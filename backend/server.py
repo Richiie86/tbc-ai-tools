@@ -41,7 +41,7 @@ logger = logging.getLogger('tbc')
 
 # Mongo — shared client (see db.py); also kept here as module global for
 # backwards compatibility with any external import of `server.db`.
-from db import db  # noqa: E402
+from db import db, client  # noqa: E402
 
 OPERATOR_EMAIL = os.environ.get('OPERATOR_EMAIL', 'rac.invetments.swe@gmail.com').lower()
 OPERATOR_PASSWORD = os.environ.get('OPERATOR_PASSWORD', 'TBC@2025!Admin')

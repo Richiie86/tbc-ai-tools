@@ -14,3 +14,5 @@ load_dotenv(Path(__file__).parent / '.env')
 
 _client = AsyncIOMotorClient(os.environ['MONGO_URL'])
 db = _client[os.environ['DB_NAME']]
+# Re-export the client for callers that need to close the connection on shutdown.
+client = _client
