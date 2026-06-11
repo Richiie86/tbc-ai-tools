@@ -22,7 +22,9 @@ from models import (
     TreasuryDestination, TreasuryUpsertRequest,
     PaymentSettings, ManualPaymentRequest,
     PaymentTransaction,
+    License, LicenseUpsertRequest, EarningsReportRequest, RoyaltyRecord, RemittanceRequest,
 )
+import secrets
 
 logger = logging.getLogger('tbc.payments')
 
@@ -251,7 +253,7 @@ async def op_list_treasury(_: dict = Depends(get_current_operator)):
 @router.post('/operator/treasury')
 async def op_create_treasury(req: TreasuryUpsertRequest, _: dict = Depends(get_current_operator)):
     db = await get_db()
-    dest = TreasuryDestination(**req.dict())
+    dest = TreasuryDestination(**req.dict(exclude_none=True))
     await db.treasury.insert_one(dest.dict())
     return _serialize(dest.dict())
 
@@ -508,3 +510,201 @@ async def op_tx_export(
     pdf = buf.getvalue()
     fname = f"tbc_transactions_{(from_date or 'all')}_{(to_date or 'all')}.pdf"
     return Response(content=pdf, media_type='application/pdf', headers={'Content-Disposition': f'attachment; filename={fname}'})
+
+
+# ===================================================================
+# LICENSING & ROYALTIES
+# ===================================================================
+def _gen_license_key() -> str:
+    return 'TBC-' + secrets.token_hex(16).upper()
+
+
+@router.get('/operator/licenses')
+async def op_list_licenses(_: dict = Depends(get_current_operator)):
+    db = await get_db()
+    cursor = db.licenses.find({}).sort('created_at', -1)
+    items = []
+    async for d in cursor:
+        d = _serialize(d)
+        # attach summary: total owed
+        owed_cursor = db.royalties.aggregate([
+            {'$match': {'license_id': d['id'], 'status': 'owed'}},
+            {'$group': {'_id': None, 'sum': {'$sum': '$royalty_amount'}, 'count': {'$sum': 1}}},
+        ])
+        owed_doc = await owed_cursor.to_list(1)
+        rem_cursor = db.royalties.aggregate([
+            {'$match': {'license_id': d['id'], 'status': 'remitted'}},
+            {'$group': {'_id': None, 'sum': {'$sum': '$royalty_amount'}}},
+        ])
+        rem_doc = await rem_cursor.to_list(1)
+        d['owed_amount'] = (owed_doc[0]['sum'] if owed_doc else 0) or 0
+        d['owed_count'] = (owed_doc[0]['count'] if owed_doc else 0) or 0
+        d['remitted_amount'] = (rem_doc[0]['sum'] if rem_doc else 0) or 0
+        items.append(d)
+    return items
+
+
+@router.post('/operator/licenses')
+async def op_create_license(req: LicenseUpsertRequest, _: dict = Depends(get_current_operator)):
+    db = await get_db()
+    lic = License(key=_gen_license_key(), **req.dict())
+    await db.licenses.insert_one(lic.dict())
+    return _serialize(lic.dict())
+
+
+@router.put('/operator/licenses/{lic_id}')
+async def op_update_license(lic_id: str, req: LicenseUpsertRequest, _: dict = Depends(get_current_operator)):
+    db = await get_db()
+    res = await db.licenses.update_one({'id': lic_id}, {'$set': req.dict()})
+    if res.matched_count == 0:
+        raise HTTPException(404, 'License not found')
+    doc = await db.licenses.find_one({'id': lic_id})
+    return _serialize(doc)
+
+
+@router.post('/operator/licenses/{lic_id}/revoke')
+async def op_revoke_license(lic_id: str, _: dict = Depends(get_current_operator)):
+    db = await get_db()
+    res = await db.licenses.update_one({'id': lic_id}, {'$set': {'status': 'revoked'}})
+    if res.matched_count == 0:
+        raise HTTPException(404, 'License not found')
+    return {'success': True}
+
+
+@router.post('/operator/licenses/{lic_id}/activate')
+async def op_reactivate_license(lic_id: str, _: dict = Depends(get_current_operator)):
+    db = await get_db()
+    res = await db.licenses.update_one({'id': lic_id}, {'$set': {'status': 'active'}})
+    if res.matched_count == 0:
+        raise HTTPException(404, 'License not found')
+    return {'success': True}
+
+
+@router.delete('/operator/licenses/{lic_id}')
+async def op_delete_license(lic_id: str, _: dict = Depends(get_current_operator)):
+    db = await get_db()
+    res = await db.licenses.delete_one({'id': lic_id})
+    if res.deleted_count == 0:
+        raise HTTPException(404, 'License not found')
+    return {'success': True}
+
+
+# Public endpoint: child app reports a paid transaction
+@router.post('/license/report-earnings')
+async def license_report_earnings(req: EarningsReportRequest):
+    db = await get_db()
+    lic = await db.licenses.find_one({'key': req.license_key, 'status': 'active'})
+    if not lic:
+        raise HTTPException(401, 'Invalid or revoked license key')
+
+    # Idempotency: skip if already reported by same child_transaction_id for this license
+    existing = await db.royalties.find_one({'license_id': lic['id'], 'child_transaction_id': req.child_transaction_id})
+    if existing:
+        return {'duplicate': True, 'royalty_id': existing['id']}
+
+    pct = float(lic.get('royalty_pct', 10.0))
+    royalty_amount = round(float(req.amount) * pct / 100.0, 2)
+
+    occurred_at = datetime.now(timezone.utc)
+    if req.occurred_at:
+        try:
+            occurred_at = datetime.fromisoformat(req.occurred_at.replace('Z', '+00:00'))
+        except Exception:
+            pass
+
+    rec = RoyaltyRecord(
+        license_id=lic['id'],
+        license_key=lic['key'],
+        child_transaction_id=req.child_transaction_id,
+        child_user_email=req.child_user_email,
+        plan_id=req.plan_id,
+        gross_amount=float(req.amount),
+        royalty_amount=royalty_amount,
+        currency=req.currency,
+        payment_method=req.payment_method,
+        status='owed',
+        occurred_at=occurred_at,
+    )
+    await db.royalties.insert_one(rec.dict())
+    await db.licenses.update_one({'id': lic['id']}, {'$set': {'last_report_at': datetime.now(timezone.utc)}})
+    return {'royalty_id': rec.id, 'royalty_amount': royalty_amount, 'pct': pct}
+
+
+@router.get('/operator/royalties')
+async def op_list_royalties(
+    license_id: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    _: dict = Depends(get_current_operator),
+):
+    db = await get_db()
+    q = {}
+    if license_id:
+        q['license_id'] = license_id
+    if status in ('owed', 'remitted', 'disputed'):
+        q['status'] = status
+    cursor = db.royalties.find(q).sort('occurred_at', -1).limit(500)
+    return [_serialize(r) async for r in cursor]
+
+
+@router.get('/operator/royalties/summary')
+async def op_royalty_summary(_: dict = Depends(get_current_operator)):
+    db = await get_db()
+    summary = {'owed_total': 0, 'owed_count': 0, 'remitted_total': 0, 'remitted_count': 0, 'licenses_active': 0, 'licenses_total': 0}
+    summary['licenses_total'] = await db.licenses.count_documents({})
+    summary['licenses_active'] = await db.licenses.count_documents({'status': 'active'})
+    for state, total_key, count_key in [('owed', 'owed_total', 'owed_count'), ('remitted', 'remitted_total', 'remitted_count')]:
+        cursor = db.royalties.aggregate([
+            {'$match': {'status': state}},
+            {'$group': {'_id': None, 'sum': {'$sum': '$royalty_amount'}, 'count': {'$sum': 1}}},
+        ])
+        doc = await cursor.to_list(1)
+        summary[total_key] = round((doc[0]['sum'] if doc else 0) or 0, 2)
+        summary[count_key] = (doc[0]['count'] if doc else 0) or 0
+    return summary
+
+
+@router.post('/operator/royalties/remit')
+async def op_record_remittance(req: RemittanceRequest, _: dict = Depends(get_current_operator)):
+    """Mark a batch of royalty records as remitted (paid by licensee)."""
+    db = await get_db()
+    lic = await db.licenses.find_one({'id': req.license_id})
+    if not lic:
+        raise HTTPException(404, 'License not found')
+    remittance_id = secrets.token_hex(8)
+    update = {
+        'status': 'remitted',
+        'remittance_id': remittance_id,
+        'remitted_at': datetime.now(timezone.utc).isoformat(),
+        'remit_method': req.method,
+        'remit_reference': req.reference,
+        'remit_note': req.note,
+    }
+    q = {'license_id': req.license_id, 'status': 'owed'}
+    if req.royalty_ids:
+        q['id'] = {'$in': req.royalty_ids}
+    res = await db.royalties.update_many(q, {'$set': update})
+    return {'success': True, 'matched': res.matched_count, 'modified': res.modified_count, 'remittance_id': remittance_id}
+
+
+@router.get('/license/agreement')
+async def license_agreement_text():
+    """Public text of the licensing agreement (10% royalty)."""
+    return {
+        'version': '1.0',
+        'title': 'TBC AI Control — Source License Agreement',
+        'effective_date': '2026-01-01',
+        'royalty_pct': 10.0,
+        'text': (
+            "By using a copy of TBC AI Control under this license, the licensee agrees to remit "
+            "ten percent (10%) of all gross revenue generated by the licensed instance to the "
+            "original operator. Earnings must be reported automatically via the official "
+            "/license/report-earnings endpoint or manually via the operator console at least "
+            "once per calendar month. Royalties are owed in the same currency as the original "
+            "payment. The licensee remains the controller of customer data on their instance, "
+            "but is responsible for all customer support, regulatory compliance, taxes, and "
+            "refunds related to their instance. The original operator may revoke this license "
+            "for non-payment, misuse, or breach of these terms. Sub-licensing this copy is "
+            "permitted, but every sub-licensed instance also owes 10% directly to the original "
+            "operator (not the intermediate licensee)."
+        ),
+    }

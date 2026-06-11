@@ -6,6 +6,8 @@ import Landing from './pages/Landing';
 import About from './pages/About';
 import Contact from './pages/Contact';
 import Pricing from './pages/Pricing';
+import PayMethod from './pages/PayMethod';
+import PayManual from './pages/PayManual';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Verify2FA from './pages/Verify2FA';
@@ -25,6 +27,8 @@ function App() {
             <Route path="/about" element={<About />} />
             <Route path="/contact" element={<Contact />} />
             <Route path="/pricing" element={<Pricing />} />
+            <Route path="/pay" element={<ProtectedRoute><PayMethod /></ProtectedRoute>} />
+            <Route path="/pay/manual" element={<ProtectedRoute><PayManual /></ProtectedRoute>} />
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
             <Route path="/verify-2fa" element={<Verify2FA />} />

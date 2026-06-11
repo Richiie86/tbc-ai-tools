@@ -2,15 +2,9 @@ import React, { useEffect, useMemo, useState } from 'react';
 import Navbar from '../components/Navbar';
 import api from '../lib/api';
 import { Card } from '../components/ui/card';
-import {
-  Tabs, TabsContent, TabsList, TabsTrigger,
-} from '../components/ui/tabs';
-import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from '../components/ui/table';
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from '../components/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { ScrollArea } from '../components/ui/scroll-area';
@@ -18,8 +12,15 @@ import { toast } from 'sonner';
 import {
   Users, CreditCard, MessageSquare, DollarSign, Loader2, ShieldCheck, Mail,
   Code2, ChevronRight, ChevronDown, FileCode, Folder, FolderOpen, Search,
-  Download, Copy, Check,
+  Download, Copy, Check, Sparkles, Wallet, KeyRound, Settings as SettingsIcon, Coins,
 } from 'lucide-react';
+
+import PlansTab from './operator/PlansTab';
+import TreasuryTab from './operator/TreasuryTab';
+import SettingsTab from './operator/SettingsTab';
+import PaymentsTab from './operator/PaymentsTab';
+import LicensesTab from './operator/LicensesTab';
+import RoyaltiesTab from './operator/RoyaltiesTab';
 
 const PLANS = ['free', 'starter', 'pro', 'enterprise'];
 
@@ -42,7 +43,6 @@ function StatCard({ icon: Icon, label, value }) {
 export default function Operator() {
   const [stats, setStats] = useState(null);
   const [users, setUsers] = useState([]);
-  const [transactions, setTransactions] = useState([]);
   const [contacts, setContacts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [userSearch, setUserSearch] = useState('');
@@ -50,20 +50,15 @@ export default function Operator() {
   const loadAll = async () => {
     setLoading(true);
     try {
-      const [s, u, t, c] = await Promise.all([
+      const [s, u, c] = await Promise.all([
         api.get('/operator/stats'),
         api.get('/operator/users'),
-        api.get('/operator/transactions'),
         api.get('/operator/contacts'),
       ]);
-      setStats(s.data); setUsers(u.data); setTransactions(t.data); setContacts(c.data);
-    } catch (e) {
-      toast.error('Failed to load operator data');
-    } finally {
-      setLoading(false);
-    }
+      setStats(s.data); setUsers(u.data); setContacts(c.data);
+    } catch { toast.error('Failed to load operator data'); }
+    finally { setLoading(false); }
   };
-
   useEffect(() => { loadAll(); }, []);
 
   const grantCredits = async (userId, amount) => {
@@ -73,7 +68,6 @@ export default function Operator() {
       loadAll();
     } catch { toast.error('Could not grant credits'); }
   };
-
   const setPlan = async (userId, plan) => {
     try {
       const { data } = await api.post(`/operator/users/${userId}/plan?plan=${plan}`);
@@ -98,7 +92,7 @@ export default function Operator() {
           </div>
           <div>
             <h1 className="text-3xl font-bold text-tbc-100">Operator Console</h1>
-            <p className="text-sm text-tbc-200/60">Manage TBC1 & TBC2 members, payments, plans, and source code.</p>
+            <p className="text-sm text-tbc-200/60">Manage members, payments, plans, treasury, licenses, and source code.</p>
           </div>
         </div>
 
@@ -114,31 +108,23 @@ export default function Operator() {
             </div>
 
             <Tabs defaultValue="users" className="mt-10">
-              <TabsList className="bg-ink-900 border border-tbc-900/60">
-                <TabsTrigger value="users" className="data-[state=active]:bg-tbc-500 data-[state=active]:text-ink-950">
-                  <Users className="mr-1.5 h-3.5 w-3.5" /> Users ({users.length})
-                </TabsTrigger>
-                <TabsTrigger value="payments" className="data-[state=active]:bg-tbc-500 data-[state=active]:text-ink-950">
-                  <CreditCard className="mr-1.5 h-3.5 w-3.5" /> Payments
-                </TabsTrigger>
-                <TabsTrigger value="contacts" className="data-[state=active]:bg-tbc-500 data-[state=active]:text-ink-950">
-                  <Mail className="mr-1.5 h-3.5 w-3.5" /> Contacts
-                </TabsTrigger>
-                <TabsTrigger value="codes" className="data-[state=active]:bg-tbc-500 data-[state=active]:text-ink-950">
-                  <Code2 className="mr-1.5 h-3.5 w-3.5" /> Codes
-                </TabsTrigger>
+              <TabsList className="bg-ink-900 border border-tbc-900/60 flex flex-wrap h-auto">
+                <TabTrigger value="users" icon={Users}>Users ({users.length})</TabTrigger>
+                <TabTrigger value="plans" icon={Sparkles}>Plans</TabTrigger>
+                <TabTrigger value="payments" icon={CreditCard}>Payments</TabTrigger>
+                <TabTrigger value="treasury" icon={Wallet}>Treasury</TabTrigger>
+                <TabTrigger value="licenses" icon={KeyRound}>Licenses</TabTrigger>
+                <TabTrigger value="royalties" icon={Coins}>Royalties</TabTrigger>
+                <TabTrigger value="settings" icon={SettingsIcon}>Settings</TabTrigger>
+                <TabTrigger value="contacts" icon={Mail}>Contacts</TabTrigger>
+                <TabTrigger value="codes" icon={Code2}>Codes</TabTrigger>
               </TabsList>
 
               <TabsContent value="users" className="mt-5">
                 <div className="mb-3 flex items-center gap-3">
                   <div className="relative w-72">
                     <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-tbc-200/40" />
-                    <Input
-                      value={userSearch}
-                      onChange={(e) => setUserSearch(e.target.value)}
-                      placeholder="Search by email or name..."
-                      className="border-tbc-900/60 bg-ink-900 pl-9 text-tbc-100"
-                    />
+                    <Input value={userSearch} onChange={(e) => setUserSearch(e.target.value)} placeholder="Search by email or name..." className="border-tbc-900/60 bg-ink-900 pl-9 text-tbc-100" />
                   </div>
                   <div className="text-xs text-tbc-200/60">{filteredUsers.length} of {users.length} users</div>
                 </div>
@@ -166,13 +152,9 @@ export default function Operator() {
                           </TableCell>
                           <TableCell>
                             <Select value={u.plan} onValueChange={(v) => setPlan(u.id, v)} disabled={u.role === 'operator'}>
-                              <SelectTrigger className="h-8 w-32 border-tbc-900/60 bg-ink-900 text-tbc-100">
-                                <SelectValue />
-                              </SelectTrigger>
+                              <SelectTrigger className="h-8 w-32 border-tbc-900/60 bg-ink-900 text-tbc-100"><SelectValue /></SelectTrigger>
                               <SelectContent className="border-tbc-900/60 bg-ink-900 text-tbc-100">
-                                {PLANS.map((p) => (
-                                  <SelectItem key={p} value={p} className="capitalize focus:bg-ink-950">{p}</SelectItem>
-                                ))}
+                                {PLANS.map((p) => <SelectItem key={p} value={p} className="capitalize focus:bg-ink-950">{p}</SelectItem>)}
                               </SelectContent>
                             </Select>
                           </TableCell>
@@ -189,37 +171,12 @@ export default function Operator() {
                 </div>
               </TabsContent>
 
-              <TabsContent value="payments" className="mt-5">
-                <div className="rounded-xl border border-tbc-900/60 bg-ink-900/40">
-                  <Table>
-                    <TableHeader>
-                      <TableRow className="border-tbc-900/60 hover:bg-transparent">
-                        <TableHead>User</TableHead>
-                        <TableHead>Plan</TableHead>
-                        <TableHead>Amount</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Date</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {transactions.length === 0 && (
-                        <TableRow><TableCell colSpan={5} className="py-8 text-center text-tbc-200/50">No transactions yet</TableCell></TableRow>
-                      )}
-                      {transactions.map((t) => (
-                        <TableRow key={t.id} className="border-tbc-900/60 hover:bg-ink-900/60">
-                          <TableCell className="text-tbc-100">{t.user_email}</TableCell>
-                          <TableCell className="capitalize text-tbc-200">{t.plan_id}</TableCell>
-                          <TableCell className="text-tbc-200">${t.amount?.toFixed(2)} {t.currency?.toUpperCase()}</TableCell>
-                          <TableCell>
-                            <span className={`rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wider ${t.payment_status === 'paid' ? 'bg-tbc-500/20 text-tbc-300' : 'bg-amber-500/20 text-amber-300'}`}>{t.payment_status}</span>
-                          </TableCell>
-                          <TableCell className="text-tbc-200/60">{new Date(t.created_at).toLocaleString()}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              </TabsContent>
+              <TabsContent value="plans" className="mt-5"><PlansTab /></TabsContent>
+              <TabsContent value="payments" className="mt-5"><PaymentsTab /></TabsContent>
+              <TabsContent value="treasury" className="mt-5"><TreasuryTab /></TabsContent>
+              <TabsContent value="licenses" className="mt-5"><LicensesTab /></TabsContent>
+              <TabsContent value="royalties" className="mt-5"><RoyaltiesTab /></TabsContent>
+              <TabsContent value="settings" className="mt-5"><SettingsTab /></TabsContent>
 
               <TabsContent value="contacts" className="mt-5">
                 <div className="space-y-3">
@@ -243,9 +200,7 @@ export default function Operator() {
                 </div>
               </TabsContent>
 
-              <TabsContent value="codes" className="mt-5">
-                <CodesBrowser />
-              </TabsContent>
+              <TabsContent value="codes" className="mt-5"><CodesBrowser /></TabsContent>
             </Tabs>
           </>
         )}
@@ -254,6 +209,13 @@ export default function Operator() {
   );
 }
 
+function TabTrigger({ value, icon: Icon, children }) {
+  return (
+    <TabsTrigger value={value} className="data-[state=active]:bg-tbc-500 data-[state=active]:text-ink-950">
+      <Icon className="mr-1.5 h-3.5 w-3.5" /> {children}
+    </TabsTrigger>
+  );
+}
 
 function CodesBrowser() {
   const [tree, setTree] = useState([]);
@@ -277,11 +239,8 @@ function CodesBrowser() {
     } catch (e) {
       toast.error(e?.response?.data?.detail || 'Failed to read file');
       setContent('');
-    } finally {
-      setContentLoading(false);
-    }
+    } finally { setContentLoading(false); }
   };
-
   const toggle = (path) => {
     setExpanded((prev) => {
       const next = new Set(prev);
@@ -289,27 +248,17 @@ function CodesBrowser() {
       return next;
     });
   };
-
-  const copyContent = () => {
-    navigator.clipboard.writeText(content);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  };
-
+  const copyContent = () => { navigator.clipboard.writeText(content); setCopied(true); setTimeout(() => setCopied(false), 1500); };
   const downloadFile = () => {
     if (!selected) return;
     const blob = new Blob([content], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url;
-    a.download = selected.split('/').pop();
-    a.click();
+    a.href = url; a.download = selected.split('/').pop(); a.click();
     URL.revokeObjectURL(url);
   };
 
-  if (loading) {
-    return <div className="grid place-items-center py-16"><Loader2 className="h-6 w-6 animate-spin text-tbc-400" /></div>;
-  }
+  if (loading) return <div className="grid place-items-center py-16"><Loader2 className="h-6 w-6 animate-spin text-tbc-400" /></div>;
 
   return (
     <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
@@ -319,7 +268,6 @@ function CodesBrowser() {
           <CodeTree tree={tree} expanded={expanded} toggle={toggle} onFile={openFile} selected={selected} />
         </ScrollArea>
       </div>
-
       <div className="rounded-xl border border-tbc-900/60 bg-ink-900/40">
         <div className="flex items-center justify-between border-b border-tbc-900/60 px-3 py-2">
           <div className="flex items-center gap-2 text-xs">
@@ -341,13 +289,9 @@ function CodesBrowser() {
           {contentLoading ? (
             <div className="grid h-full place-items-center"><Loader2 className="h-6 w-6 animate-spin text-tbc-400" /></div>
           ) : selected ? (
-            <pre className="m-0 p-4 text-xs leading-relaxed text-tbc-100">
-              <code>{content}</code>
-            </pre>
+            <pre className="m-0 p-4 text-xs leading-relaxed text-tbc-100"><code>{content}</code></pre>
           ) : (
-            <div className="grid h-full place-items-center text-sm text-tbc-200/40">
-              Pick a file on the left to view its source code
-            </div>
+            <div className="grid h-full place-items-center text-sm text-tbc-200/40">Pick a file on the left to view its source code</div>
           )}
         </div>
       </div>
@@ -364,10 +308,8 @@ function flattenTree(nodes, depth, expanded, acc) {
   }
   return acc;
 }
-
 function CodeTree({ tree, expanded, toggle, onFile, selected }) {
-  const flat = [];
-  flattenTree(tree, 0, expanded, flat);
+  const flat = []; flattenTree(tree, 0, expanded, flat);
   return (
     <div>
       {flat.map((n) => {
@@ -375,12 +317,7 @@ function CodeTree({ tree, expanded, toggle, onFile, selected }) {
         if (n.type === 'dir') {
           const isOpen = expanded.has(n.path);
           return (
-            <button
-              key={n.path}
-              onClick={() => toggle(n.path)}
-              className="flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-xs text-tbc-200 hover:bg-ink-900/80"
-              style={padding}
-            >
+            <button key={n.path} onClick={() => toggle(n.path)} className="flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-xs text-tbc-200 hover:bg-ink-900/80" style={padding}>
               {isOpen ? <ChevronDown className="h-3 w-3 text-tbc-400" /> : <ChevronRight className="h-3 w-3 text-tbc-400" />}
               {isOpen ? <FolderOpen className="h-3.5 w-3.5 text-tbc-300" /> : <Folder className="h-3.5 w-3.5 text-tbc-400" />}
               <span className="truncate">{n.name}</span>
@@ -389,12 +326,7 @@ function CodeTree({ tree, expanded, toggle, onFile, selected }) {
         }
         const isSelected = selected === n.path;
         return (
-          <button
-            key={n.path}
-            onClick={() => onFile(n.path)}
-            className={`flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-xs hover:bg-ink-900/80 ${isSelected ? 'bg-tbc-500/15 text-tbc-200' : 'text-tbc-200/80'}`}
-            style={padding}
-          >
+          <button key={n.path} onClick={() => onFile(n.path)} className={`flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-xs hover:bg-ink-900/80 ${isSelected ? 'bg-tbc-500/15 text-tbc-200' : 'text-tbc-200/80'}`} style={padding}>
             <span className="w-3" />
             <FileCode className="h-3.5 w-3.5 shrink-0 text-tbc-200/60" />
             <span className="truncate">{n.name}</span>

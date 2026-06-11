@@ -227,3 +227,64 @@ class ManualPaymentRequest(BaseModel):
     treasury_id: str
     proof: str  # tx hash or bank reference
     note: Optional[str] = None
+
+
+# ===== LICENSES (royalty system) =====
+class License(BaseModel):
+    id: str = Field(default_factory=_uid)
+    key: str                      # opaque token (also unique)
+    holder_name: str
+    holder_email: str
+    company: Optional[str] = None
+    royalty_pct: float = 10.0     # default 10%
+    notes: Optional[str] = None
+    status: Literal['active', 'revoked'] = 'active'
+    created_at: datetime = Field(default_factory=_now)
+    last_report_at: Optional[datetime] = None
+
+
+class LicenseUpsertRequest(BaseModel):
+    holder_name: str
+    holder_email: str
+    company: Optional[str] = None
+    royalty_pct: float = 10.0
+    notes: Optional[str] = None
+
+
+class EarningsReportRequest(BaseModel):
+    license_key: str
+    child_transaction_id: str
+    child_user_email: Optional[str] = None
+    plan_id: Optional[str] = None
+    amount: float
+    currency: str = 'usd'
+    payment_method: Optional[str] = None
+    occurred_at: Optional[str] = None  # ISO
+
+
+class RoyaltyRecord(BaseModel):
+    id: str = Field(default_factory=_uid)
+    license_id: str
+    license_key: str
+    child_transaction_id: str
+    child_user_email: Optional[str] = None
+    plan_id: Optional[str] = None
+    gross_amount: float
+    royalty_amount: float
+    currency: str = 'usd'
+    payment_method: Optional[str] = None
+    status: Literal['owed', 'remitted', 'disputed'] = 'owed'
+    remittance_id: Optional[str] = None
+    occurred_at: datetime = Field(default_factory=_now)
+    created_at: datetime = Field(default_factory=_now)
+
+
+class RemittanceRequest(BaseModel):
+    license_id: str
+    amount: float
+    currency: str = 'usd'
+    method: Literal['stripe', 'crypto_manual', 'bank', 'paypal', 'other'] = 'other'
+    treasury_id: Optional[str] = None
+    reference: Optional[str] = None
+    note: Optional[str] = None
+    royalty_ids: List[str] = []

@@ -1,877 +1,991 @@
+#!/usr/bin/env python3
 """
-Comprehensive backend API test for TBC AI Control.
-Tests all 25 flows as specified in the review request.
+Comprehensive backend test for TBC AI Control - NEW payment endpoints.
+Tests: plans, treasury, settings, manual payments, PDF receipts, licenses, royalties.
 """
 import requests
 import pyotp
-import json
 import time
+import json
 from datetime import datetime
 
 # Backend URL from frontend/.env
 BASE_URL = "https://tbc-self-copy.preview.emergentagent.com/api"
 
-# Operator credentials (pre-seeded)
+# Operator credentials
 OPERATOR_EMAIL = "rac.invetments.swe@gmail.com"
 OPERATOR_PASSWORD = "TBC@2025!Admin"
 
-# Test results tracking
-test_results = []
-test_user_token = None
-test_user_email = None
-test_user_id = None
-test_user_2fa_secret = None
-operator_token = None
-test_session_id = None
-test_checkout_session_id = None
+# Test results
+results = {
+    "passed": 0,
+    "failed": 0,
+    "tests": []
+}
 
-
-def log_test(test_num, name, passed, details=""):
+def log_test(name, passed, details=""):
     """Log test result."""
     status = "✅ PASS" if passed else "❌ FAIL"
-    result = {
-        "test": test_num,
-        "name": name,
-        "status": status,
-        "passed": passed,
-        "details": details
-    }
-    test_results.append(result)
-    print(f"\n{status} Test #{test_num}: {name}")
+    results["tests"].append({"name": name, "passed": passed, "details": details})
+    if passed:
+        results["passed"] += 1
+    else:
+        results["failed"] += 1
+    print(f"{status} - {name}")
     if details:
-        print(f"   Details: {details}")
+        print(f"  {details}")
 
-
-def test_1_health_check():
-    """Test 1: Health check endpoint."""
-    try:
-        resp = requests.get(f"{BASE_URL}/", timeout=10)
-        data = resp.json()
-        passed = (
-            resp.status_code == 200 and
-            "service" in data and
-            "status" in data
-        )
-        log_test(1, "Health check GET /api/", passed, 
-                f"Response: {data}" if passed else f"Status: {resp.status_code}, Body: {resp.text}")
-        return passed
-    except Exception as e:
-        log_test(1, "Health check GET /api/", False, f"Exception: {str(e)}")
-        return False
-
-
-def test_2_register_new_user():
-    """Test 2: Register a new test user."""
-    global test_user_token, test_user_email, test_user_id
-    try:
-        timestamp = int(time.time())
-        test_user_email = f"test_{timestamp}@example.com"
-        payload = {
-            "email": test_user_email,
-            "password": "TestPass123!",
-            "name": "Test User"
-        }
-        resp = requests.post(f"{BASE_URL}/auth/register", json=payload, timeout=10)
-        data = resp.json()
-        
-        passed = (
-            resp.status_code == 200 and
-            "token" in data and
-            data.get("requires_2fa_setup") == True and
-            "user" in data
-        )
-        
-        if passed:
-            test_user_token = data["token"]
-            test_user_id = data["user"]["id"]
-            log_test(2, "Register new test user", True, 
-                    f"Email: {test_user_email}, Token received, requires_2fa_setup=true")
-        else:
-            log_test(2, "Register new test user", False, 
-                    f"Status: {resp.status_code}, Response: {data}")
-        return passed
-    except Exception as e:
-        log_test(2, "Register new test user", False, f"Exception: {str(e)}")
-        return False
-
-
-def test_3_get_auth_me():
-    """Test 3: GET /api/auth/me with user token."""
-    global test_user_token
-    try:
-        headers = {"Authorization": f"Bearer {test_user_token}"}
-        resp = requests.get(f"{BASE_URL}/auth/me", headers=headers, timeout=10)
-        data = resp.json()
-        
-        passed = (
-            resp.status_code == 200 and
-            data.get("email") == test_user_email and
-            data.get("role") == "user" and
-            data.get("plan") == "free" and
-            data.get("credits") == 50
-        )
-        
-        log_test(3, "GET /api/auth/me", passed, 
-                f"User info: {data}" if passed else f"Status: {resp.status_code}, Response: {data}")
-        return passed
-    except Exception as e:
-        log_test(3, "GET /api/auth/me", False, f"Exception: {str(e)}")
-        return False
-
-
-def test_4_2fa_setup():
-    """Test 4: POST /api/auth/2fa/setup."""
-    global test_user_token, test_user_2fa_secret
-    try:
-        headers = {"Authorization": f"Bearer {test_user_token}"}
-        resp = requests.post(f"{BASE_URL}/auth/2fa/setup", headers=headers, timeout=10)
-        data = resp.json()
-        
-        passed = (
-            resp.status_code == 200 and
-            "secret" in data and
-            "qr_data_url" in data and
-            "otpauth_uri" in data and
-            data["qr_data_url"].startswith("data:image/png;base64,")
-        )
-        
-        if passed:
-            test_user_2fa_secret = data["secret"]
-            log_test(4, "2FA setup", True, 
-                    f"Secret received, QR code generated")
-        else:
-            log_test(4, "2FA setup", False, 
-                    f"Status: {resp.status_code}, Response: {data}")
-        return passed
-    except Exception as e:
-        log_test(4, "2FA setup", False, f"Exception: {str(e)}")
-        return False
-
-
-def test_5_2fa_enable():
-    """Test 5: POST /api/auth/2fa/enable with TOTP code."""
-    global test_user_token, test_user_2fa_secret
-    try:
-        # Generate current TOTP code
-        totp = pyotp.TOTP(test_user_2fa_secret)
-        code = totp.now()
-        
-        headers = {"Authorization": f"Bearer {test_user_token}"}
-        payload = {"code": code}
-        resp = requests.post(f"{BASE_URL}/auth/2fa/enable", json=payload, headers=headers, timeout=10)
-        data = resp.json()
-        
-        passed = (
-            resp.status_code == 200 and
-            data.get("success") == True
-        )
-        
-        log_test(5, "2FA enable", passed, 
-                f"2FA enabled successfully" if passed else f"Status: {resp.status_code}, Response: {data}")
-        return passed
-    except Exception as e:
-        log_test(5, "2FA enable", False, f"Exception: {str(e)}")
-        return False
-
-
-def test_6_login_with_2fa():
-    """Test 6: Login with 2FA - should return pending_2fa=true."""
-    global test_user_email, test_user_token
-    try:
-        payload = {
-            "email": test_user_email,
-            "password": "TestPass123!"
-        }
-        resp = requests.post(f"{BASE_URL}/auth/login", json=payload, timeout=10)
-        data = resp.json()
-        
-        passed = (
-            resp.status_code == 200 and
-            data.get("pending_2fa") == True and
-            "token" in data
-        )
-        
-        if passed:
-            test_user_token = data["token"]  # Save pending token
-            log_test(6, "Login with 2FA", True, 
-                    f"pending_2fa=true, pending token received")
-        else:
-            log_test(6, "Login with 2FA", False, 
-                    f"Status: {resp.status_code}, Response: {data}")
-        return passed
-    except Exception as e:
-        log_test(6, "Login with 2FA", False, f"Exception: {str(e)}")
-        return False
-
-
-def test_7_verify_2fa():
-    """Test 7: POST /api/auth/2fa/verify with pending token."""
-    global test_user_token, test_user_2fa_secret
-    try:
-        # Generate current TOTP code
-        totp = pyotp.TOTP(test_user_2fa_secret)
-        code = totp.now()
-        
-        headers = {"Authorization": f"Bearer {test_user_token}"}
-        payload = {"code": code}
-        resp = requests.post(f"{BASE_URL}/auth/2fa/verify", json=payload, headers=headers, timeout=10)
-        data = resp.json()
-        
-        passed = (
-            resp.status_code == 200 and
-            "token" in data and
-            data.get("pending_2fa") == False
-        )
-        
-        if passed:
-            test_user_token = data["token"]  # Save full token
-            log_test(7, "Verify 2FA", True, 
-                    f"Full token received, pending_2fa=false")
-        else:
-            log_test(7, "Verify 2FA", False, 
-                    f"Status: {resp.status_code}, Response: {data}")
-        return passed
-    except Exception as e:
-        log_test(7, "Verify 2FA", False, f"Exception: {str(e)}")
-        return False
-
-
-def test_8_operator_login():
-    """Test 8: Operator login (no 2FA enabled yet)."""
-    global operator_token
-    try:
-        payload = {
-            "email": OPERATOR_EMAIL,
-            "password": OPERATOR_PASSWORD
-        }
-        resp = requests.post(f"{BASE_URL}/auth/login", json=payload, timeout=10)
-        data = resp.json()
-        
-        passed = (
-            resp.status_code == 200 and
-            data.get("pending_2fa") == False and
-            data.get("requires_2fa_setup") == True and
-            "token" in data
-        )
-        
-        if passed:
-            operator_token = data["token"]
-            log_test(8, "Operator login", True, 
-                    f"Operator token received, pending_2fa=false, requires_2fa_setup=true")
-        else:
-            log_test(8, "Operator login", False, 
-                    f"Status: {resp.status_code}, Response: {data}")
-        return passed
-    except Exception as e:
-        log_test(8, "Operator login", False, f"Exception: {str(e)}")
-        return False
-
-
-def test_9_list_models():
-    """Test 9: GET /api/chat/models."""
-    try:
-        resp = requests.get(f"{BASE_URL}/chat/models", timeout=10)
-        data = resp.json()
-        
-        passed = (
-            resp.status_code == 200 and
-            "providers" in data and
-            "OpenAI" in data["providers"] and
-            "Anthropic" in data["providers"] and
-            "Gemini" in data["providers"]
-        )
-        
-        log_test(9, "List models", passed, 
-                f"Providers: OpenAI, Anthropic, Gemini" if passed else f"Status: {resp.status_code}, Response: {data}")
-        return passed
-    except Exception as e:
-        log_test(9, "List models", False, f"Exception: {str(e)}")
-        return False
-
-
-def test_10_create_chat_session():
-    """Test 10: POST /api/chat/sessions."""
-    global test_user_token, test_session_id
-    try:
-        headers = {"Authorization": f"Bearer {test_user_token}"}
-        payload = {
-            "title": "Test Session",
-            "model": "gpt-5.4"
-        }
-        resp = requests.post(f"{BASE_URL}/chat/sessions", json=payload, headers=headers, timeout=10)
-        data = resp.json()
-        
-        passed = (
-            resp.status_code == 200 and
-            "id" in data and
-            data.get("title") == "Test Session"
-        )
-        
-        if passed:
-            test_session_id = data["id"]
-            log_test(10, "Create chat session", True, 
-                    f"Session created: {test_session_id}")
-        else:
-            log_test(10, "Create chat session", False, 
-                    f"Status: {resp.status_code}, Response: {data}")
-        return passed
-    except Exception as e:
-        log_test(10, "Create chat session", False, f"Exception: {str(e)}")
-        return False
-
-
-def test_11_list_sessions():
-    """Test 11: GET /api/chat/sessions."""
-    global test_user_token, test_session_id
-    try:
-        headers = {"Authorization": f"Bearer {test_user_token}"}
-        resp = requests.get(f"{BASE_URL}/chat/sessions", headers=headers, timeout=10)
-        data = resp.json()
-        
-        passed = (
-            resp.status_code == 200 and
-            isinstance(data, list) and
-            any(s.get("id") == test_session_id for s in data)
-        )
-        
-        log_test(11, "List sessions", passed, 
-                f"Found {len(data)} sessions, test session present" if passed else f"Status: {resp.status_code}, Response: {data}")
-        return passed
-    except Exception as e:
-        log_test(11, "List sessions", False, f"Exception: {str(e)}")
-        return False
-
-
-def test_12_get_session_messages():
-    """Test 12: GET /api/chat/sessions/{id}/messages."""
-    global test_user_token, test_session_id
-    try:
-        headers = {"Authorization": f"Bearer {test_user_token}"}
-        resp = requests.get(f"{BASE_URL}/chat/sessions/{test_session_id}/messages", headers=headers, timeout=10)
-        data = resp.json()
-        
-        passed = (
-            resp.status_code == 200 and
-            "messages" in data and
-            isinstance(data["messages"], list) and
-            len(data["messages"]) == 0  # Should be empty initially
-        )
-        
-        log_test(12, "Get session messages", passed, 
-                f"Messages: {len(data.get('messages', []))}" if passed else f"Status: {resp.status_code}, Response: {data}")
-        return passed
-    except Exception as e:
-        log_test(12, "Get session messages", False, f"Exception: {str(e)}")
-        return False
-
-
-def test_13_stream_chat():
-    """Test 13: POST /api/chat/stream - CRITICAL SSE test."""
-    global test_user_token, test_session_id
-    try:
-        headers = {"Authorization": f"Bearer {test_user_token}"}
-        payload = {
-            "session_id": test_session_id,
-            "message": "Say hello in exactly three words",
-            "model": "gpt-5.4"
-        }
-        
-        # Stream SSE response
-        resp = requests.post(f"{BASE_URL}/chat/stream", json=payload, headers=headers, stream=True, timeout=60)
-        
-        if resp.status_code != 200:
-            log_test(13, "Stream chat (gpt-5.4)", False, 
-                    f"Status: {resp.status_code}, Response: {resp.text}")
-            return False
-        
-        # Parse SSE events
-        delta_events = []
-        done_event = False
-        error_event = None
-        
-        for line in resp.iter_lines():
-            if line:
-                line_str = line.decode('utf-8')
-                if line_str.startswith('data: '):
-                    data_str = line_str[6:]  # Remove 'data: ' prefix
-                    try:
-                        event = json.loads(data_str)
-                        if event.get("type") == "delta":
-                            delta_events.append(event)
-                        elif event.get("type") == "done":
-                            done_event = True
-                        elif event.get("type") == "error":
-                            error_event = event
-                    except json.JSONDecodeError:
-                        pass
-        
-        # Verify we got delta events and done event
-        passed = (
-            len(delta_events) > 0 and
-            done_event and
-            error_event is None
-        )
-        
-        if passed:
-            # Now verify messages were saved
-            headers = {"Authorization": f"Bearer {test_user_token}"}
-            msg_resp = requests.get(f"{BASE_URL}/chat/sessions/{test_session_id}/messages", headers=headers, timeout=10)
-            msg_data = msg_resp.json()
-            
-            messages_saved = (
-                msg_resp.status_code == 200 and
-                len(msg_data.get("messages", [])) == 2  # user + assistant
-            )
-            
-            if messages_saved:
-                log_test(13, "Stream chat (gpt-5.4)", True, 
-                        f"Received {len(delta_events)} delta events, done event, 2 messages saved")
-            else:
-                log_test(13, "Stream chat (gpt-5.4)", False, 
-                        f"Streaming worked but messages not saved correctly: {msg_data}")
-                passed = False
-        else:
-            log_test(13, "Stream chat (gpt-5.4)", False, 
-                    f"Delta events: {len(delta_events)}, Done: {done_event}, Error: {error_event}")
-        
-        return passed
-    except Exception as e:
-        log_test(13, "Stream chat (gpt-5.4)", False, f"Exception: {str(e)}")
-        return False
-
-
-def test_14_additional_providers():
-    """Test 14: Test Claude and Gemini providers."""
-    global test_user_token
+def login_operator():
+    """Login as operator and handle 2FA if needed."""
+    print("\n=== OPERATOR LOGIN ===")
     
-    # Test Claude
-    try:
-        headers = {"Authorization": f"Bearer {test_user_token}"}
-        
-        # Create new session for Claude
-        session_payload = {"title": "Claude Test", "model": "claude-sonnet-4-6"}
-        session_resp = requests.post(f"{BASE_URL}/chat/sessions", json=session_payload, headers=headers, timeout=10)
-        claude_session_id = session_resp.json().get("id")
-        
-        payload = {
-            "session_id": claude_session_id,
-            "message": "Say hello in exactly three words",
-            "model": "claude-sonnet-4-6"
-        }
-        
-        resp = requests.post(f"{BASE_URL}/chat/stream", json=payload, headers=headers, stream=True, timeout=60)
-        
-        claude_passed = resp.status_code == 200
-        
-        if claude_passed:
-            # Check for at least some streaming data
-            has_data = False
-            for line in resp.iter_lines():
-                if line and line.decode('utf-8').startswith('data: '):
-                    has_data = True
-                    break
-            claude_passed = has_data
-        
-        log_test(14, "Stream chat (claude-sonnet-4-6)", claude_passed, 
-                f"Streaming works" if claude_passed else f"Status: {resp.status_code}")
-    except Exception as e:
-        log_test(14, "Stream chat (claude-sonnet-4-6)", False, f"Exception: {str(e)}")
-        claude_passed = False
+    # Step 1: Login
+    resp = requests.post(f"{BASE_URL}/auth/login", json={
+        "email": OPERATOR_EMAIL,
+        "password": OPERATOR_PASSWORD
+    })
     
-    # Test Gemini
-    try:
-        headers = {"Authorization": f"Bearer {test_user_token}"}
-        
-        # Create new session for Gemini
-        session_payload = {"title": "Gemini Test", "model": "gemini-3-flash-preview"}
-        session_resp = requests.post(f"{BASE_URL}/chat/sessions", json=session_payload, headers=headers, timeout=10)
-        gemini_session_id = session_resp.json().get("id")
-        
-        payload = {
-            "session_id": gemini_session_id,
-            "message": "Say hello in exactly three words",
-            "model": "gemini-3-flash-preview"
-        }
-        
-        resp = requests.post(f"{BASE_URL}/chat/stream", json=payload, headers=headers, stream=True, timeout=60)
-        
-        gemini_passed = resp.status_code == 200
-        
-        if gemini_passed:
-            # Check for at least some streaming data
-            has_data = False
-            for line in resp.iter_lines():
-                if line and line.decode('utf-8').startswith('data: '):
-                    has_data = True
-                    break
-            gemini_passed = has_data
-        
-        log_test(14, "Stream chat (gemini-3-flash-preview)", gemini_passed, 
-                f"Streaming works" if gemini_passed else f"Status: {resp.status_code}")
-    except Exception as e:
-        log_test(14, "Stream chat (gemini-3-flash-preview)", False, f"Exception: {str(e)}")
-        gemini_passed = False
+    if resp.status_code != 200:
+        log_test("Operator login", False, f"Status {resp.status_code}: {resp.text}")
+        return None
     
-    return claude_passed and gemini_passed
-
-
-def test_15_rename_delete_session():
-    """Test 15: PATCH and DELETE session."""
-    global test_user_token, test_session_id
+    data = resp.json()
+    token = data.get("token")
     
-    # Rename
-    try:
-        headers = {"Authorization": f"Bearer {test_user_token}"}
-        payload = {"title": "Renamed Session"}
-        resp = requests.patch(f"{BASE_URL}/chat/sessions/{test_session_id}", json=payload, headers=headers, timeout=10)
-        data = resp.json()
-        
-        rename_passed = (
-            resp.status_code == 200 and
-            data.get("success") == True
-        )
-        
-        log_test(15, "Rename session", rename_passed, 
-                f"Session renamed" if rename_passed else f"Status: {resp.status_code}, Response: {data}")
-    except Exception as e:
-        log_test(15, "Rename session", False, f"Exception: {str(e)}")
-        rename_passed = False
+    # Check if 2FA is required
+    if data.get("requires_2fa_setup"):
+        # Token is usable directly (2FA not enabled yet)
+        log_test("Operator login (no 2FA)", True, "Token usable directly")
+        return token
     
-    # Delete
-    try:
-        headers = {"Authorization": f"Bearer {test_user_token}"}
-        resp = requests.delete(f"{BASE_URL}/chat/sessions/{test_session_id}", headers=headers, timeout=10)
-        data = resp.json()
+    if data.get("pending_2fa"):
+        # Need to compute TOTP and verify
+        print("  2FA required, computing TOTP...")
         
-        delete_passed = (
-            resp.status_code == 200 and
-            data.get("success") == True
-        )
+        # Get user info to retrieve TOTP secret
+        headers = {"Authorization": f"Bearer {token}"}
+        me_resp = requests.get(f"{BASE_URL}/auth/me", headers=headers)
         
-        if delete_passed:
-            # Verify session no longer in list
-            list_resp = requests.get(f"{BASE_URL}/chat/sessions", headers=headers, timeout=10)
-            list_data = list_resp.json()
-            not_in_list = not any(s.get("id") == test_session_id for s in list_data)
-            delete_passed = not_in_list
+        # We need the TOTP secret - try to get it from setup endpoint
+        # Actually, we need to use the pending token to verify
+        # Let's assume operator has already set up 2FA, we need to get the secret
+        # For testing, we'll try to verify with a code
         
-        log_test(15, "Delete session", delete_passed, 
-                f"Session deleted and not in list" if delete_passed else f"Status: {resp.status_code}, Response: {data}")
-    except Exception as e:
-        log_test(15, "Delete session", False, f"Exception: {str(e)}")
-        delete_passed = False
+        # Since we can't get the secret directly, we'll need to handle this differently
+        # Let's check if we can bypass by using the token directly
+        log_test("Operator login (pending 2FA)", False, "Cannot proceed without TOTP secret")
+        return None
     
-    return rename_passed and delete_passed
+    log_test("Operator login", True, "Full token received")
+    return token
 
-
-def test_16_get_plans():
-    """Test 16: GET /api/payments/plans."""
-    try:
-        resp = requests.get(f"{BASE_URL}/payments/plans", timeout=10)
-        data = resp.json()
-        
-        passed = (
-            resp.status_code == 200 and
-            isinstance(data, list) and
-            len(data) == 3 and
-            any(p.get("id") == "starter" for p in data) and
-            any(p.get("id") == "pro" for p in data) and
-            any(p.get("id") == "enterprise" for p in data)
-        )
-        
-        if passed:
-            # Verify each plan has required fields
-            for plan in data:
-                if not all(k in plan for k in ["id", "name", "price", "credits", "features"]):
-                    passed = False
-                    break
-        
-        log_test(16, "Get plans", passed, 
-                f"3 plans: starter, pro, enterprise" if passed else f"Status: {resp.status_code}, Response: {data}")
-        return passed
-    except Exception as e:
-        log_test(16, "Get plans", False, f"Exception: {str(e)}")
-        return False
-
-
-def test_17_create_checkout():
-    """Test 17: POST /api/payments/checkout."""
-    global test_user_token, test_checkout_session_id
-    try:
-        headers = {"Authorization": f"Bearer {test_user_token}"}
-        payload = {
-            "plan_id": "starter",
-            "origin_url": "https://tbc-self-copy.preview.emergentagent.com"
-        }
-        resp = requests.post(f"{BASE_URL}/payments/checkout", json=payload, headers=headers, timeout=10)
-        data = resp.json()
-        
-        passed = (
-            resp.status_code == 200 and
-            "url" in data and
-            "session_id" in data and
-            data["url"].startswith("http")
-        )
-        
-        if passed:
-            test_checkout_session_id = data["session_id"]
-            log_test(17, "Create checkout", True, 
-                    f"Checkout URL: {data['url'][:50]}..., Session ID: {test_checkout_session_id}")
-        else:
-            log_test(17, "Create checkout", False, 
-                    f"Status: {resp.status_code}, Response: {data}")
-        return passed
-    except Exception as e:
-        log_test(17, "Create checkout", False, f"Exception: {str(e)}")
-        return False
-
-
-def test_18_check_payment_status():
-    """Test 18: GET /api/payments/status/{session_id}."""
-    global test_user_token, test_checkout_session_id
-    try:
-        headers = {"Authorization": f"Bearer {test_user_token}"}
-        resp = requests.get(f"{BASE_URL}/payments/status/{test_checkout_session_id}", headers=headers, timeout=10)
-        data = resp.json()
-        
-        passed = (
-            resp.status_code == 200 and
-            "status" in data and
-            "payment_status" in data and
-            data.get("payment_status") in ["pending", "unpaid", "paid"]
-        )
-        
-        log_test(18, "Check payment status", passed, 
-                f"Status: {data.get('status')}, Payment: {data.get('payment_status')}" if passed else f"Status: {resp.status_code}, Response: {data}")
-        return passed
-    except Exception as e:
-        log_test(18, "Check payment status", False, f"Exception: {str(e)}")
-        return False
-
-
-def test_19_contact_form():
-    """Test 19: POST /api/contact."""
-    try:
-        payload = {
-            "name": "Test Contact",
-            "email": "testcontact@example.com",
-            "subject": "Test Subject",
-            "message": "This is a test contact message."
-        }
-        resp = requests.post(f"{BASE_URL}/contact", json=payload, timeout=10)
-        data = resp.json()
-        
-        passed = (
-            resp.status_code == 200 and
-            data.get("success") == True and
-            "id" in data
-        )
-        
-        log_test(19, "Contact form", passed, 
-                f"Contact submitted: {data.get('id')}" if passed else f"Status: {resp.status_code}, Response: {data}")
-        return passed
-    except Exception as e:
-        log_test(19, "Contact form", False, f"Exception: {str(e)}")
-        return False
-
-
-def test_20_operator_stats():
-    """Test 20: GET /api/operator/stats."""
-    global operator_token
-    try:
-        headers = {"Authorization": f"Bearer {operator_token}"}
-        resp = requests.get(f"{BASE_URL}/operator/stats", headers=headers, timeout=10)
-        data = resp.json()
-        
-        passed = (
-            resp.status_code == 200 and
-            "total_users" in data and
-            "paid_users" in data and
-            "total_messages" in data and
-            "revenue_usd" in data
-        )
-        
-        log_test(20, "Operator stats", passed, 
-                f"Stats: {data}" if passed else f"Status: {resp.status_code}, Response: {data}")
-        return passed
-    except Exception as e:
-        log_test(20, "Operator stats", False, f"Exception: {str(e)}")
-        return False
-
-
-def test_21_operator_users():
-    """Test 21: GET /api/operator/users."""
-    global operator_token, test_user_email
-    try:
-        headers = {"Authorization": f"Bearer {operator_token}"}
-        resp = requests.get(f"{BASE_URL}/operator/users", headers=headers, timeout=10)
-        data = resp.json()
-        
-        passed = (
-            resp.status_code == 200 and
-            isinstance(data, list) and
-            any(u.get("email") == test_user_email for u in data)
-        )
-        
-        log_test(21, "Operator users", passed, 
-                f"Found {len(data)} users, test user present" if passed else f"Status: {resp.status_code}, Response: {data}")
-        return passed
-    except Exception as e:
-        log_test(21, "Operator users", False, f"Exception: {str(e)}")
-        return False
-
-
-def test_22_operator_transactions():
-    """Test 22: GET /api/operator/transactions."""
-    global operator_token, test_checkout_session_id
-    try:
-        headers = {"Authorization": f"Bearer {operator_token}"}
-        resp = requests.get(f"{BASE_URL}/operator/transactions", headers=headers, timeout=10)
-        data = resp.json()
-        
-        passed = (
-            resp.status_code == 200 and
-            isinstance(data, list) and
-            any(t.get("session_id") == test_checkout_session_id for t in data)
-        )
-        
-        log_test(22, "Operator transactions", passed, 
-                f"Found {len(data)} transactions, test checkout present" if passed else f"Status: {resp.status_code}, Response: {data}")
-        return passed
-    except Exception as e:
-        log_test(22, "Operator transactions", False, f"Exception: {str(e)}")
-        return False
-
-
-def test_23_operator_contacts():
-    """Test 23: GET /api/operator/contacts."""
-    global operator_token
-    try:
-        headers = {"Authorization": f"Bearer {operator_token}"}
-        resp = requests.get(f"{BASE_URL}/operator/contacts", headers=headers, timeout=10)
-        data = resp.json()
-        
-        passed = (
-            resp.status_code == 200 and
-            isinstance(data, list) and
-            len(data) > 0  # Should have at least the contact we submitted
-        )
-        
-        log_test(23, "Operator contacts", passed, 
-                f"Found {len(data)} contacts" if passed else f"Status: {resp.status_code}, Response: {data}")
-        return passed
-    except Exception as e:
-        log_test(23, "Operator contacts", False, f"Exception: {str(e)}")
-        return False
-
-
-def test_24_operator_grant_credits():
-    """Test 24: POST /api/operator/users/{user_id}/credits."""
-    global operator_token, test_user_id, test_user_token
-    try:
-        headers = {"Authorization": f"Bearer {operator_token}"}
-        resp = requests.post(f"{BASE_URL}/operator/users/{test_user_id}/credits?amount=100", headers=headers, timeout=10)
-        data = resp.json()
-        
-        grant_passed = (
-            resp.status_code == 200 and
-            data.get("success") == True
-        )
-        
-        if grant_passed:
-            # Verify credits increased
-            user_headers = {"Authorization": f"Bearer {test_user_token}"}
-            me_resp = requests.get(f"{BASE_URL}/auth/me", headers=user_headers, timeout=10)
-            me_data = me_resp.json()
-            
-            # User should have more credits now (started with 50, used some for chat, then granted 100)
-            credits_increased = me_data.get("credits", 0) > 50
-            grant_passed = credits_increased
-        
-        log_test(24, "Operator grant credits", grant_passed, 
-                f"Credits granted and verified" if grant_passed else f"Status: {resp.status_code}, Response: {data}")
-        return grant_passed
-    except Exception as e:
-        log_test(24, "Operator grant credits", False, f"Exception: {str(e)}")
-        return False
-
-
-def test_25_authorization_checks():
-    """Test 25: Verify regular user cannot access operator routes."""
-    global test_user_token
-    try:
-        headers = {"Authorization": f"Bearer {test_user_token}"}
-        resp = requests.get(f"{BASE_URL}/operator/stats", headers=headers, timeout=10)
-        
-        passed = resp.status_code == 403
-        
-        log_test(25, "Authorization checks", passed, 
-                f"Regular user correctly denied access (403)" if passed else f"Status: {resp.status_code}, Expected 403")
-        return passed
-    except Exception as e:
-        log_test(25, "Authorization checks", False, f"Exception: {str(e)}")
-        return False
-
-
-def run_all_tests():
-    """Run all 25 tests in order."""
-    print("=" * 80)
-    print("TBC AI Control Backend API Test Suite")
-    print("=" * 80)
+def create_test_user():
+    """Create a fresh test user for manual payment testing."""
+    print("\n=== CREATE TEST USER ===")
     
-    # Run tests in order
-    test_1_health_check()
-    test_2_register_new_user()
-    test_3_get_auth_me()
-    test_4_2fa_setup()
-    test_5_2fa_enable()
-    test_6_login_with_2fa()
-    test_7_verify_2fa()
-    test_8_operator_login()
-    test_9_list_models()
-    test_10_create_chat_session()
-    test_11_list_sessions()
-    test_12_get_session_messages()
-    test_13_stream_chat()
-    test_14_additional_providers()
-    test_15_rename_delete_session()
-    test_16_get_plans()
-    test_17_create_checkout()
-    test_18_check_payment_status()
-    test_19_contact_form()
-    test_20_operator_stats()
-    test_21_operator_users()
-    test_22_operator_transactions()
-    test_23_operator_contacts()
-    test_24_operator_grant_credits()
-    test_25_authorization_checks()
+    timestamp = int(time.time())
+    email = f"test_payment_{timestamp}@example.com"
+    password = "TestPass123!"
     
-    # Summary
-    print("\n" + "=" * 80)
+    resp = requests.post(f"{BASE_URL}/auth/register", json={
+        "email": email,
+        "password": password,
+        "name": "Test Payment User"
+    })
+    
+    if resp.status_code != 200:
+        log_test("Create test user", False, f"Status {resp.status_code}: {resp.text}")
+        return None, None
+    
+    data = resp.json()
+    token = data.get("token")
+    
+    log_test("Create test user", True, f"User: {email}")
+    return token, email
+
+def test_public_plans():
+    """Test 1: Public plans (DB-backed)."""
+    print("\n=== TEST 1: PUBLIC PLANS ===")
+    
+    resp = requests.get(f"{BASE_URL}/payments/plans")
+    
+    if resp.status_code != 200:
+        log_test("GET /api/payments/plans", False, f"Status {resp.status_code}")
+        return
+    
+    plans = resp.json()
+    
+    # Should return at least 3 default plans
+    if len(plans) < 3:
+        log_test("GET /api/payments/plans", False, f"Expected at least 3 plans, got {len(plans)}")
+        return
+    
+    # Check for required fields
+    required_fields = ["id", "name", "price", "regular_price", "credits", "intro", "features"]
+    for plan in plans:
+        for field in required_fields:
+            if field not in plan:
+                log_test("GET /api/payments/plans", False, f"Missing field '{field}' in plan")
+                return
+    
+    # Check for default plans
+    plan_ids = [p["id"] for p in plans]
+    expected_ids = ["starter", "pro", "enterprise"]
+    for expected_id in expected_ids:
+        if expected_id not in plan_ids:
+            log_test("GET /api/payments/plans", False, f"Missing default plan '{expected_id}'")
+            return
+    
+    # Verify specific plan details
+    starter = next((p for p in plans if p["id"] == "starter"), None)
+    if starter:
+        if starter["price"] != 9.0:
+            log_test("GET /api/payments/plans", False, f"Starter price should be 9.0, got {starter['price']}")
+            return
+    
+    log_test("GET /api/payments/plans", True, f"Found {len(plans)} plans with correct structure")
+
+def test_payment_methods():
+    """Test 2: Payment methods."""
+    print("\n=== TEST 2: PAYMENT METHODS ===")
+    
+    resp = requests.get(f"{BASE_URL}/payments/methods")
+    
+    if resp.status_code != 200:
+        log_test("GET /api/payments/methods", False, f"Status {resp.status_code}")
+        return
+    
+    methods = resp.json()
+    
+    # Should return at least card, crypto_manual, bank
+    method_ids = [m["id"] for m in methods]
+    expected = ["card", "crypto_manual", "bank"]
+    
+    for exp in expected:
+        if exp not in method_ids:
+            log_test("GET /api/payments/methods", False, f"Missing method '{exp}'")
+            return
+    
+    log_test("GET /api/payments/methods", True, f"Found methods: {', '.join(method_ids)}")
+
+def test_treasury_404():
+    """Test 3: Treasury active (404 case)."""
+    print("\n=== TEST 3: TREASURY ACTIVE (404) ===")
+    
+    resp = requests.get(f"{BASE_URL}/payments/treasury/active?method=crypto_manual")
+    
+    if resp.status_code != 404:
+        log_test("GET /api/payments/treasury/active (404)", False, f"Expected 404, got {resp.status_code}")
+        return
+    
+    data = resp.json()
+    if "detail" not in data:
+        log_test("GET /api/payments/treasury/active (404)", False, "Missing 'detail' in error response")
+        return
+    
+    log_test("GET /api/payments/treasury/active (404)", True, f"Got 404 with detail: {data['detail']}")
+
+def test_operator_plans_crud(op_token):
+    """Test 4: Operator Plans CRUD."""
+    print("\n=== TEST 4: OPERATOR PLANS CRUD ===")
+    
+    headers = {"Authorization": f"Bearer {op_token}"}
+    
+    # GET existing plans
+    resp = requests.get(f"{BASE_URL}/operator/plans", headers=headers)
+    if resp.status_code != 200:
+        log_test("GET /api/operator/plans", False, f"Status {resp.status_code}")
+        return
+    
+    plans = resp.json()
+    log_test("GET /api/operator/plans", True, f"Found {len(plans)} plans")
+    
+    # POST new plan
+    new_plan = {
+        "id": "test_plan",
+        "name": "Test Plan",
+        "price": 5.0,
+        "credits": 100,
+        "features": ["X"],
+        "enabled": True,
+        "order": 99
+    }
+    
+    resp = requests.post(f"{BASE_URL}/operator/plans", headers=headers, json=new_plan)
+    if resp.status_code != 200:
+        log_test("POST /api/operator/plans", False, f"Status {resp.status_code}: {resp.text}")
+        return
+    
+    created = resp.json()
+    if created.get("id") != "test_plan":
+        log_test("POST /api/operator/plans", False, f"Expected id 'test_plan', got {created.get('id')}")
+        return
+    
+    log_test("POST /api/operator/plans", True, "Created test_plan")
+    
+    # PUT update plan
+    update = {
+        "name": "Renamed Test Plan",
+        "price": 7.0,
+        "credits": 100,
+        "features": ["X"],
+        "enabled": True,
+        "order": 99
+    }
+    
+    resp = requests.put(f"{BASE_URL}/operator/plans/test_plan", headers=headers, json=update)
+    if resp.status_code != 200:
+        log_test("PUT /api/operator/plans/test_plan", False, f"Status {resp.status_code}: {resp.text}")
+        return
+    
+    updated = resp.json()
+    if updated.get("name") != "Renamed Test Plan" or updated.get("price") != 7.0:
+        log_test("PUT /api/operator/plans/test_plan", False, "Update didn't apply correctly")
+        return
+    
+    log_test("PUT /api/operator/plans/test_plan", True, "Updated name and price")
+    
+    # DELETE plan
+    resp = requests.delete(f"{BASE_URL}/operator/plans/test_plan", headers=headers)
+    if resp.status_code != 200:
+        log_test("DELETE /api/operator/plans/test_plan", False, f"Status {resp.status_code}")
+        return
+    
+    log_test("DELETE /api/operator/plans/test_plan", True, "Deleted test_plan")
+
+def test_operator_treasury_crud(op_token):
+    """Test 5: Operator Treasury CRUD."""
+    print("\n=== TEST 5: OPERATOR TREASURY CRUD ===")
+    
+    headers = {"Authorization": f"Bearer {op_token}"}
+    
+    # POST crypto treasury
+    crypto_dest = {
+        "type": "crypto",
+        "label": "USDT Tron Test",
+        "network": "TRC20-USDT",
+        "wallet_address": "TXyZ12345TestWalletAddress"
+    }
+    
+    resp = requests.post(f"{BASE_URL}/operator/treasury", headers=headers, json=crypto_dest)
+    if resp.status_code != 200:
+        log_test("POST /api/operator/treasury (crypto)", False, f"Status {resp.status_code}: {resp.text}")
+        return
+    
+    crypto = resp.json()
+    crypto_id = crypto.get("id")
+    log_test("POST /api/operator/treasury (crypto)", True, f"Created crypto destination: {crypto_id}")
+    
+    # POST bank treasury
+    bank_dest = {
+        "type": "bank",
+        "label": "Main Bank Test",
+        "holder_name": "Test Holder",
+        "iban": "DE89370400440532013000",
+        "bic": "COBADEFFXXX",
+        "bank_name": "Test Bank"
+    }
+    
+    resp = requests.post(f"{BASE_URL}/operator/treasury", headers=headers, json=bank_dest)
+    if resp.status_code != 200:
+        log_test("POST /api/operator/treasury (bank)", False, f"Status {resp.status_code}: {resp.text}")
+        return
+    
+    bank = resp.json()
+    bank_id = bank.get("id")
+    log_test("POST /api/operator/treasury (bank)", True, f"Created bank destination: {bank_id}")
+    
+    # GET treasury list
+    resp = requests.get(f"{BASE_URL}/operator/treasury", headers=headers)
+    if resp.status_code != 200:
+        log_test("GET /api/operator/treasury", False, f"Status {resp.status_code}")
+        return
+    
+    treasury_list = resp.json()
+    if len(treasury_list) < 2:
+        log_test("GET /api/operator/treasury", False, f"Expected at least 2 items, got {len(treasury_list)}")
+        return
+    
+    log_test("GET /api/operator/treasury", True, f"Found {len(treasury_list)} treasury destinations")
+    
+    # POST activate crypto
+    resp = requests.post(f"{BASE_URL}/operator/treasury/{crypto_id}/activate", headers=headers)
+    if resp.status_code != 200:
+        log_test("POST /api/operator/treasury/{crypto_id}/activate", False, f"Status {resp.status_code}")
+        return
+    
+    log_test("POST /api/operator/treasury/{crypto_id}/activate", True, "Activated crypto destination")
+    
+    # GET active crypto treasury (public endpoint)
+    resp = requests.get(f"{BASE_URL}/payments/treasury/active?method=crypto_manual")
+    if resp.status_code != 200:
+        log_test("GET /api/payments/treasury/active (crypto)", False, f"Status {resp.status_code}")
+        return
+    
+    active_crypto = resp.json()
+    if not active_crypto.get("qr_data_url"):
+        log_test("GET /api/payments/treasury/active (crypto)", False, "Missing qr_data_url")
+        return
+    
+    if not active_crypto["qr_data_url"].startswith("data:image/png;base64,"):
+        log_test("GET /api/payments/treasury/active (crypto)", False, "Invalid qr_data_url format")
+        return
+    
+    log_test("GET /api/payments/treasury/active (crypto)", True, "Got active crypto with QR code")
+    
+    # POST activate bank
+    resp = requests.post(f"{BASE_URL}/operator/treasury/{bank_id}/activate", headers=headers)
+    if resp.status_code != 200:
+        log_test("POST /api/operator/treasury/{bank_id}/activate", False, f"Status {resp.status_code}")
+        return
+    
+    log_test("POST /api/operator/treasury/{bank_id}/activate", True, "Activated bank destination")
+    
+    # GET active bank treasury
+    resp = requests.get(f"{BASE_URL}/payments/treasury/active?method=bank")
+    if resp.status_code != 200:
+        log_test("GET /api/payments/treasury/active (bank)", False, f"Status {resp.status_code}")
+        return
+    
+    active_bank = resp.json()
+    log_test("GET /api/payments/treasury/active (bank)", True, "Got active bank destination")
+    
+    # PUT update bank
+    update = {
+        "type": "bank",
+        "label": "Main Bank Updated",
+        "holder_name": "Test Holder 2",
+        "iban": "DE89370400440532013000",
+        "bic": "COBADEFFXXX",
+        "bank_name": "Test Bank"
+    }
+    
+    resp = requests.put(f"{BASE_URL}/operator/treasury/{bank_id}", headers=headers, json=update)
+    if resp.status_code != 200:
+        log_test("PUT /api/operator/treasury/{bank_id}", False, f"Status {resp.status_code}: {resp.text}")
+        return
+    
+    updated_bank = resp.json()
+    if updated_bank.get("label") != "Main Bank Updated":
+        log_test("PUT /api/operator/treasury/{bank_id}", False, "Update didn't apply")
+        return
+    
+    log_test("PUT /api/operator/treasury/{bank_id}", True, "Updated bank destination")
+    
+    # DELETE both
+    resp = requests.delete(f"{BASE_URL}/operator/treasury/{crypto_id}", headers=headers)
+    if resp.status_code != 200:
+        log_test("DELETE /api/operator/treasury/{crypto_id}", False, f"Status {resp.status_code}")
+        return
+    
+    log_test("DELETE /api/operator/treasury/{crypto_id}", True, "Deleted crypto destination")
+    
+    resp = requests.delete(f"{BASE_URL}/operator/treasury/{bank_id}", headers=headers)
+    if resp.status_code != 200:
+        log_test("DELETE /api/operator/treasury/{bank_id}", False, f"Status {resp.status_code}")
+        return
+    
+    log_test("DELETE /api/operator/treasury/{bank_id}", True, "Deleted bank destination")
+
+def test_operator_settings(op_token):
+    """Test 6: Operator Settings."""
+    print("\n=== TEST 6: OPERATOR SETTINGS ===")
+    
+    headers = {"Authorization": f"Bearer {op_token}"}
+    
+    # GET settings
+    resp = requests.get(f"{BASE_URL}/operator/settings", headers=headers)
+    if resp.status_code != 200:
+        log_test("GET /api/operator/settings", False, f"Status {resp.status_code}")
+        return
+    
+    settings = resp.json()
+    
+    # Check for required fields
+    required = ["enable_card", "enable_crypto_manual", "enable_bank"]
+    for field in required:
+        if field not in settings:
+            log_test("GET /api/operator/settings", False, f"Missing field '{field}'")
+            return
+    
+    log_test("GET /api/operator/settings", True, "Got settings with masked keys")
+    
+    # PUT update settings
+    update = {
+        "nowpayments_api_key": "test-key-1234",
+        "enable_crypto_auto": True
+    }
+    
+    resp = requests.put(f"{BASE_URL}/operator/settings", headers=headers, json=update)
+    if resp.status_code != 200:
+        log_test("PUT /api/operator/settings", False, f"Status {resp.status_code}: {resp.text}")
+        return
+    
+    log_test("PUT /api/operator/settings", True, "Updated settings")
+    
+    # GET settings again to verify
+    resp = requests.get(f"{BASE_URL}/operator/settings", headers=headers)
+    if resp.status_code != 200:
+        log_test("GET /api/operator/settings (verify)", False, f"Status {resp.status_code}")
+        return
+    
+    settings = resp.json()
+    if not settings.get("nowpayments_api_key_set"):
+        log_test("GET /api/operator/settings (verify)", False, "nowpayments_api_key not set")
+        return
+    
+    if not settings.get("enable_crypto_auto"):
+        log_test("GET /api/operator/settings (verify)", False, "enable_crypto_auto not enabled")
+        return
+    
+    log_test("GET /api/operator/settings (verify)", True, "Settings updated correctly")
+    
+    # GET payment methods to verify crypto_auto is now available
+    resp = requests.get(f"{BASE_URL}/payments/methods")
+    if resp.status_code != 200:
+        log_test("GET /api/payments/methods (crypto_auto)", False, f"Status {resp.status_code}")
+        return
+    
+    methods = resp.json()
+    method_ids = [m["id"] for m in methods]
+    
+    if "crypto_auto" not in method_ids:
+        log_test("GET /api/payments/methods (crypto_auto)", False, "crypto_auto not in methods")
+        return
+    
+    log_test("GET /api/payments/methods (crypto_auto)", True, "crypto_auto now available")
+    
+    # POST clear key
+    resp = requests.post(f"{BASE_URL}/operator/settings/clear?key=nowpayments_api_key", headers=headers)
+    if resp.status_code != 200:
+        log_test("POST /api/operator/settings/clear", False, f"Status {resp.status_code}")
+        return
+    
+    log_test("POST /api/operator/settings/clear", True, "Cleared nowpayments_api_key")
+    
+    # Verify it's cleared
+    resp = requests.get(f"{BASE_URL}/operator/settings", headers=headers)
+    if resp.status_code != 200:
+        log_test("GET /api/operator/settings (verify clear)", False, f"Status {resp.status_code}")
+        return
+    
+    settings = resp.json()
+    if settings.get("nowpayments_api_key_set"):
+        log_test("GET /api/operator/settings (verify clear)", False, "Key not cleared")
+        return
+    
+    log_test("GET /api/operator/settings (verify clear)", True, "Key cleared successfully")
+
+def test_manual_payment_flow(op_token):
+    """Test 7: Manual payment flow."""
+    print("\n=== TEST 7: MANUAL PAYMENT FLOW ===")
+    
+    op_headers = {"Authorization": f"Bearer {op_token}"}
+    
+    # Create test user
+    user_token, user_email = create_test_user()
+    if not user_token:
+        return
+    
+    user_headers = {"Authorization": f"Bearer {user_token}"}
+    
+    # Create and activate crypto treasury
+    crypto_dest = {
+        "type": "crypto",
+        "label": "Test Crypto for Manual Payment",
+        "network": "TRC20-USDT",
+        "wallet_address": "TTestWalletForManualPayment123"
+    }
+    
+    resp = requests.post(f"{BASE_URL}/operator/treasury", headers=op_headers, json=crypto_dest)
+    if resp.status_code != 200:
+        log_test("Manual payment: Create treasury", False, f"Status {resp.status_code}")
+        return
+    
+    crypto = resp.json()
+    crypto_id = crypto.get("id")
+    
+    # Activate it
+    resp = requests.post(f"{BASE_URL}/operator/treasury/{crypto_id}/activate", headers=op_headers)
+    if resp.status_code != 200:
+        log_test("Manual payment: Activate treasury", False, f"Status {resp.status_code}")
+        return
+    
+    log_test("Manual payment: Setup treasury", True, f"Created and activated treasury {crypto_id}")
+    
+    # Submit manual payment as test user
+    payment_req = {
+        "plan_id": "starter",
+        "method": "crypto_manual",
+        "treasury_id": crypto_id,
+        "proof": "0xabc123def456test"
+    }
+    
+    resp = requests.post(f"{BASE_URL}/payments/manual", headers=user_headers, json=payment_req)
+    if resp.status_code != 200:
+        log_test("POST /api/payments/manual", False, f"Status {resp.status_code}: {resp.text}")
+        return
+    
+    payment = resp.json()
+    tx_id = payment.get("transaction_id")
+    
+    if payment.get("status") != "pending_review":
+        log_test("POST /api/payments/manual", False, f"Expected status 'pending_review', got {payment.get('status')}")
+        return
+    
+    log_test("POST /api/payments/manual", True, f"Created transaction {tx_id} with status pending_review")
+    
+    # GET operator transactions to verify
+    resp = requests.get(f"{BASE_URL}/operator/transactions", headers=op_headers)
+    if resp.status_code != 200:
+        log_test("GET /api/operator/transactions (verify)", False, f"Status {resp.status_code}")
+        return
+    
+    txs = resp.json()
+    tx = next((t for t in txs if t.get("id") == tx_id), None)
+    
+    if not tx:
+        log_test("GET /api/operator/transactions (verify)", False, "Transaction not found")
+        return
+    
+    if tx.get("payment_status") != "pending":
+        log_test("GET /api/operator/transactions (verify)", False, f"Expected payment_status 'pending', got {tx.get('payment_status')}")
+        return
+    
+    metadata = tx.get("metadata", {})
+    if metadata.get("method") != "crypto_manual":
+        log_test("GET /api/operator/transactions (verify)", False, f"Expected method 'crypto_manual', got {metadata.get('method')}")
+        return
+    
+    log_test("GET /api/operator/transactions (verify)", True, "Transaction appears with correct status and method")
+    
+    # Confirm transaction as operator
+    resp = requests.post(f"{BASE_URL}/operator/transactions/{tx_id}/confirm", headers=op_headers)
+    if resp.status_code != 200:
+        log_test("POST /api/operator/transactions/{tx_id}/confirm", False, f"Status {resp.status_code}")
+        return
+    
+    log_test("POST /api/operator/transactions/{tx_id}/confirm", True, "Confirmed transaction")
+    
+    # Verify user's plan upgraded and credits added
+    resp = requests.get(f"{BASE_URL}/auth/me", headers=user_headers)
+    if resp.status_code != 200:
+        log_test("Verify user upgrade", False, f"Status {resp.status_code}")
+        return
+    
+    user = resp.json()
+    
+    if user.get("plan") != "starter":
+        log_test("Verify user upgrade", False, f"Expected plan 'starter', got {user.get('plan')}")
+        return
+    
+    # User should have 50 (default) + 500 (starter) = 550 credits
+    if user.get("credits") < 500:
+        log_test("Verify user upgrade", False, f"Expected at least 500 credits, got {user.get('credits')}")
+        return
+    
+    log_test("Verify user upgrade", True, f"User upgraded to starter with {user.get('credits')} credits")
+    
+    # Cleanup: delete treasury
+    requests.delete(f"{BASE_URL}/operator/treasury/{crypto_id}", headers=op_headers)
+
+def test_pdf_receipts(op_token):
+    """Test 8: PDF receipts."""
+    print("\n=== TEST 8: PDF RECEIPTS ===")
+    
+    headers = {"Authorization": f"Bearer {op_token}"}
+    
+    # Get a transaction ID from operator transactions
+    resp = requests.get(f"{BASE_URL}/operator/transactions", headers=headers)
+    if resp.status_code != 200:
+        log_test("PDF: Get transactions", False, f"Status {resp.status_code}")
+        return
+    
+    txs = resp.json()
+    if not txs:
+        log_test("PDF: Get transactions", False, "No transactions found")
+        return
+    
+    tx_id = txs[0].get("id")
+    log_test("PDF: Get transactions", True, f"Found transaction {tx_id}")
+    
+    # GET single receipt
+    resp = requests.get(f"{BASE_URL}/operator/transactions/{tx_id}/receipt", headers=headers)
+    if resp.status_code != 200:
+        log_test("GET /api/operator/transactions/{tx_id}/receipt", False, f"Status {resp.status_code}")
+        return
+    
+    # Check Content-Type
+    content_type = resp.headers.get("Content-Type")
+    if content_type != "application/pdf":
+        log_test("GET /api/operator/transactions/{tx_id}/receipt", False, f"Expected Content-Type 'application/pdf', got '{content_type}'")
+        return
+    
+    # Check Content-Disposition
+    content_disp = resp.headers.get("Content-Disposition")
+    if not content_disp or "attachment" not in content_disp:
+        log_test("GET /api/operator/transactions/{tx_id}/receipt", False, f"Expected Content-Disposition with 'attachment', got '{content_disp}'")
+        return
+    
+    # Check PDF signature
+    if not resp.content.startswith(b"%PDF"):
+        log_test("GET /api/operator/transactions/{tx_id}/receipt", False, "Response doesn't start with %PDF")
+        return
+    
+    log_test("GET /api/operator/transactions/{tx_id}/receipt", True, f"Got PDF receipt ({len(resp.content)} bytes)")
+    
+    # GET export (all paid transactions)
+    resp = requests.get(f"{BASE_URL}/operator/transactions/export", headers=headers)
+    
+    # Could be 404 if no paid transactions, or 200 with PDF
+    if resp.status_code == 404:
+        log_test("GET /api/operator/transactions/export (no paid)", True, "Got 404 (no paid transactions)")
+    elif resp.status_code == 200:
+        if not resp.content.startswith(b"%PDF"):
+            log_test("GET /api/operator/transactions/export", False, "Response doesn't start with %PDF")
+            return
+        log_test("GET /api/operator/transactions/export", True, f"Got export PDF ({len(resp.content)} bytes)")
+    else:
+        log_test("GET /api/operator/transactions/export", False, f"Unexpected status {resp.status_code}")
+        return
+    
+    # GET export with date range
+    resp = requests.get(f"{BASE_URL}/operator/transactions/export?from=2026-01-01&to=2030-01-01", headers=headers)
+    
+    if resp.status_code == 404:
+        log_test("GET /api/operator/transactions/export (date range)", True, "Got 404 (no transactions in range)")
+    elif resp.status_code == 200:
+        if not resp.content.startswith(b"%PDF"):
+            log_test("GET /api/operator/transactions/export (date range)", False, "Response doesn't start with %PDF")
+            return
+        log_test("GET /api/operator/transactions/export (date range)", True, f"Got export PDF with date range ({len(resp.content)} bytes)")
+    else:
+        log_test("GET /api/operator/transactions/export (date range)", False, f"Unexpected status {resp.status_code}")
+        return
+    
+    # GET export with invalid date
+    resp = requests.get(f"{BASE_URL}/operator/transactions/export?from=invalid", headers=headers)
+    
+    if resp.status_code != 400:
+        log_test("GET /api/operator/transactions/export (invalid date)", False, f"Expected 400, got {resp.status_code}")
+        return
+    
+    log_test("GET /api/operator/transactions/export (invalid date)", True, "Got 400 for invalid date")
+
+def test_licenses_royalties(op_token):
+    """Test 9: Licenses + Royalties."""
+    print("\n=== TEST 9: LICENSES + ROYALTIES ===")
+    
+    headers = {"Authorization": f"Bearer {op_token}"}
+    
+    # POST create license
+    license_req = {
+        "holder_name": "Test Licensee",
+        "holder_email": "lic@test.com",
+        "company": "Test Company X",
+        "royalty_pct": 10.0
+    }
+    
+    resp = requests.post(f"{BASE_URL}/operator/licenses", headers=headers, json=license_req)
+    if resp.status_code != 200:
+        log_test("POST /api/operator/licenses", False, f"Status {resp.status_code}: {resp.text}")
+        return
+    
+    license_data = resp.json()
+    lic_id = license_data.get("id")
+    lic_key = license_data.get("key")
+    
+    if not lic_key or not lic_key.startswith("TBC-"):
+        log_test("POST /api/operator/licenses", False, f"Invalid license key: {lic_key}")
+        return
+    
+    log_test("POST /api/operator/licenses", True, f"Created license {lic_id} with key {lic_key}")
+    
+    # GET licenses
+    resp = requests.get(f"{BASE_URL}/operator/licenses", headers=headers)
+    if resp.status_code != 200:
+        log_test("GET /api/operator/licenses", False, f"Status {resp.status_code}")
+        return
+    
+    licenses = resp.json()
+    lic = next((l for l in licenses if l.get("id") == lic_id), None)
+    
+    if not lic:
+        log_test("GET /api/operator/licenses", False, "License not found in list")
+        return
+    
+    log_test("GET /api/operator/licenses", True, f"Found {len(licenses)} licenses")
+    
+    # PUT update license
+    update = {
+        "holder_name": "Test Licensee Updated",
+        "holder_email": "lic@test.com",
+        "company": "Test Company X",
+        "royalty_pct": 10.0
+    }
+    
+    resp = requests.put(f"{BASE_URL}/operator/licenses/{lic_id}", headers=headers, json=update)
+    if resp.status_code != 200:
+        log_test("PUT /api/operator/licenses/{lic_id}", False, f"Status {resp.status_code}: {resp.text}")
+        return
+    
+    updated = resp.json()
+    if updated.get("holder_name") != "Test Licensee Updated":
+        log_test("PUT /api/operator/licenses/{lic_id}", False, "Update didn't apply")
+        return
+    
+    log_test("PUT /api/operator/licenses/{lic_id}", True, "Updated license")
+    
+    # POST report earnings (public endpoint)
+    earnings_req = {
+        "license_key": lic_key,
+        "child_transaction_id": "tx_test_1",
+        "amount": 100.0,
+        "currency": "usd",
+        "payment_method": "card"
+    }
+    
+    resp = requests.post(f"{BASE_URL}/license/report-earnings", json=earnings_req)
+    if resp.status_code != 200:
+        log_test("POST /api/license/report-earnings", False, f"Status {resp.status_code}: {resp.text}")
+        return
+    
+    earnings = resp.json()
+    royalty_amount = earnings.get("royalty_amount")
+    
+    if royalty_amount != 10.0:
+        log_test("POST /api/license/report-earnings", False, f"Expected royalty_amount 10.0, got {royalty_amount}")
+        return
+    
+    log_test("POST /api/license/report-earnings", True, f"Reported earnings, royalty_amount={royalty_amount}")
+    
+    # POST same request again (duplicate check)
+    resp = requests.post(f"{BASE_URL}/license/report-earnings", json=earnings_req)
+    if resp.status_code != 200:
+        log_test("POST /api/license/report-earnings (duplicate)", False, f"Status {resp.status_code}")
+        return
+    
+    dup = resp.json()
+    if not dup.get("duplicate"):
+        log_test("POST /api/license/report-earnings (duplicate)", False, "Expected duplicate=true")
+        return
+    
+    log_test("POST /api/license/report-earnings (duplicate)", True, "Duplicate detected correctly")
+    
+    # POST with invalid key
+    invalid_req = {
+        "license_key": "TBC-FAKEKEY",
+        "child_transaction_id": "tx_test_2",
+        "amount": 100.0,
+        "currency": "usd",
+        "payment_method": "card"
+    }
+    
+    resp = requests.post(f"{BASE_URL}/license/report-earnings", json=invalid_req)
+    if resp.status_code != 401:
+        log_test("POST /api/license/report-earnings (invalid key)", False, f"Expected 401, got {resp.status_code}")
+        return
+    
+    log_test("POST /api/license/report-earnings (invalid key)", True, "Got 401 for invalid key")
+    
+    # GET royalties
+    resp = requests.get(f"{BASE_URL}/operator/royalties", headers=headers)
+    if resp.status_code != 200:
+        log_test("GET /api/operator/royalties", False, f"Status {resp.status_code}")
+        return
+    
+    royalties = resp.json()
+    roy = next((r for r in royalties if r.get("license_id") == lic_id), None)
+    
+    if not roy:
+        log_test("GET /api/operator/royalties", False, "Royalty record not found")
+        return
+    
+    log_test("GET /api/operator/royalties", True, f"Found {len(royalties)} royalty records")
+    
+    # GET royalties summary
+    resp = requests.get(f"{BASE_URL}/operator/royalties/summary", headers=headers)
+    if resp.status_code != 200:
+        log_test("GET /api/operator/royalties/summary", False, f"Status {resp.status_code}")
+        return
+    
+    summary = resp.json()
+    
+    if summary.get("owed_total") < 10.0:
+        log_test("GET /api/operator/royalties/summary", False, f"Expected owed_total >= 10.0, got {summary.get('owed_total')}")
+        return
+    
+    if summary.get("owed_count") < 1:
+        log_test("GET /api/operator/royalties/summary", False, f"Expected owed_count >= 1, got {summary.get('owed_count')}")
+        return
+    
+    log_test("GET /api/operator/royalties/summary", True, f"owed_total={summary.get('owed_total')}, owed_count={summary.get('owed_count')}")
+    
+    # POST remit royalties
+    remit_req = {
+        "license_id": lic_id,
+        "amount": 10.0,
+        "method": "bank",
+        "royalty_ids": [roy.get("id")]
+    }
+    
+    resp = requests.post(f"{BASE_URL}/operator/royalties/remit", headers=headers, json=remit_req)
+    if resp.status_code != 200:
+        log_test("POST /api/operator/royalties/remit", False, f"Status {resp.status_code}: {resp.text}")
+        return
+    
+    remit = resp.json()
+    if remit.get("modified") < 1:
+        log_test("POST /api/operator/royalties/remit", False, f"Expected modified >= 1, got {remit.get('modified')}")
+        return
+    
+    log_test("POST /api/operator/royalties/remit", True, f"Remitted {remit.get('modified')} royalty records")
+    
+    # Verify status changed to remitted
+    resp = requests.get(f"{BASE_URL}/operator/royalties", headers=headers)
+    if resp.status_code != 200:
+        log_test("Verify royalty remitted", False, f"Status {resp.status_code}")
+        return
+    
+    royalties = resp.json()
+    roy = next((r for r in royalties if r.get("id") == roy.get("id")), None)
+    
+    if not roy or roy.get("status") != "remitted":
+        log_test("Verify royalty remitted", False, f"Expected status 'remitted', got {roy.get('status') if roy else 'not found'}")
+        return
+    
+    log_test("Verify royalty remitted", True, "Royalty status changed to remitted")
+    
+    # POST revoke license
+    resp = requests.post(f"{BASE_URL}/operator/licenses/{lic_id}/revoke", headers=headers)
+    if resp.status_code != 200:
+        log_test("POST /api/operator/licenses/{lic_id}/revoke", False, f"Status {resp.status_code}")
+        return
+    
+    log_test("POST /api/operator/licenses/{lic_id}/revoke", True, "Revoked license")
+    
+    # POST report earnings with revoked key
+    resp = requests.post(f"{BASE_URL}/license/report-earnings", json=earnings_req)
+    if resp.status_code != 401:
+        log_test("POST /api/license/report-earnings (revoked)", False, f"Expected 401, got {resp.status_code}")
+        return
+    
+    log_test("POST /api/license/report-earnings (revoked)", True, "Got 401 for revoked key")
+    
+    # POST activate license
+    resp = requests.post(f"{BASE_URL}/operator/licenses/{lic_id}/activate", headers=headers)
+    if resp.status_code != 200:
+        log_test("POST /api/operator/licenses/{lic_id}/activate", False, f"Status {resp.status_code}")
+        return
+    
+    log_test("POST /api/operator/licenses/{lic_id}/activate", True, "Activated license")
+    
+    # DELETE license
+    resp = requests.delete(f"{BASE_URL}/operator/licenses/{lic_id}", headers=headers)
+    if resp.status_code != 200:
+        log_test("DELETE /api/operator/licenses/{lic_id}", False, f"Status {resp.status_code}")
+        return
+    
+    log_test("DELETE /api/operator/licenses/{lic_id}", True, "Deleted license")
+
+def test_license_agreement():
+    """Test 10: License agreement."""
+    print("\n=== TEST 10: LICENSE AGREEMENT ===")
+    
+    resp = requests.get(f"{BASE_URL}/license/agreement")
+    
+    if resp.status_code != 200:
+        log_test("GET /api/license/agreement", False, f"Status {resp.status_code}")
+        return
+    
+    agreement = resp.json()
+    
+    # Check required fields
+    required = ["version", "title", "royalty_pct", "text"]
+    for field in required:
+        if field not in agreement:
+            log_test("GET /api/license/agreement", False, f"Missing field '{field}'")
+            return
+    
+    if agreement.get("royalty_pct") != 10.0:
+        log_test("GET /api/license/agreement", False, f"Expected royalty_pct 10.0, got {agreement.get('royalty_pct')}")
+        return
+    
+    log_test("GET /api/license/agreement", True, f"Got agreement with royalty_pct={agreement.get('royalty_pct')}")
+
+def test_authorization(op_token):
+    """Test 11: Authorization."""
+    print("\n=== TEST 11: AUTHORIZATION ===")
+    
+    # Try operator endpoint without auth
+    resp = requests.get(f"{BASE_URL}/operator/plans")
+    
+    if resp.status_code not in [401, 403]:
+        log_test("GET /api/operator/plans (no auth)", False, f"Expected 401/403, got {resp.status_code}")
+        return
+    
+    log_test("GET /api/operator/plans (no auth)", True, f"Got {resp.status_code} without auth")
+    
+    # Create normal user and try operator endpoint
+    user_token, _ = create_test_user()
+    if not user_token:
+        return
+    
+    user_headers = {"Authorization": f"Bearer {user_token}"}
+    resp = requests.get(f"{BASE_URL}/operator/plans", headers=user_headers)
+    
+    if resp.status_code != 403:
+        log_test("GET /api/operator/plans (user token)", False, f"Expected 403, got {resp.status_code}")
+        return
+    
+    log_test("GET /api/operator/plans (user token)", True, "Got 403 with normal user token")
+
+def main():
+    """Run all tests."""
+    print("=" * 60)
+    print("TBC AI CONTROL - BACKEND TEST SUITE")
+    print("Testing NEW payment endpoints")
+    print("=" * 60)
+    
+    # Login as operator
+    op_token = login_operator()
+    if not op_token:
+        print("\n❌ CRITICAL: Cannot proceed without operator token")
+        print("Please ensure operator has 2FA disabled or provide TOTP secret")
+        return
+    
+    # Run tests
+    test_public_plans()
+    test_payment_methods()
+    test_treasury_404()
+    
+    if op_token:
+        test_operator_plans_crud(op_token)
+        test_operator_treasury_crud(op_token)
+        test_operator_settings(op_token)
+        test_manual_payment_flow(op_token)
+        test_pdf_receipts(op_token)
+        test_licenses_royalties(op_token)
+        test_license_agreement()
+        test_authorization(op_token)
+    
+    # Print summary
+    print("\n" + "=" * 60)
     print("TEST SUMMARY")
-    print("=" * 80)
+    print("=" * 60)
+    print(f"✅ PASSED: {results['passed']}")
+    print(f"❌ FAILED: {results['failed']}")
+    print(f"TOTAL: {results['passed'] + results['failed']}")
     
-    passed_count = sum(1 for r in test_results if r["passed"])
-    failed_count = len(test_results) - passed_count
+    if results['failed'] > 0:
+        print("\nFAILED TESTS:")
+        for test in results['tests']:
+            if not test['passed']:
+                print(f"  ❌ {test['name']}")
+                if test['details']:
+                    print(f"     {test['details']}")
     
-    print(f"\nTotal Tests: {len(test_results)}")
-    print(f"✅ Passed: {passed_count}")
-    print(f"❌ Failed: {failed_count}")
-    
-    if failed_count > 0:
-        print("\n" + "=" * 80)
-        print("FAILED TESTS:")
-        print("=" * 80)
-        for r in test_results:
-            if not r["passed"]:
-                print(f"\n❌ Test #{r['test']}: {r['name']}")
-                print(f"   {r['details']}")
-    
-    print("\n" + "=" * 80)
-    
-    return passed_count, failed_count
-
+    print("=" * 60)
 
 if __name__ == "__main__":
-    passed, failed = run_all_tests()
-    exit(0 if failed == 0 else 1)
+    main()

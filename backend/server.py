@@ -119,6 +119,8 @@ async def startup():
     await db.payment_transactions.create_index('session_id', unique=True)
     await db.plans.create_index('id', unique=True)
     await db.treasury.create_index('id', unique=True)
+    await db.licenses.create_index('key', unique=True)
+    await db.royalties.create_index([('license_id', 1), ('child_transaction_id', 1)], unique=True)
 
     # Seed operator user
     existing = await db.users.find_one({'email': OPERATOR_EMAIL})

@@ -20,17 +20,9 @@ export default function Pricing() {
     api.get('/payments/plans').then((r)=>setPlans(r.data)).catch(()=>{});
   }, []);
 
-  const checkout = async (planId) => {
+  const checkout = (planId) => {
     if (!user) { navigate('/login'); return; }
-    setLoadingPlan(planId);
-    try {
-      const origin_url = window.location.origin;
-      const { data } = await api.post('/payments/checkout', { plan_id: planId, origin_url });
-      window.location.href = data.url;
-    } catch (e) {
-      toast.error(e?.response?.data?.detail || 'Checkout failed');
-      setLoadingPlan(null);
-    }
+    navigate(`/pay?plan=${planId}`);
   };
 
   return (

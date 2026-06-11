@@ -225,6 +225,96 @@ backend:
           agent: "testing"
           comment: "✅ PASS - All operator routes working correctly. Operator login successful (rac.invetments.swe@gmail.com). GET /api/operator/stats returns total_users, paid_users, total_messages, revenue_usd. GET /api/operator/users returns user list (test user present). GET /api/operator/transactions returns transaction list (test checkout present). GET /api/operator/contacts returns contact submissions. POST /api/operator/users/{id}/credits grants credits successfully (verified with GET /auth/me). Authorization working - regular user correctly denied access (403) to operator routes."
 
+  - task: "Payment plans CRUD (operator)"
+    implemented: true
+    working: true
+    file: "payments_ext.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: "✅ PASS - All plan CRUD operations working. GET /api/operator/plans returns existing plans. POST creates new plan with all fields. PUT updates plan correctly. DELETE removes plan. Public endpoint GET /api/payments/plans returns DB-backed plans with intro/regular_price fields."
+
+  - task: "Treasury destinations CRUD (operator)"
+    implemented: true
+    working: true
+    file: "payments_ext.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: false
+          agent: "testing"
+          comment: "❌ FAIL - POST /api/operator/treasury returned 500 error. Issue: TreasuryDestination model validation error - id field was None when passed from TreasuryUpsertRequest."
+        - working: true
+          agent: "testing"
+          comment: "✅ PASS - Fixed by using exclude_none=True when creating TreasuryDestination. All treasury CRUD working: POST creates crypto/bank destinations, GET lists all, POST activate sets is_active flag and deactivates others of same type, PUT updates fields, DELETE removes. Public endpoint GET /api/payments/treasury/active returns active destination with QR code for crypto."
+
+  - task: "Payment settings (operator)"
+    implemented: true
+    working: true
+    file: "payments_ext.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: "✅ PASS - All settings operations working. GET /api/operator/settings returns masked keys and enable_* booleans. PUT updates settings (tested with nowpayments_api_key and enable_crypto_auto). POST /api/operator/settings/clear removes specific keys. GET /api/payments/methods dynamically returns available methods based on settings."
+
+  - task: "Manual payment flow"
+    implemented: true
+    working: true
+    file: "payments_ext.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: "✅ PASS - Complete manual payment flow working. User submits payment via POST /api/payments/manual with plan_id, method, treasury_id, proof. Transaction created with status pending_review. Operator confirms via POST /api/operator/transactions/{tx_id}/confirm. User plan upgraded and credits added correctly (verified 550 credits = 50 default + 500 starter)."
+
+  - task: "PDF receipts"
+    implemented: true
+    working: true
+    file: "payments_ext.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: "✅ PASS - All PDF endpoints working. GET /api/operator/transactions/{tx_id}/receipt returns PDF with correct Content-Type (application/pdf), Content-Disposition (attachment), and %PDF signature. GET /api/operator/transactions/export returns combined PDF for all paid transactions or 404 if none. Date range filtering works. Invalid date returns 400."
+
+  - task: "Licenses and royalties"
+    implemented: true
+    working: true
+    file: "payments_ext.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: false
+          agent: "testing"
+          comment: "❌ FAIL - GET /api/operator/royalties/summary returned 500 error. Issue: Syntax error using 'async for' on a regular list."
+        - working: true
+          agent: "testing"
+          comment: "✅ PASS - Fixed by removing incorrect async for loop. All license/royalty operations working: POST /api/operator/licenses creates license with TBC- prefixed key, GET lists with owed/remitted summaries, PUT updates, POST revoke/activate changes status. Public endpoint POST /api/license/report-earnings accepts license_key and creates royalty record with 10% calculation, detects duplicates by child_transaction_id. GET /api/operator/royalties lists records, GET summary returns owed_total/count. POST remit marks records as remitted. Revoked licenses return 401. DELETE removes license."
+
+  - task: "License agreement endpoint"
+    implemented: true
+    working: true
+    file: "payments_ext.py"
+    stuck_count: 0
+    priority: "low"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: "✅ PASS - GET /api/license/agreement returns public license agreement with version, title, royalty_pct (10.0), and full text."
+
 frontend:
   - task: "Landing, About, Contact, Pricing pages"
     implemented: true
@@ -280,7 +370,7 @@ frontend:
 metadata:
   created_by: "main_agent"
   version: "1.0"
-  test_sequence: 3
+  test_sequence: 4
   run_ui: true
 
 test_plan:
@@ -300,3 +390,5 @@ agent_communication:
       message: "✅ Backend testing complete. Executed comprehensive test suite covering all 25 flows. Results: 26/27 tests PASSED. All core functionality working: auth (register/login/2FA), chat sessions CRUD, chat streaming (Claude & Gemini), Stripe payments, contact form, operator console, authorization. Minor issue: gpt-5.4 model name not available in Emergent LLM API, but streaming infrastructure fully functional (verified with Claude and Gemini). Backend is production-ready."
     - agent: "testing"
       message: "✅ Frontend testing complete. Executed comprehensive UI test suite covering all 8 test scenarios. Results: ALL TESTS PASSED. Landing page: Hero text, model strip (Claude Opus 4.7, Claude Sonnet 4.6, GPT-5, Gemini), theme, and CTA navigation working. Register & 2FA: Complete flow works (test_1781204561@example.com created, 2FA enabled with pyotp-generated code). Dashboard: Empty state, chat streaming, model picker (OpenAI, Anthropic visible), sidebar features, new chat all working. Pricing: All 3 plans visible with intro pricing, Stripe redirect works. Contact: Form submission works with success toast. Sign out: Works correctly. Operator login: Works correctly - redirects to /setup-2fa (operator requires 2FA setup: requires_2fa_setup=true, totp_enabled=false). Minor: Google provider not visible in model picker dropdown. Application is production-ready."
+    - agent: "testing"
+      message: "✅ NEW PAYMENT ENDPOINTS TESTING COMPLETE. Executed comprehensive test suite for all new payment features. Results: 53/53 tests PASSED (100%). Fixed 2 bugs during testing: (1) TreasuryDestination validation error - fixed by using exclude_none=True, (2) Royalty summary syntax error - removed incorrect async for loop. All features working: Public plans (DB-backed with intro/regular_price), Payment methods (dynamic based on settings), Treasury CRUD (crypto/bank with QR codes), Settings management (masked keys, enable toggles), Manual payment flow (pending_review → confirm → upgrade), PDF receipts (single + export with date filtering), Licenses & Royalties (TBC- keys, 10% calculation, duplicate detection, revoke/activate, remittance tracking), License agreement endpoint, Authorization checks (401/403). All endpoints production-ready."
