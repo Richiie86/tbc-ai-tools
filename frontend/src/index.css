@@ -19,26 +19,26 @@ code, pre {
 
 @layer base {
   :root {
-    --background: 222 47% 5%;
-    --foreground: 38 30% 92%;
-    --card: 222 35% 8%;
-    --card-foreground: 38 30% 92%;
-    --popover: 222 35% 8%;
-    --popover-foreground: 38 30% 92%;
-    --primary: 38 92% 50%;
-    --primary-foreground: 222 47% 5%;
-    --secondary: 222 20% 14%;
-    --secondary-foreground: 38 30% 92%;
-    --muted: 222 20% 14%;
-    --muted-foreground: 215 20% 65%;
-    --accent: 38 92% 50%;
-    --accent-foreground: 222 47% 5%;
+    --background: 0 0% 2%;
+    --foreground: 42 35% 90%;
+    --card: 0 0% 5%;
+    --card-foreground: 42 35% 90%;
+    --popover: 0 0% 5%;
+    --popover-foreground: 42 35% 90%;
+    --primary: 41 64% 47%;
+    --primary-foreground: 0 0% 5%;
+    --secondary: 0 0% 11%;
+    --secondary-foreground: 42 35% 90%;
+    --muted: 0 0% 11%;
+    --muted-foreground: 42 12% 60%;
+    --accent: 41 64% 47%;
+    --accent-foreground: 0 0% 5%;
     --destructive: 0 75% 55%;
     --destructive-foreground: 0 0% 98%;
-    --border: 222 20% 18%;
-    --input: 222 20% 14%;
-    --ring: 38 92% 50%;
-    --radius: 0.75rem;
+    --border: 42 18% 16%;
+    --input: 0 0% 11%;
+    --ring: 41 64% 47%;
+    --radius: 0.5rem;
   }
 }
 
@@ -50,20 +50,20 @@ code, pre {
 /* Subtle grid bg */
 .bg-grid {
   background-image:
-    linear-gradient(rgba(245,158,11,0.05) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(245,158,11,0.05) 1px, transparent 1px);
-  background-size: 56px 56px;
+    linear-gradient(rgba(200,156,42,0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(200,156,42,0.05) 1px, transparent 1px);
+  background-size: 64px 64px;
 }
 .bg-radial-fade {
-  background: radial-gradient(ellipse at top, rgba(245,158,11,0.12), transparent 55%),
-              radial-gradient(ellipse at bottom right, rgba(217,119,6,0.07), transparent 60%);
+  background: radial-gradient(ellipse at top, rgba(212,175,55,0.10), transparent 60%),
+              radial-gradient(ellipse at bottom right, rgba(122,93,18,0.08), transparent 65%);
 }
 
 /* Scrollbar */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-track { background: #0a0d14; }
-::-webkit-scrollbar-thumb { background: #1f2937; border-radius: 8px; }
-::-webkit-scrollbar-thumb:hover { background: #2b3849; }
+::-webkit-scrollbar-track { background: #050505; }
+::-webkit-scrollbar-thumb { background: #2a230f; border-radius: 8px; }
+::-webkit-scrollbar-thumb:hover { background: #443710; }
 
 /* Streaming caret */
 .caret-blink::after {
@@ -71,12 +71,12 @@ code, pre {
   display: inline-block;
   margin-left: 2px;
   animation: caret 0.9s steps(1) infinite;
-  color: #fbbf24;
+  color: #d4af37;
 }
 @keyframes caret { 50% { opacity: 0; } }
 
 .shimmer {
-  background: linear-gradient(90deg, #0f1623 0%, #1a2434 50%, #0f1623 100%);
+  background: linear-gradient(90deg, #0a0a0a 0%, #1a1305 50%, #0a0a0a 100%);
   background-size: 200% 100%;
   animation: shimmer 1.6s ease-in-out infinite;
 }
@@ -87,8 +87,8 @@ code, pre {
 .markdown-body li { margin: 0.25rem 0; }
 .markdown-body h1, .markdown-body h2, .markdown-body h3 { font-weight: 700; margin: 1rem 0 0.5rem; }
 .markdown-body h1 { font-size: 1.4rem; } .markdown-body h2 { font-size: 1.2rem; } .markdown-body h3 { font-size: 1.05rem; }
-.markdown-body code { background: #0b1220; color: #fcd34d; padding: 0.1rem 0.35rem; border-radius: 6px; font-size: 0.88em; }
-.markdown-body pre { background: #0a0f1a !important; border: 1px solid #1f2937; border-radius: 10px; padding: 1rem; overflow-x: auto; margin: 0.75rem 0; }
-.markdown-body pre code { background: transparent; color: #e2e8f0; padding: 0; }
-.markdown-body a { color: #fbbf24; text-decoration: underline; text-underline-offset: 3px; }
-.markdown-body blockquote { border-left: 3px solid #f59e0b; padding-left: 0.9rem; margin: 0.6rem 0; color: #cbd5e1; }
+.markdown-body code { background: #0a0a0a; color: #dfc080; padding: 0.1rem 0.35rem; border-radius: 6px; font-size: 0.88em; }
+.markdown-body pre { background: #050505 !important; border: 1px solid #2a230f; border-radius: 10px; padding: 1rem; overflow-x: auto; margin: 0.75rem 0; }
+.markdown-body pre code { background: transparent; color: #ead4a0; padding: 0; }
+.markdown-body a { color: #d4af37; text-decoration: underline; text-underline-offset: 3px; }
+.markdown-body blockquote { border-left: 3px solid #c89c2a; padding-left: 0.9rem; margin: 0.6rem 0; color: #cbd5e1; }

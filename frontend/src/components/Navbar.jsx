@@ -2,7 +2,7 @@ import React from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { Button } from './ui/button';
 import { useAuth } from '../context/AuthContext';
-import { Cpu, LayoutDashboard, LogOut, ShieldCheck, Sparkles } from 'lucide-react';
+import { Cpu, LayoutDashboard, LogOut, ShieldCheck, Sparkles, Bot } from 'lucide-react';
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent,
   DropdownMenuItem, DropdownMenuSeparator, DropdownMenuLabel,
@@ -15,15 +15,15 @@ export default function Navbar({ minimal = false }) {
   const isActive = (p) => loc.pathname === p;
 
   return (
-    <header className="sticky top-0 z-40 w-full border-b border-slate-800/80 bg-slate-950/70 backdrop-blur-xl">
+    <header className="sticky top-0 z-40 w-full border-b border-slate-800/80 bg-ink-950/70 backdrop-blur-xl">
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-5">
         <Link to="/" className="flex items-center gap-2.5">
-          <div className="relative grid h-9 w-9 place-items-center rounded-lg bg-gradient-to-br from-amber-400 to-yellow-500 shadow-lg shadow-amber-500/30">
+          <div className="relative grid h-9 w-9 place-items-center rounded-lg bg-gradient-to-br from-tbc-300 to-tbc-500 shadow-lg shadow-tbc-500/30">
             <Cpu className="h-5 w-5 text-slate-950" strokeWidth={2.4} />
           </div>
           <div className="leading-tight">
             <div className="text-[15px] font-bold tracking-tight text-white">TBC AI Control</div>
-            <div className="text-[10px] uppercase tracking-[0.18em] text-amber-400/80">TradeBridge Club</div>
+            <div className="text-[10px] uppercase tracking-[0.18em] text-tbc-400/80">TradeBridge Club</div>
           </div>
         </Link>
 
@@ -55,7 +55,7 @@ export default function Navbar({ minimal = false }) {
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button className="flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-1.5 text-sm font-medium text-slate-200 hover:bg-slate-800 transition-colors">
-                  <div className="grid h-6 w-6 place-items-center rounded-full bg-amber-500/20 text-amber-300 text-[11px] font-bold">
+                  <div className="grid h-6 w-6 place-items-center rounded-full bg-tbc-500/20 text-tbc-300 text-[11px] font-bold">
                     {(user.name?.[0] || user.email[0]).toUpperCase()}
                   </div>
                   <span className="hidden sm:inline">{user.name || user.email.split('@')[0]}</span>
@@ -65,17 +65,20 @@ export default function Navbar({ minimal = false }) {
                 <DropdownMenuLabel className="flex flex-col">
                   <span className="text-xs text-slate-400">Signed in as</span>
                   <span className="truncate text-sm">{user.email}</span>
-                  <span className="mt-1 inline-flex w-fit items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] uppercase tracking-wide text-amber-300">
+                  <span className="mt-1 inline-flex w-fit items-center gap-1 rounded-full bg-tbc-500/15 px-2 py-0.5 text-[10px] uppercase tracking-wide text-tbc-300">
                     <Sparkles className="h-3 w-3" /> {user.plan} plan
                   </span>
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator className="bg-slate-800" />
                 <DropdownMenuItem onClick={() => navigate('/dashboard')} className="focus:bg-slate-800 cursor-pointer">
-                  <LayoutDashboard className="mr-2 h-4 w-4" /> Dashboard
+                  <LayoutDashboard className="mr-2 h-4 w-4" /> TBC1 Dashboard
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => navigate('/tbc2')} className="focus:bg-slate-800 cursor-pointer">
+                  <Bot className="mr-2 h-4 w-4 text-tbc-400" /> TBC2 Dashboard
                 </DropdownMenuItem>
                 {user.role === 'operator' && (
                   <DropdownMenuItem onClick={() => navigate('/operator')} className="focus:bg-slate-800 cursor-pointer">
-                    <ShieldCheck className="mr-2 h-4 w-4 text-amber-400" /> Operator Console
+                    <ShieldCheck className="mr-2 h-4 w-4 text-tbc-400" /> Operator Console
                   </DropdownMenuItem>
                 )}
                 <DropdownMenuItem onClick={() => navigate('/pricing')} className="focus:bg-slate-800 cursor-pointer">
@@ -93,7 +96,7 @@ export default function Navbar({ minimal = false }) {
                 <Button variant="ghost" className="text-slate-300 hover:bg-slate-800 hover:text-white">Sign in</Button>
               </Link>
               <Link to="/register">
-                <Button className="bg-amber-500 text-slate-950 hover:bg-amber-400 font-semibold">Get started</Button>
+                <Button className="bg-tbc-500 text-slate-950 hover:bg-tbc-400 font-semibold">Get started</Button>
               </Link>
             </>
           )}

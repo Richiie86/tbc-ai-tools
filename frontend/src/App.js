@@ -29,8 +29,10 @@ function App() {
             <Route path="/register" element={<Register />} />
             <Route path="/verify-2fa" element={<Verify2FA />} />
             <Route path="/setup-2fa" element={<ProtectedRoute><Setup2FA /></ProtectedRoute>} />
-            <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-            <Route path="/dashboard/:sessionId" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+            <Route path="/dashboard" element={<ProtectedRoute><Dashboard variant="tbc1" /></ProtectedRoute>} />
+            <Route path="/dashboard/:sessionId" element={<ProtectedRoute><Dashboard variant="tbc1" /></ProtectedRoute>} />
+            <Route path="/tbc2" element={<ProtectedRoute><Dashboard variant="tbc2" /></ProtectedRoute>} />
+            <Route path="/tbc2/:sessionId" element={<ProtectedRoute><Dashboard variant="tbc2" /></ProtectedRoute>} />
             <Route path="/billing/success" element={<ProtectedRoute><BillingSuccess /></ProtectedRoute>} />
             <Route path="/operator" element={<ProtectedRoute operatorOnly><Operator /></ProtectedRoute>} />
             <Route path="*" element={<Navigate to="/" replace />} />

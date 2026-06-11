@@ -24,7 +24,7 @@ api.interceptors.response.use(
 export default api;
 
 // Streaming helper for chat (SSE via fetch)
-export async function* streamChat({ session_id, message, model }) {
+export async function* streamChat({ session_id, message, model, variant, attachments }) {
   const token = localStorage.getItem('tbc_token');
   const res = await fetch(`${API}/chat/stream`, {
     method: 'POST',
@@ -32,7 +32,7 @@ export async function* streamChat({ session_id, message, model }) {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({ session_id, message, model }),
+    body: JSON.stringify({ session_id, message, model, variant, attachments }),
   });
   if (!res.ok) {
     let detail = 'Request failed';

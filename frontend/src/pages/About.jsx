@@ -5,10 +5,10 @@ import { ShieldCheck, Code2, Globe, Users, Target, Sparkles } from 'lucide-react
 
 export default function About() {
   return (
-    <div className="min-h-screen bg-slate-950">
+    <div className="min-h-screen bg-ink-950">
       <Navbar />
       <section className="mx-auto max-w-5xl px-5 py-20">
-        <div className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-400">About TBC AI Control</div>
+        <div className="text-xs font-semibold uppercase tracking-[0.2em] text-tbc-400">About TBC AI Control</div>
         <h1 className="mt-3 text-5xl font-bold tracking-tight text-white md:text-6xl">A copy of an elite AI builder — yours to operate.</h1>
         <p className="mt-6 max-w-3xl text-lg leading-relaxed text-slate-300">
           TBC AI Control was created for the TradeBridge Club to put the power of frontier large language
@@ -27,7 +27,7 @@ export default function About() {
             { icon: Globe,       title: 'Reach',    desc: 'Hosted globally so every member experiences low-latency token streaming.' },
           ].map((b) => (
             <div key={b.title} className="rounded-2xl border border-slate-800 bg-slate-900/60 p-7">
-              <b.icon className="h-6 w-6 text-amber-400" />
+              <b.icon className="h-6 w-6 text-tbc-400" />
               <div className="mt-3 text-lg font-semibold text-white">{b.title}</div>
               <p className="mt-2 text-sm text-slate-400">{b.desc}</p>
             </div>
@@ -47,7 +47,7 @@ export default function About() {
               { name: 'Aisha Khan',     role: 'Security Architect' },
             ].map((p) => (
               <div key={p.name} className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6">
-                <div className="grid h-12 w-12 place-items-center rounded-full bg-amber-500/20 text-lg font-bold text-amber-300">{p.name.split(' ').map((s)=>s[0]).join('')}</div>
+                <div className="grid h-12 w-12 place-items-center rounded-full bg-tbc-500/20 text-lg font-bold text-tbc-300">{p.name.split(' ').map((s)=>s[0]).join('')}</div>
                 <div className="mt-3 text-base font-semibold text-white">{p.name}</div>
                 <div className="text-xs uppercase tracking-wider text-slate-500">{p.role}</div>
               </div>

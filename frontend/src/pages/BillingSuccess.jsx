@@ -47,29 +47,29 @@ export default function BillingSuccess() {
   }, [sessionId]);
 
   return (
-    <div className="min-h-screen bg-slate-950">
+    <div className="min-h-screen bg-ink-950">
       <Navbar />
       <div className="mx-auto max-w-xl px-5 py-20">
         <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-10 text-center">
           {status === 'checking' && (
             <>
-              <Loader2 className="mx-auto h-10 w-10 animate-spin text-amber-400" />
+              <Loader2 className="mx-auto h-10 w-10 animate-spin text-tbc-400" />
               <h1 className="mt-5 text-2xl font-bold text-white">Confirming your payment…</h1>
               <p className="mt-2 text-sm text-slate-400">This usually takes a few seconds.</p>
             </>
           )}
           {status === 'paid' && (
             <>
-              <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-amber-500/20 text-amber-300">
+              <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-tbc-500/20 text-tbc-300">
                 <Check className="h-7 w-7" />
               </div>
               <h1 className="mt-5 text-3xl font-bold text-white">You’re upgraded!</h1>
               <p className="mt-2 text-sm text-slate-400">
-                Welcome to the <span className="font-semibold text-amber-300">{info?.plan_id?.toUpperCase()}</span> plan. Credits have been added to your account.
+                Welcome to the <span className="font-semibold text-tbc-300">{info?.plan_id?.toUpperCase()}</span> plan. Credits have been added to your account.
               </p>
               <div className="mt-7 flex justify-center gap-3">
                 <Link to="/dashboard">
-                  <Button className="bg-amber-500 text-slate-950 hover:bg-amber-400 font-semibold">
+                  <Button className="bg-tbc-500 text-slate-950 hover:bg-tbc-400 font-semibold">
                     <Sparkles className="mr-2 h-4 w-4" /> Open dashboard
                   </Button>
                 </Link>
@@ -85,7 +85,7 @@ export default function BillingSuccess() {
               <p className="mt-2 text-sm text-slate-400">Please try again or contact support.</p>
               <div className="mt-6 flex justify-center gap-3">
                 <Link to="/pricing">
-                  <Button className="bg-amber-500 text-slate-950 hover:bg-amber-400 font-semibold">Back to pricing</Button>
+                  <Button className="bg-tbc-500 text-slate-950 hover:bg-tbc-400 font-semibold">Back to pricing</Button>
                 </Link>
               </div>
             </>

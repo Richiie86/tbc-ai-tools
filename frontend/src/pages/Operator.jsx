@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import Navbar from '../components/Navbar';
 import api from '../lib/api';
 import { Card } from '../components/ui/card';
@@ -8,20 +8,30 @@ import {
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '../components/ui/table';
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '../components/ui/select';
 import { Button } from '../components/ui/button';
+import { Input } from '../components/ui/input';
+import { ScrollArea } from '../components/ui/scroll-area';
 import { toast } from 'sonner';
-import { Users, CreditCard, MessageSquare, DollarSign, Loader2, ShieldCheck, Mail } from 'lucide-react';
+import {
+  Users, CreditCard, MessageSquare, DollarSign, Loader2, ShieldCheck, Mail,
+  Code2, ChevronRight, ChevronDown, FileCode, Folder, FolderOpen, Search,
+  Download, Copy, Check,
+} from 'lucide-react';
 
-function StatCard({ icon: Icon, label, value, tone = 'emerald' }) {
-  const toneClass = tone === 'emerald' ? 'bg-amber-500/15 text-amber-300' : 'bg-yellow-500/15 text-amber-300';
+const PLANS = ['free', 'starter', 'pro', 'enterprise'];
+
+function StatCard({ icon: Icon, label, value }) {
   return (
-    <Card className="border-slate-800 bg-slate-900/60 p-5">
+    <Card className="border-tbc-900/60 bg-ink-900/80 p-5">
       <div className="flex items-center justify-between">
         <div>
-          <div className="text-xs uppercase tracking-wider text-slate-400">{label}</div>
-          <div className="mt-1 text-2xl font-bold text-white">{value}</div>
+          <div className="text-xs uppercase tracking-wider text-tbc-200/60">{label}</div>
+          <div className="mt-1 text-2xl font-bold text-tbc-100">{value}</div>
         </div>
-        <div className={`grid h-10 w-10 place-items-center rounded-lg ${toneClass}`}>
+        <div className="grid h-10 w-10 place-items-center rounded-lg bg-tbc-500/15 text-tbc-300">
           <Icon className="h-5 w-5" />
         </div>
       </div>
@@ -35,6 +45,7 @@ export default function Operator() {
   const [transactions, setTransactions] = useState([]);
   const [contacts, setContacts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [userSearch, setUserSearch] = useState('');
 
   const loadAll = async () => {
     setLoading(true);
@@ -63,63 +74,113 @@ export default function Operator() {
     } catch { toast.error('Could not grant credits'); }
   };
 
+  const setPlan = async (userId, plan) => {
+    try {
+      const { data } = await api.post(`/operator/users/${userId}/plan?plan=${plan}`);
+      toast.success(`Plan set to ${plan}` + (data.credits_added ? ` (+${data.credits_added} credits)` : ''));
+      loadAll();
+    } catch { toast.error('Could not change plan'); }
+  };
+
+  const filteredUsers = useMemo(() => {
+    const q = userSearch.trim().toLowerCase();
+    if (!q) return users;
+    return users.filter((u) => u.email.toLowerCase().includes(q) || (u.name || '').toLowerCase().includes(q));
+  }, [users, userSearch]);
+
   return (
-    <div className="min-h-screen bg-slate-950">
+    <div className="min-h-screen bg-ink-950">
       <Navbar />
       <section className="mx-auto max-w-7xl px-5 py-10">
         <div className="flex items-center gap-3">
-          <div className="grid h-11 w-11 place-items-center rounded-xl bg-amber-500/15 text-amber-300">
+          <div className="grid h-11 w-11 place-items-center rounded-xl bg-tbc-500/15 text-tbc-300">
             <ShieldCheck className="h-6 w-6" />
           </div>
           <div>
-            <h1 className="text-3xl font-bold text-white">Operator Console</h1>
-            <p className="text-sm text-slate-400">Manage TBC AI Control members, payments, and inbound contacts.</p>
+            <h1 className="text-3xl font-bold text-tbc-100">Operator Console</h1>
+            <p className="text-sm text-tbc-200/60">Manage TBC1 & TBC2 members, payments, plans, and source code.</p>
           </div>
         </div>
 
         {loading ? (
-          <div className="mt-16 grid place-items-center"><Loader2 className="h-7 w-7 animate-spin text-amber-400" /></div>
+          <div className="mt-16 grid place-items-center"><Loader2 className="h-7 w-7 animate-spin text-tbc-400" /></div>
         ) : (
           <>
             <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
               <StatCard icon={Users} label="Total Users" value={stats?.total_users ?? '–'} />
-              <StatCard icon={CreditCard} label="Paid Customers" value={stats?.paid_users ?? '–'} tone="cyan" />
+              <StatCard icon={CreditCard} label="Paid Customers" value={stats?.paid_users ?? '–'} />
               <StatCard icon={MessageSquare} label="Total Messages" value={stats?.total_messages?.toLocaleString() ?? '–'} />
-              <StatCard icon={DollarSign} label="Revenue (USD)" value={`$${(stats?.revenue_usd ?? 0).toLocaleString()}`} tone="cyan" />
+              <StatCard icon={DollarSign} label="Revenue (USD)" value={`$${(stats?.revenue_usd ?? 0).toLocaleString()}`} />
             </div>
 
             <Tabs defaultValue="users" className="mt-10">
-              <TabsList className="bg-slate-900 border border-slate-800">
-                <TabsTrigger value="users" className="data-[state=active]:bg-amber-500 data-[state=active]:text-slate-950">Users</TabsTrigger>
-                <TabsTrigger value="payments" className="data-[state=active]:bg-amber-500 data-[state=active]:text-slate-950">Payments</TabsTrigger>
-                <TabsTrigger value="contacts" className="data-[state=active]:bg-amber-500 data-[state=active]:text-slate-950">Contacts</TabsTrigger>
+              <TabsList className="bg-ink-900 border border-tbc-900/60">
+                <TabsTrigger value="users" className="data-[state=active]:bg-tbc-500 data-[state=active]:text-ink-950">
+                  <Users className="mr-1.5 h-3.5 w-3.5" /> Users ({users.length})
+                </TabsTrigger>
+                <TabsTrigger value="payments" className="data-[state=active]:bg-tbc-500 data-[state=active]:text-ink-950">
+                  <CreditCard className="mr-1.5 h-3.5 w-3.5" /> Payments
+                </TabsTrigger>
+                <TabsTrigger value="contacts" className="data-[state=active]:bg-tbc-500 data-[state=active]:text-ink-950">
+                  <Mail className="mr-1.5 h-3.5 w-3.5" /> Contacts
+                </TabsTrigger>
+                <TabsTrigger value="codes" className="data-[state=active]:bg-tbc-500 data-[state=active]:text-ink-950">
+                  <Code2 className="mr-1.5 h-3.5 w-3.5" /> Codes
+                </TabsTrigger>
               </TabsList>
 
               <TabsContent value="users" className="mt-5">
-                <div className="rounded-xl border border-slate-800 bg-slate-900/40">
+                <div className="mb-3 flex items-center gap-3">
+                  <div className="relative w-72">
+                    <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-tbc-200/40" />
+                    <Input
+                      value={userSearch}
+                      onChange={(e) => setUserSearch(e.target.value)}
+                      placeholder="Search by email or name..."
+                      className="border-tbc-900/60 bg-ink-900 pl-9 text-tbc-100"
+                    />
+                  </div>
+                  <div className="text-xs text-tbc-200/60">{filteredUsers.length} of {users.length} users</div>
+                </div>
+                <div className="rounded-xl border border-tbc-900/60 bg-ink-900/40">
                   <Table>
                     <TableHeader>
-                      <TableRow className="border-slate-800 hover:bg-transparent">
+                      <TableRow className="border-tbc-900/60 hover:bg-transparent">
                         <TableHead>Email</TableHead>
+                        <TableHead>Name</TableHead>
                         <TableHead>Role</TableHead>
                         <TableHead>Plan</TableHead>
                         <TableHead>Credits</TableHead>
                         <TableHead>2FA</TableHead>
+                        <TableHead>Joined</TableHead>
                         <TableHead className="text-right">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {users.map((u) => (
-                        <TableRow key={u.id} className="border-slate-800 hover:bg-slate-900">
-                          <TableCell className="font-medium">{u.email}</TableCell>
+                      {filteredUsers.map((u) => (
+                        <TableRow key={u.id} className="border-tbc-900/60 hover:bg-ink-900/60">
+                          <TableCell className="font-medium text-tbc-100">{u.email}</TableCell>
+                          <TableCell className="text-tbc-200/80">{u.name || '—'}</TableCell>
                           <TableCell>
-                            <span className={`rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wider ${u.role === 'operator' ? 'bg-amber-500/20 text-amber-300' : 'bg-slate-800 text-slate-300'}`}>{u.role}</span>
+                            <span className={`rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wider ${u.role === 'operator' ? 'bg-tbc-500/20 text-tbc-300' : 'bg-ink-900 text-tbc-200/70'}`}>{u.role}</span>
                           </TableCell>
-                          <TableCell><span className="capitalize">{u.plan}</span></TableCell>
-                          <TableCell>{u.credits?.toLocaleString()}</TableCell>
-                          <TableCell>{u.totp_enabled ? <span className="text-amber-400">On</span> : <span className="text-slate-500">Off</span>}</TableCell>
+                          <TableCell>
+                            <Select value={u.plan} onValueChange={(v) => setPlan(u.id, v)} disabled={u.role === 'operator'}>
+                              <SelectTrigger className="h-8 w-32 border-tbc-900/60 bg-ink-900 text-tbc-100">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent className="border-tbc-900/60 bg-ink-900 text-tbc-100">
+                                {PLANS.map((p) => (
+                                  <SelectItem key={p} value={p} className="capitalize focus:bg-ink-950">{p}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </TableCell>
+                          <TableCell className="text-tbc-200">{u.credits?.toLocaleString()}</TableCell>
+                          <TableCell>{u.totp_enabled ? <span className="text-tbc-300">On</span> : <span className="text-tbc-200/40">Off</span>}</TableCell>
+                          <TableCell className="text-xs text-tbc-200/60">{u.created_at ? new Date(u.created_at).toLocaleDateString() : '—'}</TableCell>
                           <TableCell className="text-right">
-                            <Button size="sm" variant="outline" className="border-slate-700 bg-slate-900 hover:bg-slate-800" onClick={()=>grantCredits(u.id, 100)}>+100 credits</Button>
+                            <Button size="sm" variant="outline" className="border-tbc-900/60 bg-ink-900 text-tbc-100 hover:bg-ink-900/40" onClick={() => grantCredits(u.id, 100)}>+100</Button>
                           </TableCell>
                         </TableRow>
                       ))}
@@ -129,10 +190,10 @@ export default function Operator() {
               </TabsContent>
 
               <TabsContent value="payments" className="mt-5">
-                <div className="rounded-xl border border-slate-800 bg-slate-900/40">
+                <div className="rounded-xl border border-tbc-900/60 bg-ink-900/40">
                   <Table>
                     <TableHeader>
-                      <TableRow className="border-slate-800 hover:bg-transparent">
+                      <TableRow className="border-tbc-900/60 hover:bg-transparent">
                         <TableHead>User</TableHead>
                         <TableHead>Plan</TableHead>
                         <TableHead>Amount</TableHead>
@@ -142,17 +203,17 @@ export default function Operator() {
                     </TableHeader>
                     <TableBody>
                       {transactions.length === 0 && (
-                        <TableRow><TableCell colSpan={5} className="py-8 text-center text-slate-500">No transactions yet</TableCell></TableRow>
+                        <TableRow><TableCell colSpan={5} className="py-8 text-center text-tbc-200/50">No transactions yet</TableCell></TableRow>
                       )}
                       {transactions.map((t) => (
-                        <TableRow key={t.id} className="border-slate-800 hover:bg-slate-900">
-                          <TableCell>{t.user_email}</TableCell>
-                          <TableCell className="capitalize">{t.plan_id}</TableCell>
-                          <TableCell>${t.amount?.toFixed(2)} {t.currency?.toUpperCase()}</TableCell>
+                        <TableRow key={t.id} className="border-tbc-900/60 hover:bg-ink-900/60">
+                          <TableCell className="text-tbc-100">{t.user_email}</TableCell>
+                          <TableCell className="capitalize text-tbc-200">{t.plan_id}</TableCell>
+                          <TableCell className="text-tbc-200">${t.amount?.toFixed(2)} {t.currency?.toUpperCase()}</TableCell>
                           <TableCell>
-                            <span className={`rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wider ${t.payment_status === 'paid' ? 'bg-amber-500/20 text-amber-300' : 'bg-amber-500/20 text-amber-300'}`}>{t.payment_status}</span>
+                            <span className={`rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wider ${t.payment_status === 'paid' ? 'bg-tbc-500/20 text-tbc-300' : 'bg-amber-500/20 text-amber-300'}`}>{t.payment_status}</span>
                           </TableCell>
-                          <TableCell className="text-slate-400">{new Date(t.created_at).toLocaleString()}</TableCell>
+                          <TableCell className="text-tbc-200/60">{new Date(t.created_at).toLocaleString()}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -163,28 +224,183 @@ export default function Operator() {
               <TabsContent value="contacts" className="mt-5">
                 <div className="space-y-3">
                   {contacts.length === 0 && (
-                    <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-8 text-center text-slate-500">No contact submissions yet</div>
+                    <div className="rounded-xl border border-tbc-900/60 bg-ink-900/40 p-8 text-center text-tbc-200/50">No contact submissions yet</div>
                   )}
                   {contacts.map((c) => (
-                    <div key={c.id} className="rounded-xl border border-slate-800 bg-slate-900/40 p-5">
+                    <div key={c.id} className="rounded-xl border border-tbc-900/60 bg-ink-900/40 p-5">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2 text-sm">
-                          <Mail className="h-4 w-4 text-amber-400" />
-                          <span className="font-semibold text-white">{c.name}</span>
-                          <span className="text-slate-400">&lt;{c.email}&gt;</span>
+                          <Mail className="h-4 w-4 text-tbc-400" />
+                          <span className="font-semibold text-tbc-100">{c.name}</span>
+                          <span className="text-tbc-200/60">&lt;{c.email}&gt;</span>
                         </div>
-                        <span className="text-xs text-slate-500">{new Date(c.created_at).toLocaleString()}</span>
+                        <span className="text-xs text-tbc-200/50">{new Date(c.created_at).toLocaleString()}</span>
                       </div>
-                      {c.subject && <div className="mt-2 text-sm font-medium text-slate-200">{c.subject}</div>}
-                      <p className="mt-2 whitespace-pre-wrap text-sm text-slate-300">{c.message}</p>
+                      {c.subject && <div className="mt-2 text-sm font-medium text-tbc-100">{c.subject}</div>}
+                      <p className="mt-2 whitespace-pre-wrap text-sm text-tbc-200/80">{c.message}</p>
                     </div>
                   ))}
                 </div>
+              </TabsContent>
+
+              <TabsContent value="codes" className="mt-5">
+                <CodesBrowser />
               </TabsContent>
             </Tabs>
           </>
         )}
       </section>
+    </div>
+  );
+}
+
+
+function CodesBrowser() {
+  const [tree, setTree] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState(null);
+  const [content, setContent] = useState('');
+  const [contentLoading, setContentLoading] = useState(false);
+  const [expanded, setExpanded] = useState(new Set(['/app/backend', '/app/frontend/src']));
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    api.get('/operator/codes/tree').then((r) => setTree(r.data)).catch(() => toast.error('Failed to load file tree')).finally(() => setLoading(false));
+  }, []);
+
+  const openFile = async (path) => {
+    setSelected(path);
+    setContentLoading(true);
+    try {
+      const { data } = await api.get('/operator/codes/file', { params: { path } });
+      setContent(data.content);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Failed to read file');
+      setContent('');
+    } finally {
+      setContentLoading(false);
+    }
+  };
+
+  const toggle = (path) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path); else next.add(path);
+      return next;
+    });
+  };
+
+  const copyContent = () => {
+    navigator.clipboard.writeText(content);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
+  const downloadFile = () => {
+    if (!selected) return;
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = selected.split('/').pop();
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  if (loading) {
+    return <div className="grid place-items-center py-16"><Loader2 className="h-6 w-6 animate-spin text-tbc-400" /></div>;
+  }
+
+  return (
+    <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
+      <div className="rounded-xl border border-tbc-900/60 bg-ink-900/40">
+        <div className="border-b border-tbc-900/60 px-3 py-2 text-xs font-semibold uppercase tracking-wider text-tbc-300">Source files</div>
+        <ScrollArea className="h-[640px] p-2">
+          <CodeTree tree={tree} expanded={expanded} toggle={toggle} onFile={openFile} selected={selected} />
+        </ScrollArea>
+      </div>
+
+      <div className="rounded-xl border border-tbc-900/60 bg-ink-900/40">
+        <div className="flex items-center justify-between border-b border-tbc-900/60 px-3 py-2">
+          <div className="flex items-center gap-2 text-xs">
+            <FileCode className="h-3.5 w-3.5 text-tbc-300" />
+            <span className="font-mono text-tbc-200">{selected ? selected.replace('/app/', '') : 'Select a file'}</span>
+          </div>
+          {selected && (
+            <div className="flex items-center gap-1">
+              <Button size="sm" variant="outline" className="border-tbc-900/60 bg-ink-900 text-tbc-100 hover:bg-ink-950" onClick={copyContent}>
+                {copied ? <Check className="h-3.5 w-3.5 text-tbc-300" /> : <Copy className="h-3.5 w-3.5" />}
+              </Button>
+              <Button size="sm" variant="outline" className="border-tbc-900/60 bg-ink-900 text-tbc-100 hover:bg-ink-950" onClick={downloadFile}>
+                <Download className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          )}
+        </div>
+        <div className="relative h-[640px] overflow-auto">
+          {contentLoading ? (
+            <div className="grid h-full place-items-center"><Loader2 className="h-6 w-6 animate-spin text-tbc-400" /></div>
+          ) : selected ? (
+            <pre className="m-0 p-4 text-xs leading-relaxed text-tbc-100">
+              <code>{content}</code>
+            </pre>
+          ) : (
+            <div className="grid h-full place-items-center text-sm text-tbc-200/40">
+              Pick a file on the left to view its source code
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function flattenTree(nodes, depth, expanded, acc) {
+  for (const n of nodes) {
+    acc.push({ ...n, depth });
+    if (n.type === 'dir' && expanded.has(n.path) && n.children) {
+      flattenTree(n.children, depth + 1, expanded, acc);
+    }
+  }
+  return acc;
+}
+
+function CodeTree({ tree, expanded, toggle, onFile, selected }) {
+  const flat = [];
+  flattenTree(tree, 0, expanded, flat);
+  return (
+    <div>
+      {flat.map((n) => {
+        const padding = { paddingLeft: 6 + n.depth * 14 };
+        if (n.type === 'dir') {
+          const isOpen = expanded.has(n.path);
+          return (
+            <button
+              key={n.path}
+              onClick={() => toggle(n.path)}
+              className="flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-xs text-tbc-200 hover:bg-ink-900/80"
+              style={padding}
+            >
+              {isOpen ? <ChevronDown className="h-3 w-3 text-tbc-400" /> : <ChevronRight className="h-3 w-3 text-tbc-400" />}
+              {isOpen ? <FolderOpen className="h-3.5 w-3.5 text-tbc-300" /> : <Folder className="h-3.5 w-3.5 text-tbc-400" />}
+              <span className="truncate">{n.name}</span>
+            </button>
+          );
+        }
+        const isSelected = selected === n.path;
+        return (
+          <button
+            key={n.path}
+            onClick={() => onFile(n.path)}
+            className={`flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-xs hover:bg-ink-900/80 ${isSelected ? 'bg-tbc-500/15 text-tbc-200' : 'text-tbc-200/80'}`}
+            style={padding}
+          >
+            <span className="w-3" />
+            <FileCode className="h-3.5 w-3.5 shrink-0 text-tbc-200/60" />
+            <span className="truncate">{n.name}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }

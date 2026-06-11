@@ -31,12 +31,12 @@ export default function Contact() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950">
+    <div className="min-h-screen bg-ink-950">
       <Navbar />
       <section className="mx-auto max-w-6xl px-5 py-20">
         <div className="grid gap-12 md:grid-cols-2">
           <div>
-            <div className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-400">Get in touch</div>
+            <div className="text-xs font-semibold uppercase tracking-[0.2em] text-tbc-400">Get in touch</div>
             <h1 className="mt-3 text-5xl font-bold tracking-tight text-white md:text-6xl">Let’s talk.</h1>
             <p className="mt-5 max-w-md text-lg text-slate-400">
               Questions about a feature, an enterprise plan, or partnership? Drop us a line and an operator
@@ -44,21 +44,21 @@ export default function Contact() {
             </p>
             <div className="mt-10 space-y-5">
               <div className="flex items-start gap-3">
-                <Mail className="mt-1 h-5 w-5 text-amber-400" />
+                <Mail className="mt-1 h-5 w-5 text-tbc-400" />
                 <div>
                   <div className="text-sm font-semibold text-white">Email</div>
                   <div className="text-sm text-slate-400">hello@tbctools.org</div>
                 </div>
               </div>
               <div className="flex items-start gap-3">
-                <Phone className="mt-1 h-5 w-5 text-amber-400" />
+                <Phone className="mt-1 h-5 w-5 text-tbc-400" />
                 <div>
                   <div className="text-sm font-semibold text-white">Operations</div>
                   <div className="text-sm text-slate-400">+1 (415) 555-0142</div>
                 </div>
               </div>
               <div className="flex items-start gap-3">
-                <MapPin className="mt-1 h-5 w-5 text-amber-400" />
+                <MapPin className="mt-1 h-5 w-5 text-tbc-400" />
                 <div>
                   <div className="text-sm font-semibold text-white">HQ</div>
                   <div className="text-sm text-slate-400">340 Bryant Street, San Francisco, CA</div>
@@ -71,21 +71,21 @@ export default function Contact() {
             <div className="grid gap-4">
               <div>
                 <label className="text-xs font-semibold uppercase tracking-wider text-slate-400">Name</label>
-                <Input className="mt-1.5 border-slate-700 bg-slate-950 text-slate-100" value={form.name} onChange={(e)=>setForm({...form,name:e.target.value})} placeholder="Your name" />
+                <Input className="mt-1.5 border-slate-700 bg-ink-950 text-slate-100" value={form.name} onChange={(e)=>setForm({...form,name:e.target.value})} placeholder="Your name" />
               </div>
               <div>
                 <label className="text-xs font-semibold uppercase tracking-wider text-slate-400">Email</label>
-                <Input className="mt-1.5 border-slate-700 bg-slate-950 text-slate-100" value={form.email} onChange={(e)=>setForm({...form,email:e.target.value})} placeholder="you@email.com" />
+                <Input className="mt-1.5 border-slate-700 bg-ink-950 text-slate-100" value={form.email} onChange={(e)=>setForm({...form,email:e.target.value})} placeholder="you@email.com" />
               </div>
               <div>
                 <label className="text-xs font-semibold uppercase tracking-wider text-slate-400">Subject</label>
-                <Input className="mt-1.5 border-slate-700 bg-slate-950 text-slate-100" value={form.subject} onChange={(e)=>setForm({...form,subject:e.target.value})} placeholder="What's this about?" />
+                <Input className="mt-1.5 border-slate-700 bg-ink-950 text-slate-100" value={form.subject} onChange={(e)=>setForm({...form,subject:e.target.value})} placeholder="What's this about?" />
               </div>
               <div>
                 <label className="text-xs font-semibold uppercase tracking-wider text-slate-400">Message</label>
-                <Textarea rows={5} className="mt-1.5 border-slate-700 bg-slate-950 text-slate-100" value={form.message} onChange={(e)=>setForm({...form,message:e.target.value})} placeholder="Tell us a bit more..." />
+                <Textarea rows={5} className="mt-1.5 border-slate-700 bg-ink-950 text-slate-100" value={form.message} onChange={(e)=>setForm({...form,message:e.target.value})} placeholder="Tell us a bit more..." />
               </div>
-              <Button type="submit" disabled={submitting} className="bg-amber-500 text-slate-950 hover:bg-amber-400 font-semibold">
+              <Button type="submit" disabled={submitting} className="bg-tbc-500 text-slate-950 hover:bg-tbc-400 font-semibold">
                 {submitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />} Send message
               </Button>
             </div>

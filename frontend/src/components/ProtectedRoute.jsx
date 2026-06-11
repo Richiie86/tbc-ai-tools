@@ -9,8 +9,8 @@ export default function ProtectedRoute({ children, operatorOnly = false }) {
 
   if (loading) {
     return (
-      <div className="grid min-h-screen place-items-center bg-slate-950">
-        <Loader2 className="h-7 w-7 animate-spin text-amber-400" />
+      <div className="grid min-h-screen place-items-center bg-ink-950">
+        <Loader2 className="h-7 w-7 animate-spin text-tbc-400" />
       </div>
     );
   }

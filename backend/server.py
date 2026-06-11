@@ -257,15 +257,23 @@ async def me(user: dict = Depends(get_current_user)):
 
 # ===== CHAT =====
 @api.get('/chat/sessions')
-async def list_sessions(user: dict = Depends(get_current_user)):
-    cursor = db.chat_sessions.find({'user_id': user['sub']}).sort('updated_at', -1).limit(200)
+async def list_sessions(user: dict = Depends(get_current_user), variant: Optional[str] = Query(None)):
+    q = {'user_id': user['sub']}
+    if variant in ('tbc1', 'tbc2'):
+        q['variant'] = variant
+    cursor = db.chat_sessions.find(q).sort('updated_at', -1).limit(200)
     sessions = [_serialize(s) async for s in cursor]
     return sessions
 
 
 @api.post('/chat/sessions')
 async def create_session(req: CreateSessionRequest, user: dict = Depends(get_current_user)):
-    s = ChatSession(user_id=user['sub'], title=req.title or 'New Chat', model=req.model or DEFAULT_MODEL)
+    s = ChatSession(
+        user_id=user['sub'],
+        title=req.title or 'New Chat',
+        model=req.model or DEFAULT_MODEL,
+        variant=req.variant or 'tbc1',
+    )
     await db.chat_sessions.insert_one(s.dict())
     return _serialize(s.dict())
 
@@ -316,7 +324,12 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
     # Ensure session
     session_id = req.session_id
     if not session_id:
-        s = ChatSession(user_id=user['sub'], title=req.message[:60] or 'New Chat', model=req.model or DEFAULT_MODEL)
+        s = ChatSession(
+            user_id=user['sub'],
+            title=req.message[:60] or 'New Chat',
+            model=req.model or DEFAULT_MODEL,
+            variant=req.variant or 'tbc1',
+        )
         await db.chat_sessions.insert_one(s.dict())
         session_id = s.id
     else:
@@ -618,6 +631,91 @@ async def op_grant_credits(user_id: str, amount: int = Query(...), _: dict = Dep
     if res.matched_count == 0:
         raise HTTPException(404, 'User not found')
     return {'success': True}
+
+
+@api.post('/operator/users/{user_id}/plan')
+async def op_set_plan(user_id: str, plan: str = Query(...), _: dict = Depends(get_current_operator)):
+    if plan not in ('free', 'starter', 'pro', 'enterprise'):
+        raise HTTPException(400, 'Invalid plan')
+    target = await db.users.find_one({'id': user_id})
+    if not target:
+        raise HTTPException(404, 'User not found')
+    update = {'plan': plan}
+    # Auto-grant credits for paid plans (idempotent: add plan credits when upgrading)
+    plan_credits = {'free': 50, 'starter': 500, 'pro': 2500, 'enterprise': 10000}
+    inc_credits = plan_credits.get(plan, 0) if plan != 'free' else 0
+    await db.users.update_one({'id': user_id}, {'$set': update, '$inc': {'credits': inc_credits} if inc_credits else {}})
+    return {'success': True, 'plan': plan, 'credits_added': inc_credits}
+
+
+# --- Codes browser (operator-only, read-only) ---
+import os.path
+
+ALLOWED_DIRS = [
+    '/app/backend',
+    '/app/frontend/src',
+]
+ALLOWED_EXT = {'.py', '.js', '.jsx', '.ts', '.tsx', '.json', '.css', '.md', '.html', '.txt', '.env.example', '.yaml', '.yml'}
+SKIP_DIRS = {'node_modules', '.git', '__pycache__', '.next', 'build', 'dist', '.venv', 'venv'}
+
+
+def _is_allowed_path(path: str) -> bool:
+    try:
+        rp = os.path.realpath(path)
+    except Exception:
+        return False
+    for base in ALLOWED_DIRS:
+        if rp == base or rp.startswith(base + os.sep):
+            return True
+    return False
+
+
+@api.get('/operator/codes/tree')
+async def op_code_tree(_: dict = Depends(get_current_operator)):
+    """Return a nested file tree of /app/backend and /app/frontend/src."""
+    def walk(base):
+        tree = []
+        try:
+            entries = sorted(os.listdir(base))
+        except Exception:
+            return tree
+        for name in entries:
+            if name in SKIP_DIRS or name.startswith('.'):
+                continue
+            full = os.path.join(base, name)
+            if os.path.isdir(full):
+                children = walk(full)
+                tree.append({'name': name, 'path': full, 'type': 'dir', 'children': children})
+            elif os.path.isfile(full):
+                ext = os.path.splitext(name)[1].lower()
+                if ext in ALLOWED_EXT or name in ('Dockerfile', 'package.json', 'requirements.txt'):
+                    try:
+                        size = os.path.getsize(full)
+                    except Exception:
+                        size = 0
+                    tree.append({'name': name, 'path': full, 'type': 'file', 'size': size})
+        return tree
+
+    return [
+        {'name': 'backend', 'path': '/app/backend', 'type': 'dir', 'children': walk('/app/backend')},
+        {'name': 'frontend/src', 'path': '/app/frontend/src', 'type': 'dir', 'children': walk('/app/frontend/src')},
+    ]
+
+
+@api.get('/operator/codes/file')
+async def op_code_file(path: str = Query(...), _: dict = Depends(get_current_operator)):
+    if not _is_allowed_path(path):
+        raise HTTPException(403, 'Path not allowed')
+    if not os.path.isfile(path):
+        raise HTTPException(404, 'File not found')
+    if os.path.getsize(path) > 1024 * 1024:  # 1 MB limit
+        raise HTTPException(413, 'File too large')
+    try:
+        with open(path, 'r', encoding='utf-8', errors='replace') as f:
+            content = f.read()
+    except Exception as e:
+        raise HTTPException(500, f'Could not read file: {e}')
+    return {'path': path, 'content': content, 'size': len(content)}
 
 
 # Include router and CORS

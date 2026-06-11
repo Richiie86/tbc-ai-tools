@@ -40,12 +40,12 @@ export default function Verify2FA() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950">
+    <div className="min-h-screen bg-ink-950">
       <Navbar minimal />
       <div className="mx-auto max-w-md px-5 py-16">
         <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-8">
           <div className="flex items-center gap-3">
-            <div className="grid h-10 w-10 place-items-center rounded-lg bg-amber-500/15 text-amber-300">
+            <div className="grid h-10 w-10 place-items-center rounded-lg bg-tbc-500/15 text-tbc-300">
               <ShieldCheck className="h-5 w-5" />
             </div>
             <div>
@@ -54,8 +54,8 @@ export default function Verify2FA() {
             </div>
           </div>
           <form onSubmit={submit} className="mt-7 space-y-4">
-            <Input maxLength={6} className="border-slate-700 bg-slate-950 text-center text-3xl tracking-[0.4em] text-amber-200" value={code} onChange={(e)=>setCode(e.target.value.replace(/\D/g,''))} placeholder="••••••" autoFocus />
-            <Button disabled={loading} className="w-full bg-amber-500 text-slate-950 hover:bg-amber-400 font-semibold">
+            <Input maxLength={6} className="border-slate-700 bg-ink-950 text-center text-3xl tracking-[0.4em] text-tbc-200" value={code} onChange={(e)=>setCode(e.target.value.replace(/\D/g,''))} placeholder="••••••" autoFocus />
+            <Button disabled={loading} className="w-full bg-tbc-500 text-slate-950 hover:bg-tbc-400 font-semibold">
               {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               Verify & continue
             </Button>
