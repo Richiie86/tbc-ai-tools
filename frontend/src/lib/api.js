@@ -36,7 +36,7 @@ export async function* streamChat({ session_id, message, model, variant, attachm
   });
   if (!res.ok) {
     let detail = 'Request failed';
-    try { const j = await res.json(); detail = j.detail || detail; } catch {}
+    try { const j = await res.json(); detail = j.detail || detail; } catch { /* non-JSON error body — keep default detail */ }
     throw new Error(detail);
   }
   const reader = res.body.getReader();
@@ -55,7 +55,7 @@ export async function* streamChat({ session_id, message, model, variant, attachm
       try {
         const ev = JSON.parse(payload);
         yield ev;
-      } catch {}
+      } catch { /* skip malformed SSE frame */ }
     }
   }
 }

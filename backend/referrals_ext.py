@@ -141,9 +141,11 @@ async def my_referral(user: dict = Depends(get_current_user)):
     paid_n = 0
     async for row in earn_cursor:
         if row['_id'] == 'accrued':
-            accrued = round(row['sum'], 2); accrued_n = row['count']
+            accrued = round(row['sum'], 2)
+            accrued_n = row['count']
         elif row['_id'] == 'paid':
-            paid = round(row['sum'], 2); paid_n = row['count']
+            paid = round(row['sum'], 2)
+            paid_n = row['count']
 
     return {
         'code': code,
