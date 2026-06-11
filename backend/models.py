@@ -55,11 +55,19 @@ class User(BaseModel):
     created_at: datetime = Field(default_factory=_now)
 
 
+class Attachment(BaseModel):
+    type: Literal['image', 'text']
+    name: str
+    mime: str
+    content: str  # base64 for image, raw text for text files
+
+
 # ===== CHAT =====
 class ChatSendRequest(BaseModel):
     session_id: Optional[str] = None
     message: str
     model: Optional[str] = 'gpt-5.4'
+    attachments: Optional[List[Attachment]] = None
 
 
 class ChatMessage(BaseModel):
