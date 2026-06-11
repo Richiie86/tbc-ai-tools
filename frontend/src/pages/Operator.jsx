@@ -76,6 +76,14 @@ export default function Operator() {
       loadAll();
     } catch { toast.error('Could not change plan'); }
   };
+  const reset2FA = async (userId, email) => {
+    if (!window.confirm(`Reset 2FA for ${email}?\n\nThe user will be asked to re-enrol on next login.`)) return;
+    try {
+      await api.post(`/operator/users/${userId}/reset-2fa`);
+      toast.success(`2FA reset for ${email}`);
+      loadAll();
+    } catch (e) { toast.error(e?.response?.data?.detail || 'Could not reset 2FA'); }
+  };
 
   const filteredUsers = useMemo(() => {
     const q = userSearch.trim().toLowerCase();
@@ -164,7 +172,29 @@ export default function Operator() {
                           <TableCell>{u.totp_enabled ? <span className="text-tbc-300">On</span> : <span className="text-tbc-200/40">Off</span>}</TableCell>
                           <TableCell className="text-xs text-tbc-200/60">{u.created_at ? new Date(u.created_at).toLocaleDateString() : '—'}</TableCell>
                           <TableCell className="text-right">
-                            <Button size="sm" variant="outline" className="border-tbc-900/60 bg-ink-900 text-tbc-100 hover:bg-ink-900/40" onClick={() => grantCredits(u.id, 100)}>+100</Button>
+                            <div className="flex justify-end gap-1.5">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                data-testid={`op-grant-credits-${u.id}`}
+                                className="border-tbc-900/60 bg-ink-900 text-tbc-100 hover:bg-ink-900/40"
+                                onClick={() => grantCredits(u.id, 100)}
+                              >
+                                +100
+                              </Button>
+                              {u.totp_enabled && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  data-testid={`op-reset-2fa-${u.id}`}
+                                  title="Reset 2FA — user will re-enrol on next login"
+                                  className="border-rose-900/60 bg-ink-900 text-rose-300 hover:bg-rose-500/10"
+                                  onClick={() => reset2FA(u.id, u.email)}
+                                >
+                                  Reset 2FA
+                                </Button>
+                              )}
+                            </div>
                           </TableCell>
                         </TableRow>
                       ))}

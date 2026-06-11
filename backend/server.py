@@ -702,6 +702,20 @@ async def op_set_plan(user_id: str, plan: str = Query(...), _: dict = Depends(ge
     return {'success': True, 'plan': plan, 'credits_added': inc_credits}
 
 
+@api.post('/operator/users/{user_id}/reset-2fa')
+async def op_reset_2fa(user_id: str, op: dict = Depends(get_current_operator)):
+    """Clear a user's TOTP secret so they can re-enrol next login. Operator-only."""
+    target = await db.users.find_one({'id': user_id}, {'id': 1, 'email': 1})
+    if not target:
+        raise HTTPException(404, 'User not found')
+    await db.users.update_one(
+        {'id': user_id},
+        {'$unset': {'totp_secret': '', 'totp_enabled': '', 'totp_pending_secret': ''}},
+    )
+    logger.info('Operator %s reset 2FA for %s', op.get('email'), target.get('email'))
+    return {'success': True, 'email': target.get('email')}
+
+
 # --- Codes browser (operator-only, read-only) ---
 import os.path
 

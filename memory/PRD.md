@@ -23,6 +23,7 @@ gold theme. Domain: **tbctools.org**.
 - ✅ **Referral sidebar banner** on every chat session (copy-link CTA).
 - ✅ Royalties + licenses module.
 - ✅ Operator Console (Plans / Treasury / Settings / Payments / Licenses / Royalties / Projects / Users).
+- ✅ **Self-serve 2FA reset** — operator can clear any user's TOTP from the Users tab (`POST /api/operator/users/:id/reset-2fa`).
 - ✅ Custom TBC gold-swirl logo (Navbar + Footer).
 
 ## Architecture cleanup (Feb 2026)
