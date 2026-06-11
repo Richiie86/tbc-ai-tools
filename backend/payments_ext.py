@@ -483,6 +483,90 @@ async def op_clear_secret(key: str = Query(...), _: dict = Depends(get_current_o
 
 
 # ===================================================================
+# Operator: Test integration connections
+# ===================================================================
+@router.post('/operator/test-connection/{provider}')
+async def op_test_connection(provider: str, _: dict = Depends(get_current_operator)):
+    """Ping a third-party API with the operator's saved keys and report success/failure.
+
+    Supported providers: paypal | stripe | resend
+    """
+    if provider == 'paypal':
+        settings = await get_settings_doc()
+        if not (settings.get('paypal_client_id') and settings.get('paypal_client_secret')):
+            return {'ok': False, 'message': 'PayPal credentials not configured.'}
+        mode = settings.get('paypal_mode', 'sandbox')
+        base = PAYPAL_BASES.get(mode, PAYPAL_BASES['sandbox'])
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            try:
+                r = await client.post(
+                    f'{base}/v1/oauth2/token',
+                    auth=(settings['paypal_client_id'], settings['paypal_client_secret']),
+                    data={'grant_type': 'client_credentials'},
+                    headers={'Accept': 'application/json'},
+                )
+            except httpx.HTTPError as e:
+                return {'ok': False, 'message': f'Network error reaching PayPal: {e}'}
+        if r.status_code == 200:
+            data = r.json()
+            return {
+                'ok': True,
+                'message': f"Connected to PayPal {mode.upper()} · app_id={data.get('app_id') or 'n/a'} · scope OK",
+            }
+        try:
+            err = r.json()
+        except Exception:
+            err = {'error_description': r.text[:200]}
+        return {'ok': False, 'message': f"PayPal {r.status_code}: {err.get('error_description') or err.get('error') or 'unknown error'}"}
+
+    if provider == 'stripe':
+        settings = await get_settings_doc()
+        key = settings.get('stripe_secret_key') or os.environ.get('STRIPE_API_KEY', '')
+        if not key:
+            return {'ok': False, 'message': 'Stripe secret key not configured.'}
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            try:
+                r = await client.get('https://api.stripe.com/v1/account', headers={'Authorization': f'Bearer {key}'})
+            except httpx.HTTPError as e:
+                return {'ok': False, 'message': f'Network error reaching Stripe: {e}'}
+        if r.status_code == 200:
+            data = r.json()
+            label = data.get('business_profile', {}).get('name') or data.get('email') or data.get('id', 'account')
+            mode = 'LIVE' if not key.startswith('sk_test_') else 'TEST'
+            return {'ok': True, 'message': f'Connected to Stripe {mode} · {label}'}
+        try:
+            err = r.json().get('error', {})
+        except Exception:
+            err = {'message': r.text[:200]}
+        return {'ok': False, 'message': f"Stripe {r.status_code}: {err.get('message') or err.get('code') or 'unknown error'}"}
+
+    if provider == 'resend':
+        api_key = os.environ.get('RESEND_API_KEY', '')
+        if not api_key:
+            return {'ok': False, 'message': 'RESEND_API_KEY not configured in backend .env'}
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            try:
+                r = await client.get('https://api.resend.com/domains', headers={'Authorization': f'Bearer {api_key}'})
+            except httpx.HTTPError as e:
+                return {'ok': False, 'message': f'Network error reaching Resend: {e}'}
+        if r.status_code == 200:
+            try:
+                data = r.json().get('data', [])
+            except Exception:
+                data = []
+            verified = [d for d in data if d.get('status') == 'verified']
+            sender = os.environ.get('SENDER_EMAIL', 'onboarding@resend.dev')
+            sender_domain = sender.split('@')[-1] if '@' in sender else sender
+            sender_ok = sender_domain == 'resend.dev' or any(d.get('name') == sender_domain and d.get('status') == 'verified' for d in data)
+            msg = f"Connected to Resend · {len(verified)}/{len(data)} domain(s) verified · sender '{sender}'"
+            msg += ' ✅' if sender_ok else ' ⚠️  (sender domain not verified — emails will be rejected)'
+            return {'ok': sender_ok, 'message': msg}
+        return {'ok': False, 'message': f"Resend {r.status_code}: {r.text[:200]}"}
+
+    raise HTTPException(400, f'Unknown provider: {provider}')
+
+
+# ===================================================================
 # PDF RECEIPTS
 # ===================================================================
 def _build_receipt_pdf(tx: dict, user: Optional[dict] = None, plan: Optional[dict] = None) -> bytes:

@@ -7,7 +7,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '../../components/ui/select';
 import { toast } from 'sonner';
-import { Loader2, KeyRound, Save, Lock, Eye, EyeOff } from 'lucide-react';
+import { Loader2, KeyRound, Save, Lock, Eye, EyeOff, Plug, Mail } from 'lucide-react';
 
 export default function SettingsTab() {
   const [settings, setSettings] = useState(null);
@@ -45,6 +45,19 @@ export default function SettingsTab() {
     try { await api.post(`/operator/settings/clear?key=${encodeURIComponent(key)}`); toast.success('Cleared'); load(); }
     catch { toast.error('Could not clear'); }
   };
+  const [testing, setTesting] = useState({});
+  const testConnection = async (provider) => {
+    setTesting((t) => ({ ...t, [provider]: true }));
+    try {
+      const { data } = await api.post(`/operator/test-connection/${provider}`);
+      if (data.ok) toast.success(data.message, { duration: 6000 });
+      else toast.error(data.message, { duration: 8000 });
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || `Could not test ${provider}`);
+    } finally {
+      setTesting((t) => ({ ...t, [provider]: false }));
+    }
+  };
   const toggleReveal = (k) => setReveal((r) => ({ ...r, [k]: !r[k] }));
 
   if (loading || !settings) return <div className="grid place-items-center py-12"><Loader2 className="h-6 w-6 animate-spin text-tbc-400" /></div>;
@@ -74,6 +87,18 @@ export default function SettingsTab() {
               <SelectItem value="live">Live</SelectItem>
             </SelectContent>
           </Select>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            data-testid="op-test-stripe"
+            disabled={testing.stripe}
+            onClick={() => testConnection('stripe')}
+            className="ml-auto border-tbc-900/60 bg-ink-900 text-tbc-100 hover:bg-tbc-500/10"
+          >
+            {testing.stripe ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Plug className="mr-1.5 h-3.5 w-3.5" />}
+            Test connection
+          </Button>
         </div>
       </Section>
 
@@ -138,6 +163,46 @@ export default function SettingsTab() {
               <SelectItem value="live">Live</SelectItem>
             </SelectContent>
           </Select>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            data-testid="op-test-paypal"
+            disabled={testing.paypal}
+            onClick={() => testConnection('paypal')}
+            className="ml-auto border-tbc-900/60 bg-ink-900 text-tbc-100 hover:bg-tbc-500/10"
+          >
+            {testing.paypal ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Plug className="mr-1.5 h-3.5 w-3.5" />}
+            Test connection
+          </Button>
+        </div>
+      </Section>
+
+      <Section icon={Mail} title="Resend (transactional emails)">
+        <div className="rounded-md border border-tbc-900/40 bg-ink-950/60 p-3 text-xs text-tbc-200/70">
+          API key + sender are configured via backend env vars (<code className="text-tbc-300">RESEND_API_KEY</code>, <code className="text-tbc-300">SENDER_EMAIL</code>). The button below verifies the key works and that the sender domain is verified at Resend.
+        </div>
+        <div className="flex items-center gap-3">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            data-testid="op-test-resend"
+            disabled={testing.resend}
+            onClick={() => testConnection('resend')}
+            className="border-tbc-900/60 bg-ink-900 text-tbc-100 hover:bg-tbc-500/10"
+          >
+            {testing.resend ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Plug className="mr-1.5 h-3.5 w-3.5" />}
+            Test connection
+          </Button>
+          <a
+            href="https://resend.com/domains"
+            target="_blank"
+            rel="noreferrer"
+            className="text-xs text-tbc-300 underline-offset-2 hover:underline"
+          >
+            Verify a domain →
+          </a>
         </div>
       </Section>
 
