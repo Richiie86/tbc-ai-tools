@@ -43,7 +43,9 @@ logger = logging.getLogger('tbc')
 # backwards compatibility with any external import of `server.db`.
 from db import db, client  # noqa: E402
 
-OPERATOR_EMAIL = os.environ.get('OPERATOR_EMAIL', 'rac.invetments.swe@gmail.com').lower()
+OPERATOR_EMAIL = os.environ.get('OPERATOR_EMAIL', 'rac.investments.swe@gmail.com').lower()
+# Historical typo'd email — migrated to OPERATOR_EMAIL on startup if found.
+_LEGACY_OPERATOR_EMAIL = 'rac.invetments.swe@gmail.com'
 OPERATOR_PASSWORD = os.environ.get('OPERATOR_PASSWORD', 'TBC@2025!Admin')
 EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY')
 STRIPE_API_KEY = os.environ.get('STRIPE_API_KEY', 'sk_test_emergent')
@@ -120,6 +122,34 @@ async def startup():
     await db.treasury.create_index('id', unique=True)
     await db.licenses.create_index('key', unique=True)
     await db.royalties.create_index([('license_id', 1), ('child_transaction_id', 1)], unique=True)
+
+    # --- One-time migration: rename historical typo'd operator email if present ---
+    if _LEGACY_OPERATOR_EMAIL != OPERATOR_EMAIL:
+        legacy = await db.users.find_one({'email': _LEGACY_OPERATOR_EMAIL})
+        if legacy:
+            collision = await db.users.find_one({'email': OPERATOR_EMAIL})
+            if collision:
+                # Both exist — drop the typo'd one to avoid duplicates
+                await db.users.delete_one({'email': _LEGACY_OPERATOR_EMAIL})
+                logger.info('Removed duplicate legacy operator account: %s', _LEGACY_OPERATOR_EMAIL)
+            else:
+                # Rename + clear 2FA so the owner can re-enrol cleanly
+                await db.users.update_one(
+                    {'email': _LEGACY_OPERATOR_EMAIL},
+                    {
+                        '$set': {'email': OPERATOR_EMAIL},
+                        '$unset': {'totp_secret': '', 'totp_enabled': '', 'totp_pending_secret': ''},
+                    },
+                )
+                logger.info('Renamed operator email %s -> %s (2FA reset)', _LEGACY_OPERATOR_EMAIL, OPERATOR_EMAIL)
+
+    # Optional emergency lockout-recovery: set RESET_OPERATOR_2FA=true to clear 2FA on next boot.
+    if os.environ.get('RESET_OPERATOR_2FA', '').lower() == 'true':
+        await db.users.update_one(
+            {'email': OPERATOR_EMAIL},
+            {'$unset': {'totp_secret': '', 'totp_enabled': '', 'totp_pending_secret': ''}},
+        )
+        logger.warning('RESET_OPERATOR_2FA flag honoured: 2FA cleared for %s', OPERATOR_EMAIL)
 
     # Seed operator user
     existing = await db.users.find_one({'email': OPERATOR_EMAIL})
