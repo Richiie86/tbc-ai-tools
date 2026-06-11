@@ -281,6 +281,9 @@ export default function Dashboard({ variant = 'tbc1' }) {
           <Link to="/pricing" className="mb-1 flex items-center gap-2 rounded-md px-2.5 py-2 text-xs font-medium text-slate-300 hover:bg-slate-800">
             <Sparkles className="h-3.5 w-3.5" /> Upgrade plan
           </Link>
+          <Link to="/refer" className="mb-1 flex items-center gap-2 rounded-md px-2.5 py-2 text-xs font-medium text-tbc-200 hover:bg-slate-800">
+            <Sparkles className="h-3.5 w-3.5 text-tbc-300" /> Refer &amp; earn 10%
+          </Link>
           <button onClick={() => { logout(); navigate('/'); }} className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-xs font-medium text-slate-300 hover:bg-slate-800">
             <LogOut className="h-3.5 w-3.5" /> Sign out
           </button>

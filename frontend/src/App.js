@@ -8,6 +8,8 @@ import Contact from './pages/Contact';
 import Pricing from './pages/Pricing';
 import PayMethod from './pages/PayMethod';
 import PayManual from './pages/PayManual';
+import ReferralLanding from './pages/ReferralLanding';
+import MyReferral from './pages/MyReferral';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Verify2FA from './pages/Verify2FA';
@@ -29,6 +31,8 @@ function App() {
             <Route path="/pricing" element={<Pricing />} />
             <Route path="/pay" element={<ProtectedRoute><PayMethod /></ProtectedRoute>} />
             <Route path="/pay/manual" element={<ProtectedRoute><PayManual /></ProtectedRoute>} />
+            <Route path="/referral/:code" element={<ReferralLanding />} />
+            <Route path="/refer" element={<ProtectedRoute><MyReferral /></ProtectedRoute>} />
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
             <Route path="/verify-2fa" element={<Verify2FA />} />

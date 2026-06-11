@@ -12,7 +12,7 @@ import { toast } from 'sonner';
 import {
   Users, CreditCard, MessageSquare, DollarSign, Loader2, ShieldCheck, Mail,
   Code2, ChevronRight, ChevronDown, FileCode, Folder, FolderOpen, Search,
-  Download, Copy, Check, Sparkles, Wallet, KeyRound, Settings as SettingsIcon, Coins,
+  Download, Copy, Check, Sparkles, Wallet, KeyRound, Settings as SettingsIcon, Coins, FolderKanban,
 } from 'lucide-react';
 
 import PlansTab from './operator/PlansTab';
@@ -21,6 +21,7 @@ import SettingsTab from './operator/SettingsTab';
 import PaymentsTab from './operator/PaymentsTab';
 import LicensesTab from './operator/LicensesTab';
 import RoyaltiesTab from './operator/RoyaltiesTab';
+import ProjectsTab from './operator/ProjectsTab';
 
 const PLANS = ['free', 'starter', 'pro', 'enterprise'];
 
@@ -110,6 +111,7 @@ export default function Operator() {
             <Tabs defaultValue="users" className="mt-10">
               <TabsList className="bg-ink-900 border border-tbc-900/60 flex flex-wrap h-auto">
                 <TabTrigger value="users" icon={Users}>Users ({users.length})</TabTrigger>
+                <TabTrigger value="projects" icon={FolderKanban}>Projects</TabTrigger>
                 <TabTrigger value="plans" icon={Sparkles}>Plans</TabTrigger>
                 <TabTrigger value="payments" icon={CreditCard}>Payments</TabTrigger>
                 <TabTrigger value="treasury" icon={Wallet}>Treasury</TabTrigger>
@@ -172,6 +174,7 @@ export default function Operator() {
               </TabsContent>
 
               <TabsContent value="plans" className="mt-5"><PlansTab /></TabsContent>
+              <TabsContent value="projects" className="mt-5"><ProjectsTab /></TabsContent>
               <TabsContent value="payments" className="mt-5"><PaymentsTab /></TabsContent>
               <TabsContent value="treasury" className="mt-5"><TreasuryTab /></TabsContent>
               <TabsContent value="licenses" className="mt-5"><LicensesTab /></TabsContent>

@@ -35,6 +35,7 @@ from models import (
     CheckoutRequest, PaymentTransaction, ContactRequest, ContactSubmission,
 )
 from payments_ext import router as payments_router, seed_defaults as seed_payment_defaults, get_plans_list, get_settings_doc
+from referrals_ext import router as referrals_router, record_referral_signup, record_referral_earning, get_or_create_referral_code
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger('tbc')
@@ -191,6 +192,17 @@ async def register(req: RegisterRequest):
         role='operator' if email == OPERATOR_EMAIL else 'user',
     )
     await db.users.insert_one(user.dict())
+    # Auto-generate referral code for the new user
+    try:
+        await get_or_create_referral_code(user.dict())
+    except Exception:
+        pass
+    # If they came via a referral code, record it
+    if req.referral_code:
+        try:
+            await record_referral_signup(user.id, user.email, req.referral_code.strip())
+        except Exception:
+            pass
     # Issue token requiring 2FA setup
     token = create_jwt(user.id, user.email, user.role, pending_2fa=False)
     return AuthResponse(token=token, pending_2fa=False, requires_2fa_setup=True, user=_public_user(user.dict()))
@@ -555,6 +567,18 @@ async def payment_status(session_id: str, http_request: Request, user: dict = De
                 {'id': tx['user_id']},
                 {'$set': {'plan': plan['id']}, '$inc': {'credits': int(plan['credits'])}},
             )
+        # Accrue referral commission if applicable
+        try:
+            await record_referral_earning(
+                transaction_id=tx['id'],
+                paid_user_id=tx['user_id'],
+                paid_user_email=tx['user_email'],
+                plan_id=tx['plan_id'],
+                amount=float(tx.get('amount', 0)),
+                currency=tx.get('currency', 'usd'),
+            )
+        except Exception:
+            pass
 
     return {
         'status': new_status,
@@ -747,6 +771,7 @@ async def op_code_file(path: str = Query(...), _: dict = Depends(get_current_ope
 # Include routers and CORS
 app.include_router(api)
 app.include_router(payments_router)
+app.include_router(referrals_router)
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,

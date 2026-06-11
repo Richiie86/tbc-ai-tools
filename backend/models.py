@@ -18,6 +18,7 @@ class RegisterRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8)
     name: Optional[str] = None
+    referral_code: Optional[str] = None
 
 
 class LoginRequest(BaseModel):
@@ -52,6 +53,8 @@ class User(BaseModel):
     totp_enabled: bool = False
     plan: Literal['free', 'starter', 'pro', 'enterprise'] = 'free'
     credits: int = 50  # free tier messages
+    referral_code: Optional[str] = None
+    referred_by_code: Optional[str] = None
     created_at: datetime = Field(default_factory=_now)
 
 
@@ -288,3 +291,71 @@ class RemittanceRequest(BaseModel):
     reference: Optional[str] = None
     note: Optional[str] = None
     royalty_ids: List[str] = []
+
+
+# ===== REFERRALS =====
+class ReferralCode(BaseModel):
+    id: str = Field(default_factory=_uid)
+    user_id: str
+    code: str          # short slug e.g. operator-username or random
+    created_at: datetime = Field(default_factory=_now)
+
+
+class ReferralClick(BaseModel):
+    id: str = Field(default_factory=_uid)
+    code: str
+    ip: Optional[str] = None
+    user_agent: Optional[str] = None
+    referrer: Optional[str] = None
+    created_at: datetime = Field(default_factory=_now)
+
+
+class ReferralEarning(BaseModel):
+    id: str = Field(default_factory=_uid)
+    referrer_user_id: str
+    referred_user_id: str
+    referred_user_email: str
+    transaction_id: str
+    plan_id: str
+    gross_amount: float
+    commission_pct: float = 10.0
+    commission_amount: float
+    currency: str = 'usd'
+    status: Literal['accrued', 'paid'] = 'accrued'
+    created_at: datetime = Field(default_factory=_now)
+
+
+class TrackClickRequest(BaseModel):
+    code: str
+    referrer: Optional[str] = None
+
+
+# ===== PROJECTS (operator) =====
+class Project(BaseModel):
+    id: str = Field(default_factory=_uid)
+    owner_id: str
+    title: str
+    description: Optional[str] = None
+    status: Literal['idea', 'active', 'paused', 'done'] = 'idea'
+    tags: List[str] = []
+    link_url: Optional[str] = None
+    chat_session_id: Optional[str] = None
+    created_at: datetime = Field(default_factory=_now)
+    updated_at: datetime = Field(default_factory=_now)
+
+
+class ProjectUpsertRequest(BaseModel):
+    title: str
+    description: Optional[str] = None
+    status: Literal['idea', 'active', 'paused', 'done'] = 'idea'
+    tags: List[str] = []
+    link_url: Optional[str] = None
+    chat_session_id: Optional[str] = None
+
+
+# ===== BRAND SETTINGS (share URLs etc) =====
+class BrandSettings(BaseModel):
+    share_base_url: str = 'https://www.tbctools.org'
+    referral_base_url_org: str = 'https://www.tbctools.org/referral'
+    referral_base_url_com: str = 'https://www.tbctools.com/referral'
+    referral_pct: float = 10.0

@@ -7,8 +7,9 @@ import { Card } from '../components/ui/card';
 import {
   Sparkles, Cpu, ShieldCheck, Zap, Code2, MessagesSquare,
   Bot, GitBranch, Layers, ArrowRight, Check, TrendingUp,
-  LineChart, Lock, Globe
+  LineChart, Lock, Globe, Share2,
 } from 'lucide-react';
+import ShareButtons from '../components/ShareButtons';
 
 function Stat({ value, label }) {
   return (
@@ -259,6 +260,16 @@ export default function Landing() {
                 View plans
               </Button>
             </Link>
+          </div>
+
+          {/* Share row */}
+          <div className="mx-auto mt-12 max-w-2xl">
+            <div className="mb-2 inline-flex items-center gap-1.5 rounded-full border border-tbc-900/60 bg-ink-900 px-3 py-1 text-xs text-tbc-300">
+              <Share2 className="h-3.5 w-3.5" /> Share TBC AI Control
+            </div>
+            <div className="flex justify-center">
+              <ShareButtons url="https://www.tbctools.org" text="I'm using TBC AI Control to build apps faster. Try it:" />
+            </div>
           </div>
         </div>
       </section>

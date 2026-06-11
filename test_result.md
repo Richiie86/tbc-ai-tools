@@ -315,6 +315,43 @@ backend:
           agent: "testing"
           comment: "✅ PASS - GET /api/license/agreement returns public license agreement with version, title, royalty_pct (10.0), and full text."
 
+  - task: "Brand settings (public and operator)"
+    implemented: true
+    working: true
+    file: "referrals_ext.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: "✅ PASS - GET /api/brand/settings (public) returns share_base_url, referral_base_url_org (https://www.tbctools.org/referral), referral_base_url_com (https://www.tbctools.com/referral), referral_pct (10.0). GET /api/operator/brand-settings returns same values. PUT /api/operator/brand-settings updates referral_pct successfully (tested 15% then back to 10%, verified via public endpoint)."
+
+  - task: "Referral system (user and operator)"
+    implemented: true
+    working: true
+    file: "referrals_ext.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: "✅ PASS - Complete referral flow working. Register user → GET /api/referral/me returns auto-generated code (slug from email), share_url_org, share_url_com, commission_pct=10, stats (clicks, signups, accrued_usd, paid_usd). POST /api/referral/track records clicks correctly (tracked 2 clicks, verified count). Register second user with referral_code → first user's stats.signups incremented to 1. GET /api/operator/referrals returns list with user_email, clicks, signups, accrued_usd, paid_usd for all referral codes."
+
+  - task: "Projects CRUD (operator)"
+    implemented: true
+    working: true
+    file: "referrals_ext.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: "✅ PASS - All project CRUD operations working. GET /api/operator/projects returns empty list initially. POST creates project with title='My SaaS', description='Test', status='active', tags=['mvp'], returns id. PUT updates project status to 'done'. DELETE removes project. Authorization: regular user calling GET /api/operator/projects returns 403."
+
+
 frontend:
   - task: "Landing, About, Contact, Pricing pages"
     implemented: true
@@ -370,7 +407,7 @@ frontend:
 metadata:
   created_by: "main_agent"
   version: "1.0"
-  test_sequence: 4
+  test_sequence: 5
   run_ui: true
 
 test_plan:
@@ -388,6 +425,9 @@ agent_communication:
       message: "Switched DEFAULT_MODEL to claude-sonnet-4-6 and removed gpt-5.4 from model list. Updated plan feature descriptions. Backend is fully working."
     - agent: "testing"
       message: "✅ Backend testing complete. Executed comprehensive test suite covering all 25 flows. Results: 26/27 tests PASSED. All core functionality working: auth (register/login/2FA), chat sessions CRUD, chat streaming (Claude & Gemini), Stripe payments, contact form, operator console, authorization. Minor issue: gpt-5.4 model name not available in Emergent LLM API, but streaming infrastructure fully functional (verified with Claude and Gemini). Backend is production-ready."
+    - agent: "testing"
+      message: "✅ NEW ENDPOINTS TESTING COMPLETE (referrals + projects + brand settings). Executed comprehensive test suite for all new endpoints. Results: 22/22 tests PASSED (100%). All features working: Brand settings (public GET returns correct values, operator GET/PUT updates referral_pct successfully), Referral system (auto-generated codes from email slugs, click tracking, signup tracking, commission calculation, operator list with stats), Projects CRUD (GET/POST/PUT/DELETE all working, authorization enforced). Test flow: (1) Public brand settings verified, (2) Registered user, got referral code 'test-ref-1781209829', (3) Tracked 2 clicks, verified count, (4) Registered second user with referral code, verified signups=1, (5) Operator endpoints all working, (6) Updated referral_pct to 15% and back to 10%, (7) Created/updated/deleted project, (8) Regular user correctly denied access (403). All endpoints production-ready."
+
     - agent: "testing"
       message: "✅ Frontend testing complete. Executed comprehensive UI test suite covering all 8 test scenarios. Results: ALL TESTS PASSED. Landing page: Hero text, model strip (Claude Opus 4.7, Claude Sonnet 4.6, GPT-5, Gemini), theme, and CTA navigation working. Register & 2FA: Complete flow works (test_1781204561@example.com created, 2FA enabled with pyotp-generated code). Dashboard: Empty state, chat streaming, model picker (OpenAI, Anthropic visible), sidebar features, new chat all working. Pricing: All 3 plans visible with intro pricing, Stripe redirect works. Contact: Form submission works with success toast. Sign out: Works correctly. Operator login: Works correctly - redirects to /setup-2fa (operator requires 2FA setup: requires_2fa_setup=true, totp_enabled=false). Minor: Google provider not visible in model picker dropdown. Application is production-ready."
     - agent: "testing"

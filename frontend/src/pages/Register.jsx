@@ -19,7 +19,9 @@ export default function Register() {
     if (!form.email || form.password.length < 8) return toast.error('Email and 8+ char password required');
     setLoading(true);
     try {
-      const { data } = await api.post('/auth/register', form);
+      const referral_code = localStorage.getItem('tbc_ref_code') || undefined;
+      const { data } = await api.post('/auth/register', { ...form, referral_code });
+      if (referral_code) localStorage.removeItem('tbc_ref_code');
       saveToken(data.token);
       await refresh();
       toast.success('Welcome! Now secure your account with 2FA.');
