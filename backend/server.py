@@ -12,7 +12,7 @@ import json
 import logging
 import asyncio
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 
 from dotenv import load_dotenv
@@ -125,6 +125,8 @@ async def startup():
     await db.treasury.create_index('id', unique=True)
     await db.licenses.create_index('key', unique=True)
     await db.royalties.create_index([('license_id', 1), ('child_transaction_id', 1)], unique=True)
+    # TTL index for password-reset rate limiter (auto-cleanup at 1h to be safe)
+    await db.password_reset_throttle.create_index('created_at', expireAfterSeconds=3600)
 
     # --- One-time migration: rename historical typo'd operator email if present ---
     if _LEGACY_OPERATOR_EMAIL != OPERATOR_EMAIL:
@@ -258,9 +260,34 @@ async def login(req: LoginRequest):
 
 
 @api.post('/auth/forgot-password')
-async def forgot_password(req: ForgotPasswordRequest):
+async def forgot_password(req: ForgotPasswordRequest, request: Request):
     """Send a password-reset magic link. Always returns 200 to prevent email enumeration."""
     email = req.email.lower().strip()
+    ip = (request.client.host if request.client else 'unknown')
+    # Trust X-Forwarded-For first hop when behind a proxy (K8s ingress)
+    fwd = request.headers.get('x-forwarded-for')
+    if fwd:
+        ip = fwd.split(',')[0].strip() or ip
+
+    # --- Rate limit: 3 / 15min per email, 10 / 15min per IP ---
+    now = datetime.now(timezone.utc)
+    window_start = now - timedelta(minutes=15)
+    email_recent = await db.password_reset_throttle.count_documents(
+        {'email': email, 'created_at': {'$gte': window_start}}
+    )
+    ip_recent = await db.password_reset_throttle.count_documents(
+        {'ip': ip, 'created_at': {'$gte': window_start}}
+    )
+    if email_recent >= 3 or ip_recent >= 10:
+        logger.warning(
+            'forgot-password rate-limited (email=%s ip=%s email_recent=%d ip_recent=%d)',
+            email, ip, email_recent, ip_recent,
+        )
+        # Same generic response — never tell the caller they hit a limit.
+        return {'success': True, 'message': 'If that email is registered, a reset link has been sent.'}
+
+    await db.password_reset_throttle.insert_one({'email': email, 'ip': ip, 'created_at': now})
+
     user = await db.users.find_one({'email': email}, {'id': 1, 'email': 1, 'name': 1})
     if user:
         token = create_password_reset_token(user['id'], user['email'])
