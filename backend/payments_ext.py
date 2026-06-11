@@ -6,6 +6,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional, List
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse, Response
 import segno
@@ -130,6 +131,141 @@ async def public_active_treasury(method: str = Query(...)):
         qr.save(buf, kind='png', scale=6, border=2, dark='#d4af37', light='#0a0a0a')
         out['qr_data_url'] = 'data:image/png;base64,' + base64.b64encode(buf.getvalue()).decode('ascii')
     return out
+
+
+# ===================================================================
+# PAYPAL (Orders v2 — redirect flow, pure REST)
+# ===================================================================
+PAYPAL_BASES = {'sandbox': 'https://api-m.sandbox.paypal.com', 'live': 'https://api-m.paypal.com'}
+
+
+async def _paypal_token(settings: dict) -> tuple[str, str]:
+    """Return (access_token, base_url). Raises HTTPException if credentials missing."""
+    cid = settings.get('paypal_client_id')
+    secret = settings.get('paypal_client_secret')
+    mode = settings.get('paypal_mode', 'sandbox')
+    if not cid or not secret:
+        raise HTTPException(400, 'PayPal credentials not configured by operator')
+    base = PAYPAL_BASES.get(mode, PAYPAL_BASES['sandbox'])
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        r = await client.post(
+            f'{base}/v1/oauth2/token',
+            auth=(cid, secret),
+            data={'grant_type': 'client_credentials'},
+            headers={'Accept': 'application/json'},
+        )
+    if r.status_code != 200:
+        logger.error('PayPal token error: %s %s', r.status_code, r.text)
+        raise HTTPException(502, 'PayPal authentication failed')
+    return r.json()['access_token'], base
+
+
+class PayPalCreateRequest:  # pragma: no cover (replaced below with pydantic)
+    pass
+
+
+from pydantic import BaseModel
+
+
+class PayPalCreateReq(BaseModel):
+    plan_id: str
+    origin_url: str
+
+
+@router.post('/payments/paypal/create')
+async def paypal_create_order(req: PayPalCreateReq, user: dict = Depends(get_current_user)):
+    settings = await get_settings_doc()
+    if not settings.get('enable_paypal'):
+        raise HTTPException(400, 'PayPal is disabled')
+    plans = await get_plans_list()
+    plan = next((p for p in plans if p['id'] == req.plan_id), None)
+    if not plan:
+        raise HTTPException(404, 'Plan not found')
+
+    token, base = await _paypal_token(settings)
+    return_url = f'{req.origin_url.rstrip("/")}/pay/paypal/return'
+    cancel_url = f'{req.origin_url.rstrip("/")}/pay/paypal/cancel'
+
+    body = {
+        'intent': 'CAPTURE',
+        'purchase_units': [{
+            'reference_id': req.plan_id,
+            'description': f"TBC AI Control — {plan['name']} plan",
+            'amount': {'currency_code': 'USD', 'value': f"{float(plan['price']):.2f}"},
+        }],
+        'application_context': {
+            'brand_name': 'TBC AI Control',
+            'user_action': 'PAY_NOW',
+            'return_url': return_url,
+            'cancel_url': cancel_url,
+        },
+    }
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        r = await client.post(
+            f'{base}/v2/checkout/orders',
+            headers={'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'},
+            json=body,
+        )
+    if r.status_code not in (200, 201):
+        logger.error('PayPal create order error: %s %s', r.status_code, r.text)
+        raise HTTPException(502, 'Could not create PayPal order')
+    data = r.json()
+    approval = next((link['href'] for link in data.get('links', []) if link.get('rel') == 'approve'), None)
+    if not approval:
+        raise HTTPException(502, 'PayPal did not return approval URL')
+
+    # Persist a pending transaction so we can confirm on capture
+    db = await get_db()
+    tx = PaymentTransaction(
+        session_id=data['id'],
+        user_id=user['sub'],
+        user_email=user['email'],
+        plan_id=req.plan_id,
+        amount=float(plan['price']),
+        currency='usd',
+        status='initiated',
+        payment_status='pending',
+        metadata={'method': 'paypal', 'paypal_mode': settings.get('paypal_mode', 'sandbox')},
+    )
+    await db.payment_transactions.insert_one(tx.dict())
+    return {'order_id': data['id'], 'approval_url': approval}
+
+
+@router.post('/payments/paypal/capture/{order_id}')
+async def paypal_capture_order(order_id: str, user: dict = Depends(get_current_user)):
+    settings = await get_settings_doc()
+    token, base = await _paypal_token(settings)
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        r = await client.post(
+            f'{base}/v2/checkout/orders/{order_id}/capture',
+            headers={'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'},
+        )
+    if r.status_code not in (200, 201):
+        logger.error('PayPal capture error: %s %s', r.status_code, r.text)
+        raise HTTPException(502, 'PayPal capture failed')
+    data = r.json()
+    if data.get('status') != 'COMPLETED':
+        raise HTTPException(400, f"PayPal status is {data.get('status')}")
+
+    db = await get_db()
+    tx = await db.payment_transactions.find_one({'session_id': order_id})
+    if not tx:
+        raise HTTPException(404, 'Transaction not found')
+    if tx.get('payment_status') == 'paid':
+        return {'already_paid': True, 'plan_id': tx['plan_id']}
+
+    plans = await get_plans_list()
+    plan = next((p for p in plans if p['id'] == tx['plan_id']), None)
+    await db.payment_transactions.update_one(
+        {'session_id': order_id},
+        {'$set': {'payment_status': 'paid', 'status': 'paid', 'updated_at': datetime.now(timezone.utc)}},
+    )
+    if plan:
+        await db.users.update_one(
+            {'id': tx['user_id']},
+            {'$set': {'plan': plan['id']}, '$inc': {'credits': int(plan['credits'])}},
+        )
+    return {'success': True, 'plan_id': tx['plan_id']}
 
 
 # ===================================================================
@@ -354,7 +490,7 @@ def _build_receipt_pdf(tx: dict, user: Optional[dict] = None, plan: Optional[dic
     doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=20*mm, rightMargin=20*mm, topMargin=18*mm, bottomMargin=15*mm)
     styles = getSampleStyleSheet()
     h1 = ParagraphStyle('h1', parent=styles['Heading1'], fontName='Helvetica-Bold', fontSize=22, textColor=colors.HexColor('#c89c2a'), spaceAfter=4)
-    h2 = ParagraphStyle('h2', parent=styles['Heading2'], fontName='Helvetica-Bold', fontSize=11, textColor=colors.HexColor('#3a2c08'), spaceAfter=6)
+    h2 = ParagraphStyle('h2', parent=styles['Heading2'], fontName='Helvetica-Bold', fontSize=11, textColor=colors.HexColor('#3a2c08'), spaceAfter=6)  # noqa: F841
     body = ParagraphStyle('body', parent=styles['BodyText'], fontName='Helvetica', fontSize=10, textColor=colors.HexColor('#1f2937'), leading=14)
     muted = ParagraphStyle('m', parent=styles['BodyText'], fontName='Helvetica', fontSize=9, textColor=colors.HexColor('#6b7280'))
 
@@ -457,7 +593,7 @@ async def op_tx_export(
     doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=20*mm, rightMargin=20*mm, topMargin=18*mm, bottomMargin=15*mm)
     styles = getSampleStyleSheet()
     h1 = ParagraphStyle('h1', parent=styles['Heading1'], fontName='Helvetica-Bold', fontSize=20, textColor=colors.HexColor('#c89c2a'), spaceAfter=4)
-    h2 = ParagraphStyle('h2', parent=styles['Heading2'], fontName='Helvetica-Bold', fontSize=12, textColor=colors.HexColor('#3a2c08'), spaceAfter=6)
+    h2 = ParagraphStyle('h2', parent=styles['Heading2'], fontName='Helvetica-Bold', fontSize=12, textColor=colors.HexColor('#3a2c08'), spaceAfter=6)  # noqa: F841
     body = ParagraphStyle('body', parent=styles['BodyText'], fontName='Helvetica', fontSize=10, textColor=colors.HexColor('#1f2937'))
     muted = ParagraphStyle('m', parent=styles['BodyText'], fontName='Helvetica', fontSize=9, textColor=colors.HexColor('#6b7280'))
 

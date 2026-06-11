@@ -2,7 +2,8 @@ import React from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { Button } from './ui/button';
 import { useAuth } from '../context/AuthContext';
-import { Cpu, LayoutDashboard, LogOut, ShieldCheck, Sparkles, Bot } from 'lucide-react';
+import { LayoutDashboard, LogOut, ShieldCheck, Sparkles, Bot } from 'lucide-react';
+import Logo from './Logo';
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent,
   DropdownMenuItem, DropdownMenuSeparator, DropdownMenuLabel,
@@ -18,8 +19,8 @@ export default function Navbar({ minimal = false }) {
     <header className="sticky top-0 z-40 w-full border-b border-slate-800/80 bg-ink-950/70 backdrop-blur-xl">
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-5">
         <Link to="/" className="flex items-center gap-2.5">
-          <div className="relative grid h-9 w-9 place-items-center rounded-lg bg-gradient-to-br from-tbc-300 to-tbc-500 shadow-lg shadow-tbc-500/30">
-            <Cpu className="h-5 w-5 text-slate-950" strokeWidth={2.4} />
+          <div className="relative grid h-9 w-9 place-items-center overflow-hidden rounded-lg bg-ink-950 ring-1 ring-tbc-500/30 shadow-lg shadow-tbc-500/20">
+            <img src="/brand/logo.jpg" alt="TBC AI Control" className="h-full w-full object-cover" draggable={false} />
           </div>
           <div className="leading-tight">
             <div className="text-[15px] font-bold tracking-tight text-white">TBC AI Control</div>

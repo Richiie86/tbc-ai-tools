@@ -8,6 +8,7 @@ import Contact from './pages/Contact';
 import Pricing from './pages/Pricing';
 import PayMethod from './pages/PayMethod';
 import PayManual from './pages/PayManual';
+import PayPalReturn from './pages/PayPalReturn';
 import ReferralLanding from './pages/ReferralLanding';
 import MyReferral from './pages/MyReferral';
 import Login from './pages/Login';
@@ -31,6 +32,8 @@ function App() {
             <Route path="/pricing" element={<Pricing />} />
             <Route path="/pay" element={<ProtectedRoute><PayMethod /></ProtectedRoute>} />
             <Route path="/pay/manual" element={<ProtectedRoute><PayManual /></ProtectedRoute>} />
+            <Route path="/pay/paypal/return" element={<ProtectedRoute><PayPalReturn /></ProtectedRoute>} />
+            <Route path="/pay/paypal/cancel" element={<Navigate to="/pricing" replace />} />
             <Route path="/referral/:code" element={<ReferralLanding />} />
             <Route path="/refer" element={<ProtectedRoute><MyReferral /></ProtectedRoute>} />
             <Route path="/login" element={<Login />} />

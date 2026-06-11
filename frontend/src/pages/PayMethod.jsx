@@ -47,7 +47,11 @@ export default function PayMethod() {
       }
       if (m.id === 'crypto_manual') { navigate(`/pay/manual?plan=${planId}&method=crypto_manual`); return; }
       if (m.id === 'bank') { navigate(`/pay/manual?plan=${planId}&method=bank`); return; }
-      if (m.id === 'paypal') { toast.info('PayPal is not fully configured yet — the operator must add credentials.'); }
+      if (m.id === 'paypal') {
+        const { data } = await api.post('/payments/paypal/create', { plan_id: planId, origin_url: window.location.origin });
+        window.location.href = data.approval_url;
+        return;
+      }
       if (m.id === 'crypto_auto') { toast.info('NOWPayments is not fully configured yet — the operator must add an API key.'); }
     } catch (e) {
       toast.error(e?.response?.data?.detail || 'Could not start payment');

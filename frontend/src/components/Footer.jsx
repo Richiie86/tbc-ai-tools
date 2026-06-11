@@ -1,6 +1,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Cpu, Github, Twitter, Linkedin } from 'lucide-react';
+import { Github, Twitter, Linkedin } from 'lucide-react';
+import Logo from './Logo';
 
 export default function Footer() {
   return (
@@ -8,8 +9,8 @@ export default function Footer() {
       <div className="mx-auto grid max-w-7xl gap-10 px-5 md:grid-cols-4">
         <div>
           <Link to="/" className="flex items-center gap-2.5">
-            <div className="grid h-9 w-9 place-items-center rounded-lg bg-gradient-to-br from-tbc-300 to-tbc-500">
-              <Cpu className="h-5 w-5 text-slate-950" strokeWidth={2.4} />
+            <div className="grid h-9 w-9 place-items-center overflow-hidden rounded-lg bg-ink-950 ring-1 ring-tbc-500/30">
+              <img src="/brand/logo.jpg" alt="TBC AI Control" className="h-full w-full object-cover" draggable={false} />
             </div>
             <div className="leading-tight">
               <div className="text-[15px] font-bold text-white">TBC AI Control</div>
