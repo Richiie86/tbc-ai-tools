@@ -29,6 +29,54 @@ def verify_password(plain: str, hashed: str) -> bool:
         return False
 
 
+def validate_password_strength(password: str) -> Optional[str]:
+    """Return None if password is strong enough, otherwise an error message.
+
+    Rules: min 10 chars + at least 3 of {upper, lower, digit, symbol}.
+    """
+    if not password or len(password) < 10:
+        return 'Password must be at least 10 characters long.'
+    if len(password) > 128:
+        return 'Password is too long (max 128 characters).'
+    classes = 0
+    if any(c.islower() for c in password):
+        classes += 1
+    if any(c.isupper() for c in password):
+        classes += 1
+    if any(c.isdigit() for c in password):
+        classes += 1
+    if any(not c.isalnum() for c in password):
+        classes += 1
+    if classes < 3:
+        return 'Password must include at least 3 of: lowercase, uppercase, digit, symbol.'
+    return None
+
+
+def create_password_reset_token(user_id: str, email: str) -> str:
+    """30-minute single-use reset token. The `prt` claim distinguishes it from login tokens."""
+    payload = {
+        'sub': user_id,
+        'email': email,
+        'prt': True,  # password-reset token marker
+        'iat': datetime.now(timezone.utc),
+        'exp': datetime.now(timezone.utc) + timedelta(minutes=30),
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALG)
+
+
+def decode_password_reset_token(token: str) -> dict:
+    """Validates a password-reset token. Raises 400 with a friendly message."""
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALG])
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=400, detail='Reset link has expired. Please request a new one.')
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=400, detail='Invalid reset link.')
+    if not payload.get('prt'):
+        raise HTTPException(status_code=400, detail='Invalid reset link.')
+    return payload
+
+
 def create_jwt(user_id: str, email: str, role: str, pending_2fa: bool = False) -> str:
     payload = {
         'sub': user_id,

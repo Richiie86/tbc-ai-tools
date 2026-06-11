@@ -27,9 +27,12 @@ from auth_utils import (
     hash_password, verify_password, create_jwt, decode_jwt,
     get_current_user, get_current_operator,
     generate_totp_secret, get_totp_uri, generate_qr_data_url, verify_totp,
+    validate_password_strength, create_password_reset_token, decode_password_reset_token,
 )
+from email_utils import send_email, render_password_reset_email
 from models import (
     RegisterRequest, LoginRequest, Verify2FARequest, Setup2FAResponse, AuthResponse, User,
+    ForgotPasswordRequest, ResetPasswordRequest,
     ChatSendRequest, ChatMessage, ChatSession, CreateSessionRequest, RenameSessionRequest,
     CheckoutRequest, PaymentTransaction, ContactRequest, ContactSubmission,
 )
@@ -213,6 +216,9 @@ async def register(req: RegisterRequest):
     email = req.email.lower()
     if await db.users.find_one({'email': email}):
         raise HTTPException(400, 'Email already registered')
+    strength_err = validate_password_strength(req.password)
+    if strength_err:
+        raise HTTPException(400, strength_err)
     user = User(
         email=email,
         password_hash=hash_password(req.password),
@@ -249,6 +255,53 @@ async def login(req: LoginRequest):
     # No 2FA setup yet — issue full token but flag for setup
     token = create_jwt(user['id'], user['email'], user.get('role', 'user'), pending_2fa=False)
     return AuthResponse(token=token, pending_2fa=False, requires_2fa_setup=True, user=_public_user(user))
+
+
+@api.post('/auth/forgot-password')
+async def forgot_password(req: ForgotPasswordRequest):
+    """Send a password-reset magic link. Always returns 200 to prevent email enumeration."""
+    email = req.email.lower().strip()
+    user = await db.users.find_one({'email': email}, {'id': 1, 'email': 1, 'name': 1})
+    if user:
+        token = create_password_reset_token(user['id'], user['email'])
+        app_url = os.environ.get('PUBLIC_APP_URL', 'https://tbctools.org').rstrip('/')
+        reset_url = f'{app_url}/reset-password?token={token}'
+        try:
+            html = render_password_reset_email(user.get('name') or user['email'], reset_url)
+            await send_email(user['email'], 'Reset your TBC AI Control password', html)
+        except Exception as e:
+            # Don't leak failures to caller — log and still return 200.
+            logger.error('Password reset email failed for %s: %s', email, e)
+    # Always-200 anti-enumeration response
+    return {'success': True, 'message': 'If that email is registered, a reset link has been sent.'}
+
+
+@api.post('/auth/reset-password', response_model=AuthResponse)
+async def reset_password(req: ResetPasswordRequest):
+    strength_err = validate_password_strength(req.new_password)
+    if strength_err:
+        raise HTTPException(400, strength_err)
+    payload = decode_password_reset_token(req.token)
+    user = await db.users.find_one({'id': payload['sub']})
+    if not user:
+        raise HTTPException(400, 'Invalid reset link.')
+    new_hash = hash_password(req.new_password)
+    # Clear the user's TOTP state on a password reset — owner regains the account cleanly.
+    await db.users.update_one(
+        {'id': user['id']},
+        {
+            '$set': {'password_hash': new_hash},
+            '$unset': {'totp_secret': '', 'totp_enabled': '', 'totp_pending_secret': ''},
+        },
+    )
+    logger.info('Password reset completed for %s', user['email'])
+    token = create_jwt(user['id'], user['email'], user.get('role', 'user'), pending_2fa=False)
+    return AuthResponse(
+        token=token,
+        pending_2fa=False,
+        requires_2fa_setup=(user.get('role') == 'operator'),
+        user=_public_user({**user, 'totp_enabled': False}),
+    )
 
 
 @api.post('/auth/2fa/setup', response_model=Setup2FAResponse)

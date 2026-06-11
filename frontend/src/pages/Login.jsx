@@ -68,6 +68,11 @@ export default function Login() {
               {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               Sign in
             </Button>
+            <div className="text-right">
+              <Link to="/forgot-password" className="text-xs font-medium text-tbc-300 hover:text-tbc-200" data-testid="login-forgot-password">
+                Forgot password?
+              </Link>
+            </div>
           </form>
 
           <div className="mt-5 flex items-center justify-center gap-2 text-xs text-slate-500">

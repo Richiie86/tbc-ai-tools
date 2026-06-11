@@ -7,6 +7,8 @@ import { Input } from '../components/ui/input';
 import { useAuth } from '../context/AuthContext';
 import { toast } from 'sonner';
 import { Loader2, UserPlus } from 'lucide-react';
+import PasswordStrengthMeter from '../components/PasswordStrengthMeter';
+import { evaluatePassword } from '../lib/passwordStrength';
 
 export default function Register() {
   const [form, setForm] = useState({ name: '', email: '', password: '' });
@@ -16,7 +18,10 @@ export default function Register() {
 
   const submit = async (e) => {
     e.preventDefault();
-    if (!form.email || form.password.length < 8) return toast.error('Email and 8+ char password required');
+    if (!form.email) return toast.error('Email is required');
+    if (!evaluatePassword(form.password).meetsMinimum) {
+      return toast.error('Password does not meet the strength requirements yet.');
+    }
     setLoading(true);
     try {
       const referral_code = localStorage.getItem('tbc_ref_code') || undefined;
@@ -58,8 +63,9 @@ export default function Register() {
               <Input className="mt-1.5 border-slate-700 bg-ink-950 text-slate-100" type="email" value={form.email} onChange={(e)=>setForm({...form,email:e.target.value})} placeholder="you@example.com" />
             </div>
             <div>
-              <label className="text-xs font-semibold uppercase tracking-wider text-slate-400">Password <span className="text-slate-500 normal-case">(min 8 chars)</span></label>
-              <Input className="mt-1.5 border-slate-700 bg-ink-950 text-slate-100" type="password" value={form.password} onChange={(e)=>setForm({...form,password:e.target.value})} placeholder="••••••••" />
+              <label className="text-xs font-semibold uppercase tracking-wider text-slate-400">Password <span className="text-slate-500 normal-case">(min 10 chars · 3+ classes)</span></label>
+              <Input className="mt-1.5 border-slate-700 bg-ink-950 text-slate-100" type="password" value={form.password} onChange={(e)=>setForm({...form,password:e.target.value})} placeholder="••••••••••" />
+              <PasswordStrengthMeter password={form.password} />
             </div>
             <Button disabled={loading} type="submit" className="w-full bg-tbc-500 text-slate-950 hover:bg-tbc-400 font-semibold">
               {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}

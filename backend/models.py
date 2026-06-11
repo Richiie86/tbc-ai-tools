@@ -16,7 +16,7 @@ def _uid():
 # ===== AUTH =====
 class RegisterRequest(BaseModel):
     email: EmailStr
-    password: str = Field(min_length=8)
+    password: str = Field(min_length=10, max_length=128)
     name: Optional[str] = None
     referral_code: Optional[str] = None
 
@@ -28,6 +28,15 @@ class LoginRequest(BaseModel):
 
 class Verify2FARequest(BaseModel):
     code: str
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str = Field(min_length=10, max_length=128)
 
 
 class Setup2FAResponse(BaseModel):

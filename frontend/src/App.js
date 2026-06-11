@@ -9,6 +9,8 @@ import Pricing from './pages/Pricing';
 import PayMethod from './pages/PayMethod';
 import PayManual from './pages/PayManual';
 import PayPalReturn from './pages/PayPalReturn';
+import ForgotPassword from './pages/ForgotPassword';
+import ResetPassword from './pages/ResetPassword';
 import ReferralLanding from './pages/ReferralLanding';
 import MyReferral from './pages/MyReferral';
 import Login from './pages/Login';
@@ -38,6 +40,8 @@ function App() {
             <Route path="/refer" element={<ProtectedRoute><MyReferral /></ProtectedRoute>} />
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
+            <Route path="/forgot-password" element={<ForgotPassword />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
             <Route path="/verify-2fa" element={<Verify2FA />} />
             <Route path="/setup-2fa" element={<ProtectedRoute><Setup2FA /></ProtectedRoute>} />
             <Route path="/dashboard" element={<ProtectedRoute><Dashboard variant="tbc1" /></ProtectedRoute>} />
