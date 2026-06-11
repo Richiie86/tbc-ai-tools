@@ -279,7 +279,9 @@ async def list_sessions(user: dict = Depends(get_current_user), variant: Optiona
     q = {'user_id': user['sub']}
     if variant in ('tbc1', 'tbc2'):
         q['variant'] = variant
-    cursor = db.chat_sessions.find(q).sort('updated_at', -1).limit(200)
+    cursor = db.chat_sessions.find(
+        q, {'id': 1, 'title': 1, 'model': 1, 'variant': 1, 'created_at': 1, 'updated_at': 1}
+    ).sort('updated_at', -1).limit(200)
     sessions = [_serialize(s) async for s in cursor]
     return sessions
 
@@ -301,7 +303,7 @@ async def session_messages(session_id: str, user: dict = Depends(get_current_use
     s = await db.chat_sessions.find_one({'id': session_id, 'user_id': user['sub']})
     if not s:
         raise HTTPException(404, 'Session not found')
-    cursor = db.chat_messages.find({'session_id': session_id}).sort('created_at', 1)
+    cursor = db.chat_messages.find({'session_id': session_id}).sort('created_at', 1).limit(1000)
     msgs = [_serialize(m) async for m in cursor]
     return {'session': _serialize(s), 'messages': msgs}
 
@@ -360,7 +362,9 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
     await db.chat_messages.insert_one(user_msg.dict())
 
     # Build chat with prior history
-    history_cursor = db.chat_messages.find({'session_id': session_id}).sort('created_at', 1)
+    history_cursor = db.chat_messages.find(
+        {'session_id': session_id}, {'role': 1, 'content': 1, 'created_at': 1}
+    ).sort('created_at', 1).limit(100)
     history = [m async for m in history_cursor]
 
     chat = LlmChat(
@@ -636,7 +640,9 @@ async def op_users(_: dict = Depends(get_current_operator)):
 
 @api.get('/operator/transactions')
 async def op_transactions(_: dict = Depends(get_current_operator)):
-    cursor = db.payment_transactions.find({}).sort('created_at', -1).limit(500)
+    cursor = db.payment_transactions.find(
+        {}, {'metadata.proof': 0, 'metadata.proof_image_base64': 0}
+    ).sort('created_at', -1).limit(500)
     txs = [_serialize(t) async for t in cursor]
     return txs
 

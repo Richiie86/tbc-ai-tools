@@ -175,34 +175,77 @@ async def my_referral_earnings(user: dict = Depends(get_current_user)):
 # ===================================================================
 @router.get('/operator/referrals')
 async def op_list_referrals(_: dict = Depends(get_current_operator)):
+    """Operator dashboard of all referral codes — batched to avoid N+1."""
     db = await get_db()
-    codes = []
-    async for r in db.referral_codes.find({}).sort('created_at', -1).limit(500):
-        u = await db.users.find_one({'id': r['user_id']})
-        clicks = await db.referral_clicks.count_documents({'code': r['code']})
-        signups = await db.users.count_documents({'referred_by_code': r['code']})
-        accrued_doc = await db.referral_earnings.aggregate([
-            {'$match': {'referrer_user_id': r['user_id'], 'status': 'accrued'}},
-            {'$group': {'_id': None, 'sum': {'$sum': '$commission_amount'}, 'count': {'$sum': 1}}},
-        ]).to_list(1)
-        paid_doc = await db.referral_earnings.aggregate([
-            {'$match': {'referrer_user_id': r['user_id'], 'status': 'paid'}},
-            {'$group': {'_id': None, 'sum': {'$sum': '$commission_amount'}, 'count': {'$sum': 1}}},
-        ]).to_list(1)
-        codes.append({
+    # 1) Page of codes (most recent first)
+    codes_docs = await db.referral_codes.find(
+        {}, {'code': 1, 'user_id': 1, 'created_at': 1}
+    ).sort('created_at', -1).limit(500).to_list(500)
+    if not codes_docs:
+        return []
+
+    user_ids = list({r['user_id'] for r in codes_docs})
+    code_strs = [r['code'] for r in codes_docs]
+
+    # 2) One $in query per dimension (instead of one per code)
+    users_by_id = {
+        u['id']: u
+        async for u in db.users.find(
+            {'id': {'$in': user_ids}}, {'id': 1, 'email': 1, 'name': 1}
+        )
+    }
+
+    clicks_pipeline = [
+        {'$match': {'code': {'$in': code_strs}}},
+        {'$group': {'_id': '$code', 'n': {'$sum': 1}}},
+    ]
+    clicks_by_code = {
+        d['_id']: d['n']
+        async for d in db.referral_clicks.aggregate(clicks_pipeline)
+    }
+
+    signups_pipeline = [
+        {'$match': {'referred_by_code': {'$in': code_strs}}},
+        {'$group': {'_id': '$referred_by_code', 'n': {'$sum': 1}}},
+    ]
+    signups_by_code = {
+        d['_id']: d['n']
+        async for d in db.users.aggregate(signups_pipeline)
+    }
+
+    earnings_pipeline = [
+        {'$match': {'referrer_user_id': {'$in': user_ids}}},
+        {'$group': {
+            '_id': {'uid': '$referrer_user_id', 'status': '$status'},
+            'sum': {'$sum': '$commission_amount'},
+            'count': {'$sum': 1},
+        }},
+    ]
+    earnings_by_uid_status = {}
+    async for d in db.referral_earnings.aggregate(earnings_pipeline):
+        earnings_by_uid_status[(d['_id']['uid'], d['_id']['status'])] = (d['sum'] or 0, d['count'] or 0)
+
+    # 3) Assemble response
+    out = []
+    for r in codes_docs:
+        uid = r['user_id']
+        u = users_by_id.get(uid)
+        accrued_sum, accrued_n = earnings_by_uid_status.get((uid, 'accrued'), (0, 0))
+        paid_sum, paid_n = earnings_by_uid_status.get((uid, 'paid'), (0, 0))
+        out.append({
             'code': r['code'],
-            'user_id': r['user_id'],
+            'user_id': uid,
             'user_email': u.get('email') if u else None,
             'user_name': u.get('name') if u else None,
             'created_at': (r['created_at'].isoformat() if isinstance(r.get('created_at'), datetime) else r.get('created_at')),
-            'clicks': clicks,
-            'signups': signups,
-            'accrued_usd': round((accrued_doc[0]['sum'] if accrued_doc else 0) or 0, 2),
-            'accrued_count': (accrued_doc[0]['count'] if accrued_doc else 0) or 0,
-            'paid_usd': round((paid_doc[0]['sum'] if paid_doc else 0) or 0, 2),
-            'paid_count': (paid_doc[0]['count'] if paid_doc else 0) or 0,
+            'clicks': clicks_by_code.get(r['code'], 0),
+            'signups': signups_by_code.get(r['code'], 0),
+            'accrued_usd': round(accrued_sum, 2),
+            'accrued_count': accrued_n,
+            'paid_usd': round(paid_sum, 2),
+            'paid_count': paid_n,
         })
-    return codes
+    return out
 
 
 @router.post('/operator/referrals/pay')

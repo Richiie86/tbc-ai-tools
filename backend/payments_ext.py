@@ -658,7 +658,7 @@ def _gen_license_key() -> str:
 @router.get('/operator/licenses')
 async def op_list_licenses(_: dict = Depends(get_current_operator)):
     db = await get_db()
-    cursor = db.licenses.find({}).sort('created_at', -1)
+    cursor = db.licenses.find({}).sort('created_at', -1).limit(500)
     items = []
     async for d in cursor:
         d = _serialize(d)
