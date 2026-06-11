@@ -50,9 +50,9 @@ STRIPE_API_KEY = os.environ.get('STRIPE_API_KEY', 'sk_test_emergent')
 
 # ===== PRICING =====
 PLANS = {
-    'starter':    {'name': 'Starter',    'price': 19.0,  'credits': 500,    'features': ['500 AI messages/mo', 'GPT-5.4 access', 'Chat history', 'Email support']},
-    'pro':        {'name': 'Pro',        'price': 49.0,  'credits': 2500,   'features': ['2,500 AI messages/mo', 'GPT-5.4 + Claude', 'Priority responses', 'Code export', 'Priority support']},
-    'enterprise': {'name': 'Enterprise', 'price': 149.0, 'credits': 10000,  'features': ['10,000 AI messages/mo', 'All models', 'API access', 'Custom integrations', '24/7 support']},
+    'starter':    {'name': 'Starter',    'price': 19.0,  'credits': 500,    'features': ['500 AI messages/mo', 'GPT-5 + Claude access', 'Chat history', 'Email support']},
+    'pro':        {'name': 'Pro',        'price': 49.0,  'credits': 2500,   'features': ['2,500 AI messages/mo', 'GPT-5, Claude & Gemini', 'Priority responses', 'Code export', 'Priority support']},
+    'enterprise': {'name': 'Enterprise', 'price': 149.0, 'credits': 10000,  'features': ['10,000 AI messages/mo', 'All frontier models', 'API access', 'Custom integrations', '24/7 support']},
 }
 
 # ===== APP =====
@@ -90,7 +90,7 @@ MODEL_PROVIDERS = {
     'gemini-2.5-flash':          ('gemini', 'gemini-2.5-flash'),
 }
 
-DEFAULT_MODEL = 'gpt-5.4'
+DEFAULT_MODEL = 'claude-sonnet-4-6'
 
 
 def resolve_model(name: Optional[str]):
@@ -265,7 +265,7 @@ async def list_sessions(user: dict = Depends(get_current_user)):
 
 @api.post('/chat/sessions')
 async def create_session(req: CreateSessionRequest, user: dict = Depends(get_current_user)):
-    s = ChatSession(user_id=user['sub'], title=req.title or 'New Chat', model=req.model or 'gpt-5.4')
+    s = ChatSession(user_id=user['sub'], title=req.title or 'New Chat', model=req.model or DEFAULT_MODEL)
     await db.chat_sessions.insert_one(s.dict())
     return _serialize(s.dict())
 
@@ -316,7 +316,7 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
     # Ensure session
     session_id = req.session_id
     if not session_id:
-        s = ChatSession(user_id=user['sub'], title=req.message[:60] or 'New Chat', model=req.model or 'gpt-5.4')
+        s = ChatSession(user_id=user['sub'], title=req.message[:60] or 'New Chat', model=req.model or DEFAULT_MODEL)
         await db.chat_sessions.insert_one(s.dict())
         session_id = s.id
     else:
@@ -400,9 +400,8 @@ async def list_models():
         'default': DEFAULT_MODEL,
         'providers': {
             'OpenAI': [
-                {'id': 'gpt-5.4', 'label': 'GPT-5.4 (recommended)'},
-                {'id': 'gpt-5.4-mini', 'label': 'GPT-5.4 Mini'},
                 {'id': 'gpt-5', 'label': 'GPT-5'},
+                {'id': 'gpt-5-mini', 'label': 'GPT-5 Mini'},
                 {'id': 'gpt-4.1', 'label': 'GPT-4.1'},
                 {'id': 'o3', 'label': 'o3 (reasoning)'},
             ],

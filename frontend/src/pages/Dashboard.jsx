@@ -43,7 +43,7 @@ export default function Dashboard() {
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
   const [streamText, setStreamText] = useState('');
-  const [model, setModel] = useState('gpt-5.4');
+  const [model, setModel] = useState('claude-sonnet-4-6');
   const [models, setModels] = useState({ providers: {} });
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const scrollRef = useRef(null);
@@ -86,7 +86,7 @@ export default function Dashboard() {
     try {
       const { data } = await api.get(`/chat/sessions/${id}/messages`);
       setMessages(data.messages || []);
-      setModel(data.session?.model || 'gpt-5.4');
+      setModel(data.session?.model || 'claude-sonnet-4-6');
     } catch (e) {
       toast.error('Could not load session');
       navigate('/dashboard');
