@@ -136,3 +136,94 @@ class ContactSubmission(BaseModel):
     subject: Optional[str] = None
     message: str
     created_at: datetime = Field(default_factory=_now)
+
+
+# ===== PLANS (editable) =====
+class PlanModel(BaseModel):
+    id: str
+    name: str
+    price: float
+    regular_price: Optional[float] = None
+    credits: int
+    intro: bool = False
+    features: List[str] = []
+    enabled: bool = True
+    order: int = 0
+
+
+class PlanUpsertRequest(BaseModel):
+    id: Optional[str] = None
+    name: str
+    price: float
+    regular_price: Optional[float] = None
+    credits: int
+    intro: bool = False
+    features: List[str] = []
+    enabled: bool = True
+    order: int = 0
+
+
+# ===== TREASURY =====
+class TreasuryDestination(BaseModel):
+    id: str = Field(default_factory=_uid)
+    label: str
+    type: Literal['bank', 'crypto'] = 'bank'
+    is_active: bool = False
+    # Bank fields
+    holder_name: Optional[str] = None
+    iban: Optional[str] = None
+    bic: Optional[str] = None
+    bank_name: Optional[str] = None
+    bank_address: Optional[str] = None
+    reference: Optional[str] = None
+    # Crypto fields
+    network: Optional[str] = None  # BTC, ETH, SOL, TRC20-USDT, ERC20-USDT, POLYGON
+    wallet_address: Optional[str] = None
+    memo: Optional[str] = None
+    notes: Optional[str] = None
+    created_at: datetime = Field(default_factory=_now)
+
+
+class TreasuryUpsertRequest(BaseModel):
+    id: Optional[str] = None
+    label: str
+    type: Literal['bank', 'crypto']
+    holder_name: Optional[str] = None
+    iban: Optional[str] = None
+    bic: Optional[str] = None
+    bank_name: Optional[str] = None
+    bank_address: Optional[str] = None
+    reference: Optional[str] = None
+    network: Optional[str] = None
+    wallet_address: Optional[str] = None
+    memo: Optional[str] = None
+    notes: Optional[str] = None
+
+
+# ===== SETTINGS (payment provider keys) =====
+class PaymentSettings(BaseModel):
+    stripe_secret_key: Optional[str] = None
+    stripe_mode: Literal['test', 'live'] = 'test'
+    nowpayments_api_key: Optional[str] = None
+    nowpayments_ipn_secret: Optional[str] = None
+    paypal_client_id: Optional[str] = None
+    paypal_client_secret: Optional[str] = None
+    paypal_mode: Literal['sandbox', 'live'] = 'sandbox'
+    enable_card: bool = True
+    enable_paypal: bool = False
+    enable_crypto_auto: bool = False
+    enable_crypto_manual: bool = True
+    enable_bank: bool = True
+
+
+class CheckoutMethod(str):
+    pass
+
+
+# Manual payment submission (crypto tx hash or bank reference)
+class ManualPaymentRequest(BaseModel):
+    plan_id: str
+    method: Literal['crypto_manual', 'bank']
+    treasury_id: str
+    proof: str  # tx hash or bank reference
+    note: Optional[str] = None

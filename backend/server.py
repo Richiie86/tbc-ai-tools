@@ -34,6 +34,7 @@ from models import (
     ChatSendRequest, ChatMessage, ChatSession, CreateSessionRequest, RenameSessionRequest,
     CheckoutRequest, PaymentTransaction, ContactRequest, ContactSubmission,
 )
+from payments_ext import router as payments_router, seed_defaults as seed_payment_defaults, get_plans_list, get_settings_doc
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger('tbc')
@@ -116,6 +117,8 @@ async def startup():
     await db.chat_sessions.create_index([('user_id', 1), ('updated_at', -1)])
     await db.chat_messages.create_index([('session_id', 1), ('created_at', 1)])
     await db.payment_transactions.create_index('session_id', unique=True)
+    await db.plans.create_index('id', unique=True)
+    await db.treasury.create_index('id', unique=True)
 
     # Seed operator user
     existing = await db.users.find_one({'email': OPERATOR_EMAIL})
@@ -134,6 +137,9 @@ async def startup():
         # ensure role is operator
         if existing.get('role') != 'operator':
             await db.users.update_one({'email': OPERATOR_EMAIL}, {'$set': {'role': 'operator', 'plan': 'enterprise', 'credits': 999999}})
+
+    # Seed default plans + payment settings
+    await seed_payment_defaults()
 
 
 @app.on_event('shutdown')
@@ -437,22 +443,38 @@ async def list_models():
 # ===== PAYMENTS =====
 @api.get('/payments/plans')
 async def get_plans():
-    return [
-        {'id': k, **v} for k, v in PLANS.items()
-    ]
+    plans = await get_plans_list(only_enabled=True)
+    # Strip internal fields and return public shape
+    out = []
+    for p in plans:
+        out.append({
+            'id': p['id'],
+            'name': p['name'],
+            'price': p['price'],
+            'regular_price': p.get('regular_price'),
+            'credits': p['credits'],
+            'intro': p.get('intro', False),
+            'features': p.get('features', []),
+        })
+    return out
 
 
 @api.post('/payments/checkout')
 async def create_checkout(req: CheckoutRequest, http_request: Request, user: dict = Depends(get_current_user)):
     from emergentintegrations.payments.stripe.checkout import StripeCheckout, CheckoutSessionRequest
 
-    if req.plan_id not in PLANS:
+    plans = await get_plans_list(only_enabled=True)
+    plan = next((p for p in plans if p['id'] == req.plan_id), None)
+    if not plan:
         raise HTTPException(400, 'Invalid plan')
-    plan = PLANS[req.plan_id]
+
+    # Resolve Stripe key from operator settings, fallback to env
+    settings = await get_settings_doc()
+    stripe_key = settings.get('stripe_secret_key') or STRIPE_API_KEY
 
     host_url = str(http_request.base_url).rstrip('/')
     webhook_url = f"{host_url}/api/webhook/stripe"
-    stripe_checkout = StripeCheckout(api_key=STRIPE_API_KEY, webhook_url=webhook_url)
+    stripe_checkout = StripeCheckout(api_key=stripe_key, webhook_url=webhook_url)
 
     origin = req.origin_url.rstrip('/')
     success_url = f"{origin}/billing/success?session_id={{CHECKOUT_SESSION_ID}}"
@@ -463,6 +485,7 @@ async def create_checkout(req: CheckoutRequest, http_request: Request, user: dic
         'user_id': user['sub'],
         'user_email': user['email'],
         'source': 'tbc_ai_control',
+        'method': 'card',
     }
 
     session_req = CheckoutSessionRequest(
@@ -523,12 +546,12 @@ async def payment_status(session_id: str, http_request: Request, user: dict = De
 
     # Apply plan benefit only once
     if new_payment == 'paid' and tx.get('payment_status') != 'paid':
-        plan_id = tx['plan_id']
-        plan = PLANS.get(plan_id)
+        plans = await get_plans_list()
+        plan = next((p for p in plans if p['id'] == tx['plan_id']), None)
         if plan:
             await db.users.update_one(
                 {'id': tx['user_id']},
-                {'$set': {'plan': plan_id}, '$inc': {'credits': int(plan['credits'])}},
+                {'$set': {'plan': plan['id']}, '$inc': {'credits': int(plan['credits'])}},
             )
 
     return {
@@ -561,11 +584,12 @@ async def stripe_webhook(request: Request):
                 {'session_id': result.session_id},
                 {'$set': {'payment_status': 'paid', 'status': 'paid', 'updated_at': datetime.now(timezone.utc)}},
             )
-            plan = PLANS.get(tx['plan_id'])
+            plans = await get_plans_list()
+            plan = next((p for p in plans if p['id'] == tx['plan_id']), None)
             if plan:
                 await db.users.update_one(
                     {'id': tx['user_id']},
-                    {'$set': {'plan': tx['plan_id']}, '$inc': {'credits': int(plan['credits'])}},
+                    {'$set': {'plan': plan['id']}, '$inc': {'credits': int(plan['credits'])}},
                 )
     return {'received': True}
 
@@ -718,8 +742,9 @@ async def op_code_file(path: str = Query(...), _: dict = Depends(get_current_ope
     return {'path': path, 'content': content, 'size': len(content)}
 
 
-# Include router and CORS
+# Include routers and CORS
 app.include_router(api)
+app.include_router(payments_router)
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
