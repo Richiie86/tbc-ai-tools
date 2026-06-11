@@ -44,9 +44,9 @@ export default function Login() {
     <div className="min-h-screen bg-slate-950">
       <Navbar minimal />
       <div className="mx-auto grid max-w-md px-5 py-16">
-        <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-8 shadow-2xl shadow-emerald-500/5">
+        <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-8 shadow-2xl shadow-amber-500/5">
           <div className="flex items-center gap-3">
-            <div className="grid h-10 w-10 place-items-center rounded-lg bg-emerald-500/15 text-emerald-300">
+            <div className="grid h-10 w-10 place-items-center rounded-lg bg-amber-500/15 text-amber-300">
               <LogIn className="h-5 w-5" />
             </div>
             <div>
@@ -64,18 +64,18 @@ export default function Login() {
               <label className="text-xs font-semibold uppercase tracking-wider text-slate-400">Password</label>
               <Input className="mt-1.5 border-slate-700 bg-slate-950 text-slate-100" type="password" value={form.password} onChange={(e)=>setForm({...form,password:e.target.value})} placeholder="••••••••" />
             </div>
-            <Button disabled={loading} type="submit" className="w-full bg-emerald-500 text-slate-950 hover:bg-emerald-400 font-semibold">
+            <Button disabled={loading} type="submit" className="w-full bg-amber-500 text-slate-950 hover:bg-amber-400 font-semibold">
               {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               Sign in
             </Button>
           </form>
 
           <div className="mt-5 flex items-center justify-center gap-2 text-xs text-slate-500">
-            <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" /> Protected by TOTP two-factor authentication
+            <ShieldCheck className="h-3.5 w-3.5 text-amber-400" /> Protected by TOTP two-factor authentication
           </div>
 
           <div className="mt-7 border-t border-slate-800 pt-5 text-center text-sm text-slate-400">
-            New to TBC AI Control? <Link to="/register" className="font-semibold text-emerald-400 hover:text-emerald-300">Create an account</Link>
+            New to TBC AI Control? <Link to="/register" className="font-semibold text-amber-400 hover:text-amber-300">Create an account</Link>
           </div>
         </div>
       </div>

@@ -50,9 +50,9 @@ STRIPE_API_KEY = os.environ.get('STRIPE_API_KEY', 'sk_test_emergent')
 
 # ===== PRICING =====
 PLANS = {
-    'starter':    {'name': 'Starter',    'price': 19.0,  'credits': 500,    'features': ['500 AI messages/mo', 'GPT-5 + Claude access', 'Chat history', 'Email support']},
-    'pro':        {'name': 'Pro',        'price': 49.0,  'credits': 2500,   'features': ['2,500 AI messages/mo', 'GPT-5, Claude & Gemini', 'Priority responses', 'Code export', 'Priority support']},
-    'enterprise': {'name': 'Enterprise', 'price': 149.0, 'credits': 10000,  'features': ['10,000 AI messages/mo', 'All frontier models', 'API access', 'Custom integrations', '24/7 support']},
+    'starter':    {'name': 'Starter',    'price': 9.0,   'regular_price': 19.0,  'credits': 500,    'intro': True, 'features': ['500 AI messages/mo', 'GPT-5 + Claude access', 'Chat history', 'Email support']},
+    'pro':        {'name': 'Pro',        'price': 49.0,  'regular_price': 69.0,  'credits': 2500,   'intro': True, 'features': ['2,500 AI messages/mo', 'GPT-5, Claude Opus & Gemini', 'Priority responses', 'Code export', 'Priority support']},
+    'enterprise': {'name': 'Enterprise', 'price': 139.0, 'regular_price': 139.0, 'credits': 10000,  'intro': False, 'features': ['10,000 AI messages/mo', 'All frontier models', 'API access', 'Custom integrations', '24/7 support']},
 }
 
 # ===== APP =====
@@ -90,7 +90,7 @@ MODEL_PROVIDERS = {
     'gemini-2.5-flash':          ('gemini', 'gemini-2.5-flash'),
 }
 
-DEFAULT_MODEL = 'claude-sonnet-4-6'
+DEFAULT_MODEL = 'claude-opus-4-7'
 
 
 def resolve_model(name: Optional[str]):
@@ -406,8 +406,8 @@ async def list_models():
                 {'id': 'o3', 'label': 'o3 (reasoning)'},
             ],
             'Anthropic': [
-                {'id': 'claude-sonnet-4-6', 'label': 'Claude Sonnet 4.6 (recommended)'},
-                {'id': 'claude-opus-4-7', 'label': 'Claude Opus 4.7'},
+                {'id': 'claude-opus-4-7', 'label': 'Claude Opus 4.7 (recommended)'},
+                {'id': 'claude-sonnet-4-6', 'label': 'Claude Sonnet 4.6'},
                 {'id': 'claude-sonnet-4-5-20250929', 'label': 'Claude Sonnet 4.5'},
                 {'id': 'claude-haiku-4-5-20251001', 'label': 'Claude Haiku 4.5'},
             ],

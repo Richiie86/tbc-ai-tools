@@ -13,7 +13,7 @@ import { toast } from 'sonner';
 import { Users, CreditCard, MessageSquare, DollarSign, Loader2, ShieldCheck, Mail } from 'lucide-react';
 
 function StatCard({ icon: Icon, label, value, tone = 'emerald' }) {
-  const toneClass = tone === 'emerald' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-cyan-500/15 text-cyan-300';
+  const toneClass = tone === 'emerald' ? 'bg-amber-500/15 text-amber-300' : 'bg-yellow-500/15 text-amber-300';
   return (
     <Card className="border-slate-800 bg-slate-900/60 p-5">
       <div className="flex items-center justify-between">
@@ -68,7 +68,7 @@ export default function Operator() {
       <Navbar />
       <section className="mx-auto max-w-7xl px-5 py-10">
         <div className="flex items-center gap-3">
-          <div className="grid h-11 w-11 place-items-center rounded-xl bg-emerald-500/15 text-emerald-300">
+          <div className="grid h-11 w-11 place-items-center rounded-xl bg-amber-500/15 text-amber-300">
             <ShieldCheck className="h-6 w-6" />
           </div>
           <div>
@@ -78,7 +78,7 @@ export default function Operator() {
         </div>
 
         {loading ? (
-          <div className="mt-16 grid place-items-center"><Loader2 className="h-7 w-7 animate-spin text-emerald-400" /></div>
+          <div className="mt-16 grid place-items-center"><Loader2 className="h-7 w-7 animate-spin text-amber-400" /></div>
         ) : (
           <>
             <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
@@ -90,9 +90,9 @@ export default function Operator() {
 
             <Tabs defaultValue="users" className="mt-10">
               <TabsList className="bg-slate-900 border border-slate-800">
-                <TabsTrigger value="users" className="data-[state=active]:bg-emerald-500 data-[state=active]:text-slate-950">Users</TabsTrigger>
-                <TabsTrigger value="payments" className="data-[state=active]:bg-emerald-500 data-[state=active]:text-slate-950">Payments</TabsTrigger>
-                <TabsTrigger value="contacts" className="data-[state=active]:bg-emerald-500 data-[state=active]:text-slate-950">Contacts</TabsTrigger>
+                <TabsTrigger value="users" className="data-[state=active]:bg-amber-500 data-[state=active]:text-slate-950">Users</TabsTrigger>
+                <TabsTrigger value="payments" className="data-[state=active]:bg-amber-500 data-[state=active]:text-slate-950">Payments</TabsTrigger>
+                <TabsTrigger value="contacts" className="data-[state=active]:bg-amber-500 data-[state=active]:text-slate-950">Contacts</TabsTrigger>
               </TabsList>
 
               <TabsContent value="users" className="mt-5">
@@ -113,11 +113,11 @@ export default function Operator() {
                         <TableRow key={u.id} className="border-slate-800 hover:bg-slate-900">
                           <TableCell className="font-medium">{u.email}</TableCell>
                           <TableCell>
-                            <span className={`rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wider ${u.role === 'operator' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-800 text-slate-300'}`}>{u.role}</span>
+                            <span className={`rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wider ${u.role === 'operator' ? 'bg-amber-500/20 text-amber-300' : 'bg-slate-800 text-slate-300'}`}>{u.role}</span>
                           </TableCell>
                           <TableCell><span className="capitalize">{u.plan}</span></TableCell>
                           <TableCell>{u.credits?.toLocaleString()}</TableCell>
-                          <TableCell>{u.totp_enabled ? <span className="text-emerald-400">On</span> : <span className="text-slate-500">Off</span>}</TableCell>
+                          <TableCell>{u.totp_enabled ? <span className="text-amber-400">On</span> : <span className="text-slate-500">Off</span>}</TableCell>
                           <TableCell className="text-right">
                             <Button size="sm" variant="outline" className="border-slate-700 bg-slate-900 hover:bg-slate-800" onClick={()=>grantCredits(u.id, 100)}>+100 credits</Button>
                           </TableCell>
@@ -150,7 +150,7 @@ export default function Operator() {
                           <TableCell className="capitalize">{t.plan_id}</TableCell>
                           <TableCell>${t.amount?.toFixed(2)} {t.currency?.toUpperCase()}</TableCell>
                           <TableCell>
-                            <span className={`rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wider ${t.payment_status === 'paid' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'}`}>{t.payment_status}</span>
+                            <span className={`rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wider ${t.payment_status === 'paid' ? 'bg-amber-500/20 text-amber-300' : 'bg-amber-500/20 text-amber-300'}`}>{t.payment_status}</span>
                           </TableCell>
                           <TableCell className="text-slate-400">{new Date(t.created_at).toLocaleString()}</TableCell>
                         </TableRow>
@@ -169,7 +169,7 @@ export default function Operator() {
                     <div key={c.id} className="rounded-xl border border-slate-800 bg-slate-900/40 p-5">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2 text-sm">
-                          <Mail className="h-4 w-4 text-emerald-400" />
+                          <Mail className="h-4 w-4 text-amber-400" />
                           <span className="font-semibold text-white">{c.name}</span>
                           <span className="text-slate-400">&lt;{c.email}&gt;</span>
                         </div>
