@@ -12,7 +12,7 @@ export default function ReferralLanding() {
       try {
         localStorage.setItem('tbc_ref_code', code);
         await api.post('/referral/track', { code, referrer: document.referrer || null });
-      } catch {}
+      } catch (err) { console.error('Referral track failed', err); }
       setDone(true);
     })();
   }, [code]);

@@ -19,7 +19,6 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, APIRouter, Depends, HTTPException, Request, Query
 from fastapi.responses import StreamingResponse
 from starlette.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -40,10 +39,9 @@ from referrals_ext import router as referrals_router, record_referral_signup, re
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger('tbc')
 
-# Mongo
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
+# Mongo — shared client (see db.py); also kept here as module global for
+# backwards compatibility with any external import of `server.db`.
+from db import db  # noqa: E402
 
 OPERATOR_EMAIL = os.environ.get('OPERATOR_EMAIL', 'rac.invetments.swe@gmail.com').lower()
 OPERATOR_PASSWORD = os.environ.get('OPERATOR_PASSWORD', 'TBC@2025!Admin')

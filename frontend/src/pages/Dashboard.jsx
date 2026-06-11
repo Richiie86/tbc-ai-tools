@@ -15,6 +15,7 @@ import {
   AlertDialogTrigger,
 } from '../components/ui/alert-dialog';
 import Markdown from '../components/Markdown';
+import ReferBanner from '../components/ReferBanner';
 import { toast } from 'sonner';
 import {
   Cpu, Send, Plus, Trash2, MessageSquare, Loader2, LogOut,
@@ -84,7 +85,7 @@ export default function Dashboard({ variant = 'tbc1' }) {
     try {
       const { data } = await api.get('/chat/sessions', { params: { variant } });
       setSessions(data);
-    } catch {}
+    } catch (err) { console.error('Failed to load sessions', err); }
   }
 
   async function loadMessages(id) {
@@ -267,6 +268,7 @@ export default function Dashboard({ variant = 'tbc1' }) {
         </ScrollArea>
 
         <div className="border-t border-slate-800 p-3">
+          <ReferBanner />
           <div className="mb-2 flex items-center gap-2 rounded-md bg-slate-900 px-2.5 py-2 text-xs text-slate-300">
             <Sparkles className="h-3.5 w-3.5 text-tbc-400" />
             <span className="flex-1 truncate">
@@ -280,9 +282,6 @@ export default function Dashboard({ variant = 'tbc1' }) {
           )}
           <Link to="/pricing" className="mb-1 flex items-center gap-2 rounded-md px-2.5 py-2 text-xs font-medium text-slate-300 hover:bg-slate-800">
             <Sparkles className="h-3.5 w-3.5" /> Upgrade plan
-          </Link>
-          <Link to="/refer" className="mb-1 flex items-center gap-2 rounded-md px-2.5 py-2 text-xs font-medium text-tbc-200 hover:bg-slate-800">
-            <Sparkles className="h-3.5 w-3.5 text-tbc-300" /> Refer &amp; earn 10%
           </Link>
           <button onClick={() => { logout(); navigate('/'); }} className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-xs font-medium text-slate-300 hover:bg-slate-800">
             <LogOut className="h-3.5 w-3.5" /> Sign out

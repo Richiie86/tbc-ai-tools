@@ -58,8 +58,8 @@ def _mask_key(k: Optional[str]) -> Optional[str]:
 
 
 async def get_db():
-    """Imported lazily to avoid circular import with server."""
-    from server import db as _db
+    """Return shared Mongo db handle."""
+    from db import db as _db
     return _db
 
 

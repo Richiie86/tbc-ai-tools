@@ -20,7 +20,7 @@ DEFAULT_BRAND = BrandSettings().dict()
 
 
 async def get_db():
-    from server import db as _db
+    from db import db as _db
     return _db
 
 

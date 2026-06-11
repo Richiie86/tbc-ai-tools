@@ -185,7 +185,7 @@ export default function Landing() {
                 <div className="text-xs text-slate-400">Enter the 6-digit code</div>
                 <div className="mt-3 flex gap-2">
                   {['9','2','8','3','4','1'].map((d, i) => (
-                    <div key={i} className="grid h-12 w-10 place-items-center rounded-md border border-slate-700 bg-ink-950 text-lg font-bold text-tbc-300">{d}</div>
+                    <div key={`totp-digit-${i}-${d}`} className="grid h-12 w-10 place-items-center rounded-md border border-slate-700 bg-ink-950 text-lg font-bold text-tbc-300">{d}</div>
                   ))}
                 </div>
                 <Button className="mt-5 w-full bg-tbc-500 text-slate-950 hover:bg-tbc-400 font-semibold">Verify & continue</Button>

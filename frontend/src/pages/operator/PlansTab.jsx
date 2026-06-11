@@ -140,7 +140,7 @@ export default function PlansTab() {
             </div>
             <div className="text-xs text-tbc-300">{p.credits.toLocaleString()} credits</div>
             <ul className="mt-3 space-y-1 text-xs text-tbc-200/80">
-              {p.features.slice(0, 4).map((f, i) => <li key={i}>• {f}</li>)}
+              {p.features.slice(0, 4).map((f) => <li key={`${p.id}-feat-${f}`}>• {f}</li>)}
               {p.features.length > 4 && <li className="text-tbc-200/40">+ {p.features.length - 4} more</li>}
             </ul>
           </div>
