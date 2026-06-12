@@ -156,6 +156,34 @@ async def startup():
         )
         logger.warning('RESET_OPERATOR_2FA flag honoured: 2FA cleared for %s', OPERATOR_EMAIL)
 
+    # Optional emergency password recovery: set RESET_OPERATOR_PASSWORD=true and the
+    # operator's password will be re-hashed from OPERATOR_PASSWORD env var on next boot.
+    # Also clears 2FA so the operator can re-enrol cleanly. Unset the flag after.
+    if os.environ.get('RESET_OPERATOR_PASSWORD', '').lower() == 'true':
+        new_hash = hash_password(OPERATOR_PASSWORD)
+        result = await db.users.update_one(
+            {'email': OPERATOR_EMAIL},
+            {
+                '$set': {'password_hash': new_hash, 'role': 'operator', 'plan': 'enterprise', 'credits': 999999},
+                '$unset': {'totp_secret': '', 'totp_enabled': '', 'totp_pending_secret': ''},
+            },
+            upsert=False,
+        )
+        if result.matched_count == 0:
+            # Operator doesn't exist yet — create them now so the unlock works on first deploy too.
+            op = User(
+                email=OPERATOR_EMAIL,
+                password_hash=new_hash,
+                name='TBC Operator',
+                role='operator',
+                plan='enterprise',
+                credits=999999,
+            )
+            await db.users.insert_one(op.dict())
+            logger.warning('RESET_OPERATOR_PASSWORD: operator did not exist, created fresh for %s', OPERATOR_EMAIL)
+        else:
+            logger.warning('RESET_OPERATOR_PASSWORD flag honoured: password reset + 2FA cleared for %s', OPERATOR_EMAIL)
+
     # Seed operator user
     existing = await db.users.find_one({'email': OPERATOR_EMAIL})
     if not existing:
