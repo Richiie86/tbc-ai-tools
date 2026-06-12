@@ -48,8 +48,10 @@ export default function MoneyTab() {
       const payload = {
         autopay_stripe_enabled: !!next.autopay_stripe_enabled,
         autopay_stripe_threshold_usd: Number(next.autopay_stripe_threshold_usd || 0),
+        autopay_stripe_daily_cap_usd: Number(next.autopay_stripe_daily_cap_usd || 0),
         autopay_nowpay_enabled: !!next.autopay_nowpay_enabled,
         autopay_nowpay_threshold_usd: Number(next.autopay_nowpay_threshold_usd || 0),
+        autopay_nowpay_daily_cap: Number(next.autopay_nowpay_daily_cap || 0),
         autopay_nowpay_address: next.autopay_nowpay_address || null,
         autopay_nowpay_currency: next.autopay_nowpay_currency || null,
       };
@@ -229,10 +231,22 @@ export default function MoneyTab() {
                     onChange={(e) => saveWithdrawSettings({ autopay_stripe_threshold_usd: e.target.value })}
                   />
                 </Field>
-                <div className="text-[11px] text-tbc-200/50 self-end pb-2">
-                  When balance ≥ threshold, the next sweep pays out the full available balance.
-                </div>
+                <Field label="Daily safety cap (USD)">
+                  <Input
+                    data-testid="autopay-stripe-cap"
+                    type="number" min="0" step="50"
+                    className="bg-ink-950 border-tbc-900/60 text-tbc-100"
+                    value={withdrawSettings.autopay_stripe_daily_cap_usd}
+                    onChange={(e) => saveWithdrawSettings({ autopay_stripe_daily_cap_usd: e.target.value })}
+                  />
+                </Field>
               </div>
+              <CapProgress
+                used={withdrawSettings.stripe_paid_24h_usd}
+                cap={withdrawSettings.autopay_stripe_daily_cap_usd}
+                format={(n) => `$${Number(n).toFixed(2)}`}
+                testid="autopay-stripe-cap-bar"
+              />
             </div>
 
             {/* NOWPayments row */}
@@ -256,7 +270,7 @@ export default function MoneyTab() {
                   onCheckedChange={(v) => saveWithdrawSettings({ autopay_nowpay_enabled: v })}
                 />
               </div>
-              <div className="mt-3 grid grid-cols-3 gap-3">
+              <div className="mt-3 grid grid-cols-4 gap-3">
                 <Field label="Currency">
                   <Input
                     data-testid="autopay-nowpay-currency"
@@ -275,7 +289,7 @@ export default function MoneyTab() {
                     onChange={(e) => saveWithdrawSettings({ autopay_nowpay_address: e.target.value })}
                   />
                 </Field>
-                <Field label="Threshold (in asset)">
+                <Field label="Threshold (asset)">
                   <Input
                     data-testid="autopay-nowpay-threshold"
                     type="number" min="0" step="0.001"
@@ -284,7 +298,22 @@ export default function MoneyTab() {
                     onChange={(e) => saveWithdrawSettings({ autopay_nowpay_threshold_usd: e.target.value })}
                   />
                 </Field>
+                <Field label="Daily cap (asset)">
+                  <Input
+                    data-testid="autopay-nowpay-cap"
+                    type="number" min="0" step="0.001"
+                    className="bg-ink-950 border-tbc-900/60 text-tbc-100"
+                    value={withdrawSettings.autopay_nowpay_daily_cap}
+                    onChange={(e) => saveWithdrawSettings({ autopay_nowpay_daily_cap: e.target.value })}
+                  />
+                </Field>
               </div>
+              <CapProgress
+                used={withdrawSettings.nowpay_paid_24h}
+                cap={withdrawSettings.autopay_nowpay_daily_cap}
+                format={(n) => `${Number(n).toFixed(4)} ${(withdrawSettings.autopay_nowpay_currency || '').toUpperCase()}`}
+                testid="autopay-nowpay-cap-bar"
+              />
             </div>
           </div>
         )}
@@ -339,6 +368,31 @@ function Field({ label, children }) {
     <div>
       <label className="text-[10px] font-semibold uppercase tracking-wider text-tbc-200/60">{label}</label>
       <div className="mt-1">{children}</div>
+    </div>
+  );
+}
+
+function CapProgress({ used, cap, format, testid }) {
+  const u = Math.max(0, Number(used || 0));
+  const c = Math.max(0.0001, Number(cap || 0));
+  const pct = Math.min(100, (u / c) * 100);
+  const danger = pct >= 90;
+  const warn = pct >= 60 && !danger;
+  const bar = danger ? 'bg-rose-500' : warn ? 'bg-amber-400' : 'bg-emerald-500';
+  return (
+    <div className="mt-3" data-testid={testid}>
+      <div className="flex items-center justify-between text-[10px] uppercase tracking-wider text-tbc-200/60">
+        <span>24h auto-payouts</span>
+        <span className={danger ? 'text-rose-300' : warn ? 'text-amber-300' : 'text-tbc-200/70'}>
+          {format(u)} / {format(c)} · {pct.toFixed(0)}%
+        </span>
+      </div>
+      <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-ink-950">
+        <div className={`h-full transition-all ${bar}`} style={{ width: `${pct}%` }} />
+      </div>
+      {danger && (
+        <div className="mt-1 text-[10px] text-rose-300">Cap reached — auto payouts paused until the 24h window rolls forward.</div>
+      )}
     </div>
   );
 }

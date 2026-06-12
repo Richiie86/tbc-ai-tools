@@ -39,8 +39,10 @@ router = APIRouter(prefix='/api/operator/withdraw')
 class AutoWithdrawSettings(BaseModel):
     autopay_stripe_enabled: bool = False
     autopay_stripe_threshold_usd: float = 100.0
+    autopay_stripe_daily_cap_usd: float = 5000.0
     autopay_nowpay_enabled: bool = False
     autopay_nowpay_threshold_usd: float = 25.0
+    autopay_nowpay_daily_cap: float = 1.0  # asset units (BTC/ETH/etc — set per operator)
     autopay_nowpay_address: Optional[str] = None
     autopay_nowpay_currency: Optional[str] = None
 
@@ -122,20 +124,43 @@ async def _nowpayments_payout(settings: dict, amount: float, currency: str, addr
     return r.json()
 
 
+async def _auto_paid_last_24h(provider: str) -> float:
+    """Sum of successful AUTO payout amounts for `provider` in the last 24 hours.
+
+    Used to enforce the operator-adjustable daily safety cap. We deliberately do
+    not include manual payouts — the cap is a guard against runaway auto loops.
+    """
+    from datetime import timedelta as _td
+    cutoff = datetime.now(timezone.utc) - _td(hours=24)
+    cursor = db.withdrawals.aggregate([
+        {'$match': {'provider': provider, 'kind': 'auto', 'status': 'success', 'created_at': {'$gte': cutoff}}},
+        {'$group': {'_id': None, 'total': {'$sum': '$amount_usd'}}},
+    ])
+    out = await cursor.to_list(length=1)
+    return float(out[0]['total']) if out else 0.0
+
+
 # ============== SETTINGS ==============
 @router.get('/settings')
 async def get_autowithdraw_settings(_user: dict = Depends(get_current_operator)):
     s = await get_settings_doc()
+    paid_stripe_24h = await _auto_paid_last_24h('stripe')
+    paid_nowpay_24h = await _auto_paid_last_24h('nowpayments')
     return {
         'autopay_stripe_enabled': bool(s.get('autopay_stripe_enabled', False)),
         'autopay_stripe_threshold_usd': float(s.get('autopay_stripe_threshold_usd', 100.0)),
+        'autopay_stripe_daily_cap_usd': float(s.get('autopay_stripe_daily_cap_usd', 5000.0)),
         'autopay_nowpay_enabled': bool(s.get('autopay_nowpay_enabled', False)),
         'autopay_nowpay_threshold_usd': float(s.get('autopay_nowpay_threshold_usd', 25.0)),
+        'autopay_nowpay_daily_cap': float(s.get('autopay_nowpay_daily_cap', 1.0)),
         'autopay_nowpay_address': s.get('autopay_nowpay_address') or '',
         'autopay_nowpay_currency': s.get('autopay_nowpay_currency') or '',
         # capability flags so the UI can disable rows that aren't configured.
         'stripe_configured': bool(s.get('stripe_secret_key')),
         'nowpay_configured': bool(s.get('nowpayments_api_key')),
+        # Live "used today" amounts (auto only) for the cap progress bar
+        'stripe_paid_24h_usd': paid_stripe_24h,
+        'nowpay_paid_24h': paid_nowpay_24h,
     }
 
 
@@ -199,12 +224,24 @@ async def run_auto_withdraw_once() -> dict:
             try:
                 avail = await _stripe_balance_available_usd(settings)
                 threshold = float(settings.get('autopay_stripe_threshold_usd', 100.0))
-                if avail >= threshold:
-                    result = await _stripe_payout(settings, avail)
-                    await _record('stripe', 'auto', avail, 'success', f"Auto payout {result.get('id')}", result)
-                    summary['attempts'].append({'provider': 'stripe', 'status': 'success', 'amount_usd': avail})
-                else:
+                if avail < threshold:
                     summary['attempts'].append({'provider': 'stripe', 'status': 'skipped', 'reason': f'available ${avail:.2f} < threshold ${threshold:.2f}'})
+                else:
+                    # Apply daily safety cap (auto payouts only).
+                    cap = float(settings.get('autopay_stripe_daily_cap_usd', 5000.0))
+                    paid = await _auto_paid_last_24h('stripe')
+                    headroom = max(0.0, cap - paid)
+                    if headroom <= 0.0:
+                        summary['attempts'].append({'provider': 'stripe', 'status': 'skipped', 'reason': f'daily cap reached (${paid:.2f}/${cap:.2f})'})
+                    else:
+                        payout_amt = min(avail, headroom)
+                        result = await _stripe_payout(settings, payout_amt)
+                        await _record('stripe', 'auto', payout_amt, 'success', f"Auto payout {result.get('id')} · cap {paid + payout_amt:.2f}/{cap:.2f}", result)
+                        summary['attempts'].append({
+                            'provider': 'stripe', 'status': 'success',
+                            'amount_usd': payout_amt, 'capped': payout_amt < avail,
+                            'cap_remaining_after': max(0.0, cap - paid - payout_amt),
+                        })
             except Exception as e:
                 await _record('stripe', 'auto', 0, 'failed', str(e)[:300])
                 summary['attempts'].append({'provider': 'stripe', 'status': 'failed', 'error': str(e)[:200]})
@@ -224,14 +261,24 @@ async def run_auto_withdraw_once() -> dict:
                 balances = (r.json() or {}).get('balances') or r.json() or {}
                 row = balances.get(cur) or balances.get(cur.upper())
                 amt = float((row or {}).get('amount', 0)) if isinstance(row, dict) else float(row or 0)
-                # NOWPayments balance is denominated in the asset, not USD. Treat threshold
-                # as "asset amount" for simplicity — operator sets it knowingly per currency.
-                if amt >= threshold:
-                    result = await _nowpayments_payout(settings, amt, cur, addr)
-                    await _record('nowpayments', 'auto', amt, 'success', f"Auto {amt} {cur} → {addr[:10]}…", result)
-                    summary['attempts'].append({'provider': 'nowpayments', 'status': 'success', 'amount': amt, 'currency': cur})
-                else:
+                if amt < threshold:
                     summary['attempts'].append({'provider': 'nowpayments', 'status': 'skipped', 'reason': f'balance {amt} < threshold {threshold}'})
+                else:
+                    # Apply daily safety cap (asset units, auto only).
+                    cap = float(settings.get('autopay_nowpay_daily_cap', 1.0))
+                    paid = await _auto_paid_last_24h('nowpayments')
+                    headroom = max(0.0, cap - paid)
+                    if headroom <= 0.0:
+                        summary['attempts'].append({'provider': 'nowpayments', 'status': 'skipped', 'reason': f'daily cap reached ({paid}/{cap} {cur})'})
+                    else:
+                        payout_amt = min(amt, headroom)
+                        result = await _nowpayments_payout(settings, payout_amt, cur, addr)
+                        await _record('nowpayments', 'auto', payout_amt, 'success', f"Auto {payout_amt} {cur} → {addr[:10]}… · cap {paid + payout_amt:.4f}/{cap:.4f}", result)
+                        summary['attempts'].append({
+                            'provider': 'nowpayments', 'status': 'success',
+                            'amount': payout_amt, 'currency': cur, 'capped': payout_amt < amt,
+                            'cap_remaining_after': max(0.0, cap - paid - payout_amt),
+                        })
             except Exception as e:
                 await _record('nowpayments', 'auto', 0, 'failed', str(e)[:300])
                 summary['attempts'].append({'provider': 'nowpayments', 'status': 'failed', 'error': str(e)[:200]})
