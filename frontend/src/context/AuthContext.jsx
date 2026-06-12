@@ -3,20 +3,32 @@ import api from '../lib/api';
 
 const AuthCtx = createContext(null);
 
+/**
+ * AuthProvider — session-cookie edition.
+ *
+ * The JWT lives in an `tbc_session` httpOnly cookie set by the backend on
+ * login/register/2fa-verify. JavaScript never sees it, so XSS can't steal it.
+ *
+ * `user`:
+ *   - null     → session check in flight (or just logged out)
+ *   - object   → authenticated
+ * `token`:
+ *   - kept ONLY because a handful of legacy code paths read it from context.
+ *     We populate it from the login response so those paths keep working, but
+ *     it's no longer stored in localStorage or used for new requests.
+ */
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
-  const [token, setToken] = useState(() => localStorage.getItem('tbc_token'));
+  const [token, setToken] = useState(null);
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
-    const t = localStorage.getItem('tbc_token');
-    if (!t) { setUser(null); setLoading(false); return; }
     try {
       const { data } = await api.get('/auth/me');
       setUser(data);
-    } catch (e) {
+    } catch {
+      // No valid cookie / 401 → simply not authenticated. Stay quiet.
       setUser(null);
-      localStorage.removeItem('tbc_token');
       setToken(null);
     } finally {
       setLoading(false);
@@ -25,12 +37,19 @@ export function AuthProvider({ children }) {
 
   useEffect(() => { refresh(); }, [refresh]);
 
+  // Called by Login/Register/Verify2FA after a successful auth response.
+  // `t` is the JWT — kept in memory only for legacy reads via useAuth().token.
+  // The cookie is the source of truth.
   const saveToken = (t) => {
-    if (t) { localStorage.setItem('tbc_token', t); setToken(t); }
-    else { localStorage.removeItem('tbc_token'); setToken(null); setUser(null); }
+    setToken(t || null);
+    if (!t) setUser(null);
   };
 
-  const logout = () => { saveToken(null); };
+  const logout = async () => {
+    try { await api.post('/auth/logout'); } catch { /* idempotent; ignore network errors */ }
+    setToken(null);
+    setUser(null);
+  };
 
   return (
     <AuthCtx.Provider value={{ user, token, loading, setUser, saveToken, refresh, logout }}>

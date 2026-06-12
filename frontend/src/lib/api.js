@@ -3,12 +3,13 @@ import axios from 'axios';
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 export const API = `${BACKEND_URL}/api`;
 
-const api = axios.create({ baseURL: API, headers: { 'Content-Type': 'application/json' } });
-
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('tbc_token');
-  if (token) config.headers.Authorization = `Bearer ${token}`;
-  return config;
+// withCredentials=true makes the browser send/receive the `tbc_session` httpOnly cookie
+// on every API call. This is the new primary auth channel; we no longer touch the JWT
+// from JS, eliminating the XSS-theft surface of localStorage.
+const api = axios.create({
+  baseURL: API,
+  headers: { 'Content-Type': 'application/json' },
+  withCredentials: true,
 });
 
 api.interceptors.response.use(
@@ -23,15 +24,12 @@ api.interceptors.response.use(
 
 export default api;
 
-// Streaming helper for chat (SSE via fetch)
+// Streaming helper for chat (SSE via fetch). credentials:'include' sends the cookie.
 export async function* streamChat({ session_id, message, model, variant, attachments }) {
-  const token = localStorage.getItem('tbc_token');
   const res = await fetch(`${API}/chat/stream`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ session_id, message, model, variant, attachments }),
   });
   if (!res.ok) {

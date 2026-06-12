@@ -8,12 +8,16 @@ import io
 import base64
 from datetime import datetime, timedelta, timezone
 from typing import Optional
-from fastapi import HTTPException, Depends, status
+from fastapi import HTTPException, Depends, Request, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 JWT_SECRET = os.environ.get('JWT_SECRET', 'change-me')
 JWT_ALG = 'HS256'
 JWT_EXP_HOURS = 24 * 7  # 7 days
+
+# Cookie name used by the httpOnly session cookie. Must match the value used
+# when calling `response.set_cookie` from the login/register endpoints.
+SESSION_COOKIE = 'tbc_session'
 
 security = HTTPBearer(auto_error=False)
 
@@ -98,10 +102,23 @@ def decode_jwt(token: str) -> dict:
         raise HTTPException(status_code=401, detail='Invalid token')
 
 
-async def get_current_user(creds: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> dict:
-    if not creds:
+async def get_current_user(
+    request: Request,
+    creds: Optional[HTTPAuthorizationCredentials] = Depends(security),
+) -> dict:
+    """Resolve the authenticated user.
+
+    Reads the JWT from the `tbc_session` httpOnly cookie first (browser flow),
+    then falls back to the `Authorization: Bearer ...` header (curl / mobile /
+    scripts). This dual support lets the browser stop touching the token while
+    keeping every existing API caller working.
+    """
+    token = request.cookies.get(SESSION_COOKIE)
+    if not token and creds:
+        token = creds.credentials
+    if not token:
         raise HTTPException(status_code=401, detail='Not authenticated')
-    payload = decode_jwt(creds.credentials)
+    payload = decode_jwt(token)
     if payload.get('pending_2fa'):
         raise HTTPException(status_code=401, detail='2FA verification required')
     return payload
@@ -138,3 +155,25 @@ def verify_totp(secret: str, code: str) -> bool:
         return pyotp.TOTP(secret).verify(code.strip(), valid_window=1)
     except Exception:
         return False
+
+
+def set_session_cookie(response, token: str, pending_2fa: bool = False) -> None:
+    """Attach the JWT to the response as a hardened httpOnly cookie.
+
+    Pending-2FA tokens get a short 1h lifetime so a half-logged-in user can't
+    keep the cookie around indefinitely.
+    """
+    max_age = 3600 if pending_2fa else JWT_EXP_HOURS * 3600
+    response.set_cookie(
+        key=SESSION_COOKIE,
+        value=token,
+        httponly=True,
+        secure=True,           # Both preview and prod are HTTPS-only.
+        samesite='lax',        # First-party site → Lax is safe and lets normal nav carry the cookie.
+        max_age=max_age,
+        path='/',
+    )
+
+
+def clear_session_cookie(response) -> None:
+    response.delete_cookie(key=SESSION_COOKIE, path='/')

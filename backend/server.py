@@ -16,7 +16,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, APIRouter, Depends, HTTPException, Request, Query
+from fastapi import FastAPI, APIRouter, Depends, HTTPException, Request, Response, Query
 from fastapi.responses import StreamingResponse
 from starlette.middleware.cors import CORSMiddleware
 
@@ -28,6 +28,7 @@ from auth_utils import (
     get_current_user, get_current_operator,
     generate_totp_secret, get_totp_uri, generate_qr_data_url, verify_totp,
     validate_password_strength, create_password_reset_token, decode_password_reset_token,
+    set_session_cookie, clear_session_cookie,
 )
 from email_utils import send_email, render_password_reset_email
 from models import (
@@ -323,7 +324,7 @@ async def root():
 
 # ===== AUTH =====
 @api.post('/auth/register', response_model=AuthResponse)
-async def register(req: RegisterRequest):
+async def register(req: RegisterRequest, response: Response):
     email = req.email.lower()
     if await db.users.find_one({'email': email}):
         raise HTTPException(400, 'Email already registered')
@@ -362,11 +363,12 @@ async def register(req: RegisterRequest):
             pass
     # Issue token requiring 2FA setup
     token = create_jwt(user.id, user.email, user.role, pending_2fa=False)
+    set_session_cookie(response, token, pending_2fa=False)
     return AuthResponse(token=token, pending_2fa=False, requires_2fa_setup=True, user=_public_user(user.dict()))
 
 
 @api.post('/auth/login', response_model=AuthResponse)
-async def login(req: LoginRequest):
+async def login(req: LoginRequest, response: Response):
     email = req.email.lower()
     user = await db.users.find_one({'email': email})
     if not user or not verify_password(req.password, user['password_hash']):
@@ -378,10 +380,19 @@ async def login(req: LoginRequest):
     if user.get('totp_enabled'):
         # Issue short-lived pending_2fa token
         token = create_jwt(user['id'], user['email'], user.get('role', 'user'), pending_2fa=True)
+        set_session_cookie(response, token, pending_2fa=True)
         return AuthResponse(token=token, pending_2fa=True, requires_2fa_setup=False, user=_public_user(user))
     # No 2FA setup yet — issue full token but flag for setup
     token = create_jwt(user['id'], user['email'], user.get('role', 'user'), pending_2fa=False)
+    set_session_cookie(response, token, pending_2fa=False)
     return AuthResponse(token=token, pending_2fa=False, requires_2fa_setup=True, user=_public_user(user))
+
+
+@api.post('/auth/logout')
+async def logout(response: Response):
+    """Clear the session cookie. Idempotent — safe to call when already logged out."""
+    clear_session_cookie(response)
+    return {'success': True}
 
 
 @api.post('/auth/forgot-password')
@@ -482,12 +493,14 @@ async def enable_2fa(req: Verify2FARequest, user: dict = Depends(get_current_use
 
 
 @api.post('/auth/2fa/verify', response_model=AuthResponse)
-async def verify_2fa(req: Verify2FARequest, request: Request):
-    # Read pending token from Authorization header
-    auth = request.headers.get('authorization', '')
-    if not auth.lower().startswith('bearer '):
-        raise HTTPException(401, 'Missing pending token')
-    token = auth.split(' ', 1)[1]
+async def verify_2fa(req: Verify2FARequest, request: Request, response: Response):
+    # Read pending token from cookie first, then Authorization header (transition).
+    token = request.cookies.get('tbc_session')
+    if not token:
+        auth = request.headers.get('authorization', '')
+        if not auth.lower().startswith('bearer '):
+            raise HTTPException(401, 'Missing pending token')
+        token = auth.split(' ', 1)[1]
     payload = decode_jwt(token)
     if not payload.get('pending_2fa'):
         raise HTTPException(400, 'Token is not pending 2FA')
@@ -497,6 +510,7 @@ async def verify_2fa(req: Verify2FARequest, request: Request):
     if not verify_totp(db_user['totp_secret'], req.code):
         raise HTTPException(400, 'Invalid 2FA code')
     new_token = create_jwt(db_user['id'], db_user['email'], db_user.get('role', 'user'), pending_2fa=False)
+    set_session_cookie(response, new_token, pending_2fa=False)
     return AuthResponse(token=new_token, pending_2fa=False, user=_public_user(db_user))
 
 
@@ -1168,8 +1182,10 @@ app.include_router(audit_router)
 # app.include_router(marketplace_router)  # Marketplace deferred — skipped per user.
 app.add_middleware(
     CORSMiddleware,
+    # Cookies require an explicit Allow-Origin (browsers reject `*` with credentials).
+    # Match the production custom domain + the preview/Emergent subdomain via regex.
+    allow_origin_regex=r'^https://([a-z0-9-]+\.)?(preview\.emergentagent\.com|tbctools\.org)(:\d+)?$',
     allow_credentials=True,
-    allow_origins=['*'],
     allow_methods=['*'],
     allow_headers=['*'],
     expose_headers=['*'],

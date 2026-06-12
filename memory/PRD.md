@@ -12,6 +12,16 @@ gold theme. Domain: **tbctools.org**.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
 ## Implemented
+- ✅ **Auth hardening: localStorage → httpOnly cookies** (Feb 2026): JWT now
+  lives in an `tbc_session` cookie set by the backend on login/register/2fa-verify
+  with `HttpOnly · Secure · SameSite=Lax · Max-Age=7d`. JavaScript never touches
+  the token, eliminating XSS-token-theft surface. `axios` and the SSE `fetch`
+  both use `withCredentials/credentials: 'include'`. `get_current_user` reads
+  the cookie first, then falls back to `Authorization: Bearer` so curl/scripts
+  and the existing `test_credentials.md` flow keep working. New endpoint:
+  `POST /api/auth/logout` clears the cookie. CORS tightened: `allow_origins=['*']`
+  replaced with `allow_origin_regex` matching tbctools.org + preview.emergentagent.com,
+  which `allow_credentials=True` now requires.
 - ✅ **Operator → Audit tab** (Feb 2026): centralized `audit_log` collection +
   `record_audit()` helper hooked into every destructive operator endpoint
   (user pause/resume/delete/credits/set_plan/reset_2fa, bulk actions,

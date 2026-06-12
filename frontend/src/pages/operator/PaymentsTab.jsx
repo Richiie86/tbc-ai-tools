@@ -36,8 +36,7 @@ export default function PaymentsTab() {
   };
   const downloadReceipt = async (id) => {
     try {
-      const token = localStorage.getItem('tbc_token');
-      const res = await fetch(`${API}/operator/transactions/${id}/receipt`, { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch(`${API}/operator/transactions/${id}/receipt`, { credentials: 'include' });
       if (!res.ok) throw new Error('Download failed');
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
@@ -49,11 +48,10 @@ export default function PaymentsTab() {
   const exportRange = async () => {
     setExporting(true);
     try {
-      const token = localStorage.getItem('tbc_token');
       const params = new URLSearchParams();
       if (from) params.set('from', from);
       if (to) params.set('to', to);
-      const res = await fetch(`${API}/operator/transactions/export?${params}`, { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch(`${API}/operator/transactions/export?${params}`, { credentials: 'include' });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.detail || 'Export failed');
