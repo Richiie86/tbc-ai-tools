@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import api from '../../lib/api';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -83,18 +83,19 @@ export default function ProjectsTab() {
   const [tagsText, setTagsText] = useState('');
   const [saving, setSaving] = useState(false);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
       const { data } = await api.get('/operator/projects');
       setItems(data);
-    } catch {
+    } catch (err) {
+      console.error('Failed to load projects', err);
       toast.error('Failed to load projects');
     } finally {
       setLoading(false);
     }
-  };
-  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => { load(); }, [load]);
 
   const counts = useMemo(() => {
     const c = Object.fromEntries(STAGES.map((s) => [s.v, 0]));

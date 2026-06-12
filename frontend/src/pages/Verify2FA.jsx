@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Navbar from '../components/Navbar';
+import api from '../lib/api';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { toast } from 'sonner';
 import { Loader2, ShieldCheck } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { API } from '../lib/api';
 
 export default function Verify2FA() {
   const [code, setCode] = useState('');
@@ -17,23 +17,24 @@ export default function Verify2FA() {
   const submit = async (e) => {
     e.preventDefault();
     if (code.length < 6) return toast.error('Enter the 6-digit code');
-    const pending = sessionStorage.getItem('tbc_pending_token');
-    if (!pending) { navigate('/login'); return; }
     setLoading(true);
     try {
-      const res = await fetch(`${API}/auth/2fa/verify`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${pending}` },
-        body: JSON.stringify({ code }),
-      });
-      if (!res.ok) { const j = await res.json().catch(()=>({})); throw new Error(j.detail || 'Verification failed'); }
-      const data = await res.json();
-      sessionStorage.removeItem('tbc_pending_token');
+      // The pending_2fa JWT lives in the httpOnly `tbc_session` cookie set at
+      // login time. `api` ships cookies via `withCredentials`, so we don't need
+      // to (and must not) mirror the token in sessionStorage.
+      const { data } = await api.post('/auth/2fa/verify', { code });
       saveToken(data.token);
       await refresh();
       navigate('/dashboard');
-    } catch (e) {
-      toast.error(e.message || 'Verification failed');
+    } catch (err) {
+      const msg = err?.response?.data?.detail || err?.message || 'Verification failed';
+      if (err?.response?.status === 401) {
+        // No / expired pending token — push back to login cleanly.
+        toast.error('Session expired. Please sign in again.');
+        navigate('/login');
+        return;
+      }
+      toast.error(msg);
     } finally {
       setLoading(false);
     }
@@ -54,8 +55,20 @@ export default function Verify2FA() {
             </div>
           </div>
           <form onSubmit={submit} className="mt-7 space-y-4">
-            <Input maxLength={6} className="border-slate-700 bg-ink-950 text-center text-3xl tracking-[0.4em] text-tbc-200" value={code} onChange={(e)=>setCode(e.target.value.replace(/\D/g,''))} placeholder="••••••" autoFocus />
-            <Button disabled={loading} className="w-full bg-tbc-500 text-slate-950 hover:bg-tbc-400 font-semibold">
+            <Input
+              data-testid="verify-2fa-code"
+              maxLength={6}
+              className="border-slate-700 bg-ink-950 text-center text-3xl tracking-[0.4em] text-tbc-200"
+              value={code}
+              onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
+              placeholder="••••••"
+              autoFocus
+            />
+            <Button
+              data-testid="verify-2fa-submit"
+              disabled={loading}
+              className="w-full bg-tbc-500 text-slate-950 hover:bg-tbc-400 font-semibold"
+            >
               {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               Verify & continue
             </Button>

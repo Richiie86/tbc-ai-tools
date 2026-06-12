@@ -1176,6 +1176,8 @@ async def op_code_file(path: str = Query(...), _: dict = Depends(get_current_ope
         raise HTTPException(404, 'File not found')
     if os.path.getsize(path) > 1024 * 1024:  # 1 MB limit
         raise HTTPException(413, 'File too large')
+    content = ''  # initialize defensively so the linter (and any future
+                  # refactor) can't end up referencing an unbound name.
     try:
         with open(path, 'r', encoding='utf-8', errors='replace') as f:
             content = f.read()

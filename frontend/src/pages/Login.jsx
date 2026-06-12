@@ -22,7 +22,10 @@ export default function Login() {
     try {
       const { data } = await api.post('/auth/login', form);
       if (data.pending_2fa) {
-        sessionStorage.setItem('tbc_pending_token', data.token);
+        // Backend already set a short-lived httpOnly `tbc_session` cookie with
+        // the pending_2fa JWT. We no longer mirror the token in sessionStorage
+        // (XSS risk); the /auth/2fa/verify call reads it straight from the
+        // cookie via api's withCredentials transport.
         navigate('/verify-2fa');
       } else {
         saveToken(data.token);

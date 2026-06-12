@@ -70,6 +70,8 @@ def create_password_reset_token(user_id: str, email: str) -> str:
 
 def decode_password_reset_token(token: str) -> dict:
     """Validates a password-reset token. Raises 400 with a friendly message."""
+    payload: dict = {}  # initialised before the try block so static analysers
+                        # don't flag a possible unbound-name on the return.
     try:
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALG])
     except jwt.ExpiredSignatureError:

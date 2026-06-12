@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import api, { streamChat } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
@@ -55,24 +55,46 @@ export default function Dashboard({ variant = 'tbc1' }) {
   const scrollRef = useRef(null);
   const taRef = useRef(null);
 
+  const loadSessions = useCallback(async () => {
+    try {
+      const { data } = await api.get('/chat/sessions', { params: { variant } });
+      setSessions(data);
+    } catch (err) { console.error('Failed to load sessions', err); }
+  }, [variant]);
+
+  const loadMessages = useCallback(async (id) => {
+    try {
+      const { data } = await api.get(`/chat/sessions/${id}/messages`);
+      setMessages(data.messages || []);
+      setModel(data.session?.model || 'claude-opus-4-7');
+    } catch (e) {
+      console.error('Failed to load messages', e);
+      toast.error('Could not load session');
+      navigate('/dashboard');
+    }
+  }, [navigate]);
+
   // Load models + sessions on mount/variant change
   useEffect(() => {
-    api.get('/chat/models').then((r) => setModels(r.data)).catch(() => {});
+    api.get('/chat/models').then((r) => setModels(r.data)).catch((err) => {
+      // models endpoint is best-effort — log so we can spot upstream outages
+      // in the browser console without breaking the chat UI.
+      console.warn('Failed to load chat models', err);
+    });
     loadSessions();
-    // eslint-disable-next-line
-  }, [variant]);
+  }, [variant, loadSessions]);
 
   // Load messages when session changes
   useEffect(() => {
     if (currentId) loadMessages(currentId);
     else setMessages([]);
-    // eslint-disable-next-line
-  }, [currentId]);
+  }, [currentId, loadMessages]);
 
-  // Sync sessionId from URL
+  // Sync sessionId from URL — functional setState so we don't depend on
+  // `currentId` (would re-fire every time it changed and create a loop).
   useEffect(() => {
-    if (paramSession && paramSession !== currentId) setCurrentId(paramSession);
-    // eslint-disable-next-line
+    if (!paramSession) return;
+    setCurrentId((prev) => (paramSession !== prev ? paramSession : prev));
   }, [paramSession]);
 
   // Auto-scroll
@@ -80,24 +102,6 @@ export default function Dashboard({ variant = 'tbc1' }) {
     const el = scrollRef.current;
     if (el) requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
   }, [messages, streamText]);
-
-  async function loadSessions() {
-    try {
-      const { data } = await api.get('/chat/sessions', { params: { variant } });
-      setSessions(data);
-    } catch (err) { console.error('Failed to load sessions', err); }
-  }
-
-  async function loadMessages(id) {
-    try {
-      const { data } = await api.get(`/chat/sessions/${id}/messages`);
-      setMessages(data.messages || []);
-      setModel(data.session?.model || 'claude-opus-4-7');
-    } catch (e) {
-      toast.error('Could not load session');
-      navigate('/dashboard');
-    }
-  }
 
   async function newChat() {
     // Reset UI first so the empty-state shows immediately even on slow connections.
