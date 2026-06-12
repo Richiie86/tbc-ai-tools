@@ -24,6 +24,7 @@ import LicensesTab from './operator/LicensesTab';
 import RoyaltiesTab from './operator/RoyaltiesTab';
 import ProjectsTab from './operator/ProjectsTab';
 import OpsTab from './operator/OpsTab';
+import MoneyTab from './operator/MoneyTab';
 
 const PLANS = ['free', 'starter', 'pro', 'enterprise'];
 
@@ -142,6 +143,7 @@ export default function Operator() {
                 <TabTrigger value="plans" icon={Sparkles}>Plans</TabTrigger>
                 <TabTrigger value="payments" icon={CreditCard}>Payments</TabTrigger>
                 <TabTrigger value="treasury" icon={Wallet}>Treasury</TabTrigger>
+                <TabTrigger value="money" icon={DollarSign}>Money</TabTrigger>
                 <TabTrigger value="licenses" icon={KeyRound}>Licenses</TabTrigger>
                 <TabTrigger value="royalties" icon={Coins}>Royalties</TabTrigger>
                 <TabTrigger value="settings" icon={SettingsIcon}>Security</TabTrigger>
@@ -263,6 +265,7 @@ export default function Operator() {
               <TabsContent value="projects" className="mt-5"><ProjectsTab /></TabsContent>
               <TabsContent value="payments" className="mt-5"><PaymentsTab /></TabsContent>
               <TabsContent value="treasury" className="mt-5"><TreasuryTab /></TabsContent>
+              <TabsContent value="money" className="mt-5"><MoneyTab /></TabsContent>
               <TabsContent value="licenses" className="mt-5"><LicensesTab /></TabsContent>
               <TabsContent value="royalties" className="mt-5"><RoyaltiesTab /></TabsContent>
               <TabsContent value="settings" className="mt-5"><SettingsTab /></TabsContent>

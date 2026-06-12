@@ -12,6 +12,16 @@ gold theme. Domain: **tbctools.org**.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
 ## Implemented
+- ✅ **Trial reminder emails** (Feb 2026): APScheduler runs every hour
+  in-process and dispatches via Resend. Per-user idempotency through
+  `users.trial_email_3d_sent_at` and `users.trial_email_expired_sent_at`.
+  Two templates (T-3 days + T-0 expired) styled to match the password-reset
+  email. Operator-triggered preview + run from Ops tab → "Trial reminder emails"
+  card. Endpoint: `POST /api/operator/cron/trial-reminders?dry_run=bool`.
+- ✅ **Operator → Money tab** (Feb 2026): live Stripe / PayPal / NOWPayments
+  balances pulled per request (never cached). KPI tiles (total revenue, last
+  30 days, pending manual reviews, top method). 30-day revenue sparkline +
+  recent payments table. Endpoint: `GET /api/operator/money/dashboard`.
 - ✅ **Free-trial / time-limited plans** (Feb 2026): `PlanModel.trial_days` field
   (operator-editable in Plans tab). On activation (registration into default plan,
   Stripe/PayPal/manual confirm) the user gets `plan_started_at` and

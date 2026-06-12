@@ -39,6 +39,8 @@ from models import (
 from payments_ext import router as payments_router, seed_defaults as seed_payment_defaults, get_plans_list, get_settings_doc
 from referrals_ext import router as referrals_router, record_referral_signup, record_referral_earning, get_or_create_referral_code
 from ops_ext import router as ops_router
+from money_ext import router as money_router
+from trial_emails import router as trial_emails_router, scan_and_send as trial_scan_and_send
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger('tbc')
@@ -206,10 +208,37 @@ async def startup():
     # Seed default plans + payment settings
     await seed_payment_defaults()
 
+    # Start the trial-expiry email scheduler (every hour, idempotent per user).
+    try:
+        from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+        scheduler = AsyncIOScheduler(timezone='UTC')
+
+        async def _job():
+            try:
+                result = await trial_scan_and_send(dry_run=False)
+                if result['t3_sent'] or result['expired_sent'] or result['errors']:
+                    logger.info('Trial email cron: %s', {k: v for k, v in result.items() if k != 'events'})
+            except Exception:
+                logger.exception('Trial email cron failed')
+
+        scheduler.add_job(_job, 'interval', hours=1, next_run_time=datetime.now(timezone.utc) + timedelta(minutes=2))
+        scheduler.start()
+        app.state.scheduler = scheduler
+        logger.info('Trial-email scheduler started (hourly).')
+    except Exception:
+        logger.exception('Failed to start APScheduler; trial emails will only fire on manual cron')
+
 
 @app.on_event('shutdown')
 async def shutdown():
     client.close()
+    sch = getattr(app.state, 'scheduler', None)
+    if sch:
+        try:
+            sch.shutdown(wait=False)
+        except Exception:
+            pass
 
 
 # ===== HELPERS =====
@@ -1042,6 +1071,8 @@ app.include_router(api)
 app.include_router(payments_router)
 app.include_router(referrals_router)
 app.include_router(ops_router)
+app.include_router(money_router)
+app.include_router(trial_emails_router)
 # app.include_router(marketplace_router)  # Marketplace deferred — skipped per user.
 app.add_middleware(
     CORSMiddleware,

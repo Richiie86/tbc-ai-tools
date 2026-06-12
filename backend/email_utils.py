@@ -65,3 +65,62 @@ def render_password_reset_email(name: str, reset_url: str) -> str:
     </td></tr>
   </table>
 </body></html>"""
+
+
+
+def _trial_email_shell(safe_name: str, headline: str, body_html: str, cta_label: str, cta_url: str) -> str:
+    """Shared inline-CSS shell so trial emails feel consistent with the password reset email."""
+    return f"""<!doctype html>
+<html><body style="margin:0;padding:0;background:#0a0a0c;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;color:#e7e3d6;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#0a0a0c;padding:40px 16px;">
+    <tr><td align="center">
+      <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;background:#13131a;border:1px solid #3a2c08;border-radius:14px;overflow:hidden;">
+        <tr><td style="padding:32px 36px 16px 36px;">
+          <div style="font-size:11px;letter-spacing:2px;text-transform:uppercase;color:#d4a93a;font-weight:700;">TBC AI Tools</div>
+          <h1 style="margin:18px 0 6px 0;font-size:22px;color:#f4eed5;font-weight:700;">{headline}</h1>
+          <div style="margin:6px 0 22px 0;font-size:14px;line-height:1.55;color:#a8a092;">{body_html}</div>
+          <table role="presentation" cellpadding="0" cellspacing="0">
+            <tr><td style="border-radius:10px;background:linear-gradient(135deg,#d4a93a 0%,#b8902a 100%);">
+              <a href="{cta_url}" style="display:inline-block;padding:13px 26px;color:#0a0a0c;text-decoration:none;font-weight:700;font-size:14px;letter-spacing:.3px;">{cta_label} →</a>
+            </td></tr>
+          </table>
+          <p style="margin:22px 0 4px 0;font-size:12px;color:#7e7768;">Hi {safe_name}, this is a courtesy reminder so you don't lose your TBC AI Tools workspace.</p>
+        </td></tr>
+        <tr><td style="padding:18px 36px;background:#0e0e14;border-top:1px solid #2a2316;font-size:11px;color:#7e7768;">
+          TBC AI Tools · tbctools.org · This is a transactional email.
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body></html>"""
+
+
+def render_trial_reminder_email(name: str, plan_name: str, days_left: int, upgrade_url: str) -> str:
+    safe_name = (name or 'there').split('@')[0]
+    body = (
+        f"Your <strong style=\"color:#f4eed5\">{plan_name}</strong> trial ends in "
+        f"<strong style=\"color:#f4eed5\">{days_left} day{'s' if days_left != 1 else ''}</strong>. "
+        "Upgrade now to keep your chat history, sessions, and credits without interruption."
+    )
+    return _trial_email_shell(
+        safe_name,
+        f"{days_left} day{'s' if days_left != 1 else ''} left on your trial",
+        body,
+        'Upgrade my plan',
+        upgrade_url,
+    )
+
+
+def render_trial_expired_email(name: str, plan_name: str, upgrade_url: str) -> str:
+    safe_name = (name or 'there').split('@')[0]
+    body = (
+        f"Your <strong style=\"color:#f4eed5\">{plan_name}</strong> trial has just ended. "
+        "Your chat history is safe — pick a paid plan to keep building with TBC AI Tools."
+    )
+    return _trial_email_shell(
+        safe_name,
+        'Your trial just ended',
+        body,
+        'Pick a plan',
+        upgrade_url,
+    )
