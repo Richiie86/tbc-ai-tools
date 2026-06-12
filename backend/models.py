@@ -349,6 +349,12 @@ class Project(BaseModel):
     tags: List[str] = []
     link_url: Optional[str] = None
     chat_session_id: Optional[str] = None
+    # --- Marketplace fields (v1: operator-supplied asset URL) ---
+    is_for_sale: bool = False
+    price_usd: float = 0.0  # 10.00 - 100.00 when is_for_sale=True
+    asset_url: Optional[str] = None  # External download link (Drive/Dropbox/S3) — emailed after purchase
+    summary: Optional[str] = None  # Short marketplace tagline (160 chars)
+    cover_emoji: Optional[str] = None  # Single emoji shown on marketplace card
     created_at: datetime = Field(default_factory=_now)
     updated_at: datetime = Field(default_factory=_now)
 
@@ -360,6 +366,24 @@ class ProjectUpsertRequest(BaseModel):
     tags: List[str] = []
     link_url: Optional[str] = None
     chat_session_id: Optional[str] = None
+    is_for_sale: bool = False
+    price_usd: float = 0.0
+    asset_url: Optional[str] = None
+    summary: Optional[str] = None
+    cover_emoji: Optional[str] = None
+
+
+class MarketplacePurchase(BaseModel):
+    id: str = Field(default_factory=_uid)
+    project_id: str
+    buyer_email: str
+    buyer_user_id: Optional[str] = None
+    price_paid_usd: float
+    stripe_session_id: Optional[str] = None
+    paid: bool = False
+    delivered: bool = False  # asset email sent
+    created_at: datetime = Field(default_factory=_now)
+    paid_at: Optional[datetime] = None
 
 
 # ===== BRAND SETTINGS (share URLs etc) =====
