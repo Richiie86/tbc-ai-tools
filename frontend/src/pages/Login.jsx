@@ -7,6 +7,7 @@ import { Input } from '../components/ui/input';
 import { useAuth } from '../context/AuthContext';
 import { toast } from 'sonner';
 import { Loader2, LogIn, ShieldCheck } from 'lucide-react';
+import PasswordInput from '../components/PasswordInput';
 
 export default function Login() {
   const [form, setForm] = useState({ email: '', password: '' });
@@ -62,7 +63,14 @@ export default function Login() {
             </div>
             <div>
               <label className="text-xs font-semibold uppercase tracking-wider text-slate-400">Password</label>
-              <Input className="mt-1.5 border-slate-700 bg-ink-950 text-slate-100" type="password" value={form.password} onChange={(e)=>setForm({...form,password:e.target.value})} placeholder="••••••••" />
+              <PasswordInput
+                className="mt-1.5 border-slate-700 bg-ink-950 text-slate-100"
+                value={form.password}
+                onChange={(e)=>setForm({...form,password:e.target.value})}
+                placeholder="••••••••••"
+                testId="login-password"
+                autoComplete="current-password"
+              />
             </div>
             <Button disabled={loading} type="submit" className="w-full bg-tbc-500 text-slate-950 hover:bg-tbc-400 font-semibold">
               {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}

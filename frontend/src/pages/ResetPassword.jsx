@@ -8,6 +8,7 @@ import { useAuth } from '../context/AuthContext';
 import { toast } from 'sonner';
 import { Loader2, KeyRound, CheckCircle2 } from 'lucide-react';
 import PasswordStrengthMeter from '../components/PasswordStrengthMeter';
+import PasswordInput from '../components/PasswordInput';
 import { evaluatePassword } from '../lib/passwordStrength';
 
 export default function ResetPassword() {
@@ -73,26 +74,26 @@ export default function ResetPassword() {
           <form onSubmit={submit} className="mt-7 space-y-4">
             <div>
               <label className="text-xs font-semibold uppercase tracking-wider text-slate-400">New password</label>
-              <Input
-                data-testid="reset-new-password"
+              <PasswordInput
                 className="mt-1.5 border-slate-700 bg-ink-950 text-slate-100"
-                type="password"
                 value={pwd}
                 onChange={(e) => setPwd(e.target.value)}
                 placeholder="••••••••••"
+                testId="reset-new-password"
                 autoFocus
+                autoComplete="new-password"
               />
               <PasswordStrengthMeter password={pwd} />
             </div>
             <div>
               <label className="text-xs font-semibold uppercase tracking-wider text-slate-400">Confirm new password</label>
-              <Input
-                data-testid="reset-confirm-password"
+              <PasswordInput
                 className="mt-1.5 border-slate-700 bg-ink-950 text-slate-100"
-                type="password"
                 value={confirm}
                 onChange={(e) => setConfirm(e.target.value)}
                 placeholder="••••••••••"
+                testId="reset-confirm-password"
+                autoComplete="new-password"
               />
               {confirm && pwd && confirm !== pwd && (
                 <p className="mt-1 text-[11px] text-rose-400">Passwords do not match</p>

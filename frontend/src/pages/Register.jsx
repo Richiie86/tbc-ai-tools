@@ -8,6 +8,7 @@ import { useAuth } from '../context/AuthContext';
 import { toast } from 'sonner';
 import { Loader2, UserPlus } from 'lucide-react';
 import PasswordStrengthMeter from '../components/PasswordStrengthMeter';
+import PasswordInput from '../components/PasswordInput';
 import { evaluatePassword } from '../lib/passwordStrength';
 
 export default function Register() {
@@ -64,7 +65,14 @@ export default function Register() {
             </div>
             <div>
               <label className="text-xs font-semibold uppercase tracking-wider text-slate-400">Password <span className="text-slate-500 normal-case">(min 10 chars · 3+ classes)</span></label>
-              <Input className="mt-1.5 border-slate-700 bg-ink-950 text-slate-100" type="password" value={form.password} onChange={(e)=>setForm({...form,password:e.target.value})} placeholder="••••••••••" />
+              <PasswordInput
+                className="mt-1.5 border-slate-700 bg-ink-950 text-slate-100"
+                value={form.password}
+                onChange={(e)=>setForm({...form,password:e.target.value})}
+                placeholder="••••••••••"
+                testId="register-password"
+                autoComplete="new-password"
+              />
               <PasswordStrengthMeter password={form.password} />
             </div>
             <Button disabled={loading} type="submit" className="w-full bg-tbc-500 text-slate-950 hover:bg-tbc-400 font-semibold">
