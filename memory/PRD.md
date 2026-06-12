@@ -12,6 +12,14 @@ gold theme. Domain: **tbctools.org**.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
 ## Implemented
+- ✅ **Operator → Audit tab** (Feb 2026): centralized `audit_log` collection +
+  `record_audit()` helper hooked into every destructive operator endpoint
+  (user pause/resume/delete/credits/set_plan/reset_2fa, bulk actions,
+  withdrawals manual/auto, withdraw settings update). Each row captures
+  actor email, action, target, JSON details, IP (proxy-aware), timestamp.
+  Frontend has action dropdown filter + actor-email contains filter +
+  paginated table (50/page) + per-page CSV export. Endpoint:
+  `GET /api/operator/audit?limit&skip&action&actor`.
 - ✅ **About page copy + compact team cards** (Feb 2026): updated team blurb
   attributing the engine to Emergent; team cards reduced to ~⅓ size with
   smaller avatars/names/role text.

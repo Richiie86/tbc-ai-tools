@@ -42,6 +42,7 @@ from ops_ext import router as ops_router
 from money_ext import router as money_router
 from trial_emails import router as trial_emails_router, scan_and_send as trial_scan_and_send
 from autowithdraw_ext import router as autowithdraw_router, run_auto_withdraw_once
+from audit_ext import router as audit_router, record_audit
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger('tbc')
@@ -945,17 +946,17 @@ async def op_stats(_: dict = Depends(get_current_operator)):
 
 
 @api.post('/operator/users/{user_id}/credits')
-async def op_grant_credits(user_id: str, amount: int = Query(...), _: dict = Depends(get_current_operator)):
+async def op_grant_credits(user_id: str, request: Request, amount: int = Query(...), op: dict = Depends(get_current_operator)):
+    target = await db.users.find_one({'id': user_id}, {'id': 1, 'email': 1})
     res = await db.users.update_one({'id': user_id}, {'$inc': {'credits': amount}})
     if res.matched_count == 0:
         raise HTTPException(404, 'User not found')
+    await record_audit(op, 'user.credits', target=(target or {}).get('email'), details={'amount': amount}, request=request)
     return {'success': True}
 
 
 @api.post('/operator/users/{user_id}/plan')
-async def op_set_plan(user_id: str, plan: str = Query(...), _: dict = Depends(get_current_operator)):
-    if plan not in ('free', 'starter', 'pro', 'enterprise'):
-        raise HTTPException(400, 'Invalid plan')
+async def op_set_plan(user_id: str, request: Request, plan: str = Query(...), op: dict = Depends(get_current_operator)):
     target = await db.users.find_one({'id': user_id})
     if not target:
         raise HTTPException(404, 'User not found')
@@ -964,11 +965,12 @@ async def op_set_plan(user_id: str, plan: str = Query(...), _: dict = Depends(ge
     plan_credits = {'free': 50, 'starter': 500, 'pro': 2500, 'enterprise': 10000}
     inc_credits = plan_credits.get(plan, 0) if plan != 'free' else 0
     await db.users.update_one({'id': user_id}, {'$set': update, '$inc': {'credits': inc_credits} if inc_credits else {}})
+    await record_audit(op, 'user.set_plan', target=target.get('email'), details={'plan': plan, 'credits_added': inc_credits}, request=request)
     return {'success': True, 'plan': plan, 'credits_added': inc_credits}
 
 
 @api.post('/operator/users/{user_id}/reset-2fa')
-async def op_reset_2fa(user_id: str, op: dict = Depends(get_current_operator)):
+async def op_reset_2fa(user_id: str, request: Request, op: dict = Depends(get_current_operator)):
     """Clear a user's TOTP secret so they can re-enrol next login. Operator-only."""
     target = await db.users.find_one({'id': user_id}, {'id': 1, 'email': 1})
     if not target:
@@ -978,11 +980,12 @@ async def op_reset_2fa(user_id: str, op: dict = Depends(get_current_operator)):
         {'$unset': {'totp_secret': '', 'totp_enabled': '', 'totp_pending_secret': ''}},
     )
     logger.info('Operator %s reset 2FA for %s', op.get('email'), target.get('email'))
+    await record_audit(op, 'user.reset_2fa', target=target.get('email'), request=request)
     return {'success': True, 'email': target.get('email')}
 
 
 @api.post('/operator/users/{user_id}/pause')
-async def op_pause_user(user_id: str, op: dict = Depends(get_current_operator)):
+async def op_pause_user(user_id: str, request: Request, op: dict = Depends(get_current_operator)):
     """Toggle a user's paused status. Paused users cannot log in."""
     target = await db.users.find_one({'id': user_id}, {'id': 1, 'email': 1, 'status': 1, 'role': 1})
     if not target:
@@ -992,11 +995,12 @@ async def op_pause_user(user_id: str, op: dict = Depends(get_current_operator)):
     new_status = 'active' if target.get('status') == 'paused' else 'paused'
     await db.users.update_one({'id': user_id}, {'$set': {'status': new_status}})
     logger.info('Operator %s set status=%s for %s', op.get('email'), new_status, target.get('email'))
+    await record_audit(op, f'user.{new_status}', target=target.get('email'), request=request)
     return {'success': True, 'status': new_status, 'email': target.get('email')}
 
 
 @api.post('/operator/users/{user_id}/delete')
-async def op_delete_user(user_id: str, op: dict = Depends(get_current_operator)):
+async def op_delete_user(user_id: str, request: Request, op: dict = Depends(get_current_operator)):
     """Soft-delete a user — preserves audit trail and referral/payment history."""
     target = await db.users.find_one({'id': user_id}, {'id': 1, 'email': 1, 'role': 1})
     if not target:
@@ -1008,11 +1012,12 @@ async def op_delete_user(user_id: str, op: dict = Depends(get_current_operator))
         {'$set': {'deleted_at': datetime.now(timezone.utc), 'status': 'deleted'}},
     )
     logger.warning('Operator %s soft-deleted user %s', op.get('email'), target.get('email'))
+    await record_audit(op, 'user.delete', target=target.get('email'), request=request)
     return {'success': True, 'email': target.get('email')}
 
 
 @api.post('/operator/users/bulk')
-async def op_bulk_user_action(payload: dict, op: dict = Depends(get_current_operator)):
+async def op_bulk_user_action(payload: dict, request: Request, op: dict = Depends(get_current_operator)):
     """Apply an action to multiple users at once.
 
     Body: { user_ids: [str], action: 'pause'|'resume'|'delete'|'grant_credits'|'set_plan',
@@ -1069,6 +1074,13 @@ async def op_bulk_user_action(payload: dict, op: dict = Depends(get_current_oper
         ok.append(t['id'])
 
     logger.warning('Operator %s bulk %s on %d users (skipped=%d)', op.get('email'), action, len(ok), len(skipped))
+    await record_audit(
+        op,
+        f'user.bulk_{action}',
+        target=f'{len(ok)} users',
+        details={'ok_count': len(ok), 'skipped_count': len(skipped), 'extra': {k: v for k, v in payload.items() if k not in ('user_ids',)}},
+        request=request,
+    )
     return {'action': action, 'ok': ok, 'skipped': skipped, 'total': len(user_ids)}
 
 
@@ -1152,6 +1164,7 @@ app.include_router(ops_router)
 app.include_router(money_router)
 app.include_router(trial_emails_router)
 app.include_router(autowithdraw_router)
+app.include_router(audit_router)
 # app.include_router(marketplace_router)  # Marketplace deferred — skipped per user.
 app.add_middleware(
     CORSMiddleware,

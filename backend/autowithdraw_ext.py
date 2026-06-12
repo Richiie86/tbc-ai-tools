@@ -24,12 +24,13 @@ from datetime import datetime, timezone
 from typing import Optional, List
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from auth_utils import get_current_operator
 from db import db
 from payments_ext import get_settings_doc, _paypal_token  # noqa: F401 (paypal helper reserved for future)
+from audit_ext import record_audit
 
 logger = logging.getLogger('tbc.withdraw')
 router = APIRouter(prefix='/api/operator/withdraw')
@@ -165,9 +166,10 @@ async def get_autowithdraw_settings(_user: dict = Depends(get_current_operator))
 
 
 @router.put('/settings')
-async def update_autowithdraw_settings(req: AutoWithdrawSettings, _user: dict = Depends(get_current_operator)):
+async def update_autowithdraw_settings(req: AutoWithdrawSettings, request: Request, op: dict = Depends(get_current_operator)):
     updates = req.dict(exclude_unset=False)
     await db.settings.update_one({'_id': 'payment_settings'}, {'$set': updates}, upsert=True)
+    await record_audit(op, 'withdraw.settings_update', details={'keys': list(updates.keys())}, request=request)
     return {'success': True, 'updated_keys': list(updates.keys())}
 
 
@@ -186,26 +188,30 @@ async def list_withdrawals(_user: dict = Depends(get_current_operator)):
 
 # ============== MANUAL PAYOUTS ==============
 @router.post('/stripe/now')
-async def withdraw_stripe_now(req: ManualStripePayoutRequest, _user: dict = Depends(get_current_operator)):
+async def withdraw_stripe_now(req: ManualStripePayoutRequest, request: Request, op: dict = Depends(get_current_operator)):
     settings = await get_settings_doc()
     try:
         result = await _stripe_payout(settings, req.amount_usd)
         wid = await _record('stripe', 'manual', req.amount_usd, 'success', f"Stripe payout {result.get('id')}", result)
+        await record_audit(op, 'withdraw.stripe_manual', details={'amount_usd': req.amount_usd, 'stripe_id': result.get('id')}, request=request)
         return {'success': True, 'withdrawal_id': wid, 'stripe_id': result.get('id'), 'arrival_date': result.get('arrival_date')}
     except HTTPException as e:
         await _record('stripe', 'manual', req.amount_usd, 'failed', e.detail)
+        await record_audit(op, 'withdraw.stripe_manual.failed', details={'amount_usd': req.amount_usd, 'error': e.detail}, request=request)
         raise
 
 
 @router.post('/nowpayments/now')
-async def withdraw_nowpayments_now(req: ManualCryptoPayoutRequest, _user: dict = Depends(get_current_operator)):
+async def withdraw_nowpayments_now(req: ManualCryptoPayoutRequest, request: Request, op: dict = Depends(get_current_operator)):
     settings = await get_settings_doc()
     try:
         result = await _nowpayments_payout(settings, req.amount, req.currency, req.address)
         wid = await _record('nowpayments', 'manual', float(req.amount), 'success', f"{req.amount} {req.currency} → {req.address[:10]}…", result)
+        await record_audit(op, 'withdraw.crypto_manual', details={'amount': float(req.amount), 'currency': req.currency, 'address': req.address[:10] + '…'}, request=request)
         return {'success': True, 'withdrawal_id': wid, 'response': result}
     except HTTPException as e:
         await _record('nowpayments', 'manual', float(req.amount), 'failed', e.detail)
+        await record_audit(op, 'withdraw.crypto_manual.failed', details={'currency': req.currency, 'error': e.detail}, request=request)
         raise
 
 
