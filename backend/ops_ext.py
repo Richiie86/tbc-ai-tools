@@ -119,7 +119,12 @@ def _check_disk() -> dict:
 
 
 def _check_services() -> list[dict]:
-    """Only treat the trio core services as required for "healthy"."""
+    """Only treat the trio core services as required for "healthy".
+
+    Non-core services that aren't RUNNING surface as a `warn` row (yellow in
+    the UI) instead of silently passing — operators were previously blind to
+    a stopped sidecar because the row would just say "non-critical · ok".
+    """
     CORE_SERVICES = {'backend', 'frontend', 'mongodb'}
     res = _run(['sudo', 'supervisorctl', 'status'], timeout=10)
     rows: list[dict] = []
@@ -130,11 +135,25 @@ def _check_services() -> list[dict]:
         name = parts[0]
         state = parts[1] if len(parts) > 1 else 'UNKNOWN'
         is_core = name in CORE_SERVICES
-        ok = state == 'RUNNING' if is_core else True
+        is_running = state == 'RUNNING'
         detail = ' '.join(parts[1:]) if len(parts) > 1 else 'unknown'
-        if not is_core and state != 'RUNNING':
-            detail = f'{detail} · non-critical'
-        rows.append({'key': f'svc.{name}', 'label': f'svc · {name}', 'ok': ok, 'detail': detail})
+
+        if is_core:
+            level = 'ok' if is_running else 'fail'
+        else:
+            level = 'ok' if is_running else 'warn'
+            if not is_running:
+                detail = f'{detail} · non-critical sidecar stopped'
+
+        rows.append({
+            'key': f'svc.{name}',
+            'label': f'svc · {name}',
+            # `ok` is preserved for back-compat — UI old enough to predate
+            # the `level` field will still light up correctly.
+            'ok': level != 'fail',
+            'level': level,
+            'detail': detail,
+        })
     return rows
 
 
@@ -155,10 +174,17 @@ async def ops_health(_user: dict = Depends(get_current_operator)):
     checks.append(_check_disk())
     checks.extend(_check_services())
 
-    ok_count = sum(1 for c in checks if c['ok'])
+    ok_count = sum(1 for c in checks if c.get('level', 'ok' if c['ok'] else 'fail') == 'ok')
+    warn_count = sum(1 for c in checks if c.get('level') == 'warn')
+    fail_count = sum(1 for c in checks if c.get('level', 'ok' if c['ok'] else 'fail') == 'fail')
     return {
         'generated_at': _now_iso(),
-        'summary': {'total': len(checks), 'passing': ok_count, 'failing': len(checks) - ok_count},
+        'summary': {
+            'total': len(checks),
+            'passing': ok_count,
+            'warning': warn_count,
+            'failing': fail_count,
+        },
         'commit': _check_commit(),
         'checks': checks,
     }

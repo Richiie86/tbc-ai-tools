@@ -14,6 +14,7 @@ import { TrialBanner } from './dashboard/TrialBanner';
 import { EmptyState, MessageBubble } from './dashboard/ChatMessages';
 import { ChatComposer } from './dashboard/ChatComposer';
 import CreditsBadge from '../components/CreditsBadge';
+import { OutOfCreditsDialog } from './dashboard/OutOfCreditsDialog';
 
 function sidebarTimeLabel(iso) {
   try {
@@ -44,6 +45,7 @@ export default function Dashboard({ variant = 'tbc1' }) {
   const [model, setModel] = useState('claude-opus-4-7');
   const [models, setModels] = useState({ providers: {} });
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [outOfCreditsOpen, setOutOfCreditsOpen] = useState(false);
   const scrollRef = useRef(null);
   const taRef = useRef(null);
   const streamTextRef = useRef('');
@@ -154,8 +156,10 @@ export default function Dashboard({ variant = 'tbc1' }) {
     const text = input.trim();
     if (!text || streaming) return;
     if (user && user.role !== 'operator' && (user.credits ?? 0) <= 0) {
-      toast.error('Out of credits. Please upgrade your plan.');
-      navigate('/pricing');
+      // Dedicated dialog (with a top-up CTA) converts far better than the old
+      // toast + redirect. We keep the draft in the textarea so the user can
+      // send it the moment they top up.
+      setOutOfCreditsOpen(true);
       return;
     }
     setInput('');
@@ -294,6 +298,11 @@ export default function Dashboard({ variant = 'tbc1' }) {
           taRef={taRef}
         />
       </main>
+      <OutOfCreditsDialog
+        open={outOfCreditsOpen}
+        onOpenChange={setOutOfCreditsOpen}
+        user={user}
+      />
     </div>
   );
 }

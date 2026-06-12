@@ -12,6 +12,32 @@ gold theme. Domain: **tbctools.org**.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
 ## Implemented
+- ✅ **Stripe Customer Portal + Credits modal + Ops warn state** (Feb 2026):
+  - **Stripe Customer Portal** (`/app/backend/billing_portal_ext.py`,
+    `POST /api/billing/portal`): one-tap self-serve invoices / payment method /
+    cancellation for any paying user. Looks up the Stripe customer by email
+    (no schema change), creates a portal session, returns the URL. Constrains
+    the `return_url` to the requesting origin so it can't be used as an open
+    redirect. Surfaces a clean 404 with an "upgrade first" hint for users with
+    no billing history. Wired into the Navbar dropdown as "Manage billing ·
+    invoices" — hidden for free/operator accounts. Helpful error message when
+    the Stripe portal config hasn't been activated by the operator yet.
+  - **OutOfCreditsDialog** (`/app/frontend/src/pages/dashboard/OutOfCreditsDialog.jsx`):
+    fires the moment a user with ≤0 credits hits Send. Three top-up packs
+    (100/500/1000 credits, $9/$39/$69) with per-credit price shown, "Popular"
+    badge on the 500 pack, graceful fallback to `/pricing` if the pack plan_id
+    isn't configured. The draft message stays in the composer so the user can
+    send it immediately after top-up.
+  - **Ops health-check warn state**: non-RUNNING sidecar services (e.g.
+    `code-server`) now render as **amber `warn`** tiles instead of silently
+    going green. Backend `_check_services` returns `level: ok | warn | fail`
+    (keeps the `ok` boolean for back-compat). Summary now includes
+    `warning` count and the header pill reads "N warning — operational" or
+    "N issues detected" appropriately. Verified live: 19 ok / 1 warn / 0 fail.
+  - Regression tests: `/app/backend/tests/test_p1_refactor.py` now includes
+    `TestBillingPortal` (unauth → 401, no-billing-history → 404/503). Full
+    suite: **17/17 passing** (1 prior skip preserved).
+
 - ✅ **Credits visibility + P2 cleanup** (Feb 2026):
   - New `CreditsBadge` component (`/app/frontend/src/components/CreditsBadge.jsx`)
     surfaces remaining credits with a colour-coded tone (default tbc-gold,

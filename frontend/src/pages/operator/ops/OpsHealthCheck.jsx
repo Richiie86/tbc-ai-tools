@@ -1,15 +1,23 @@
 import React from 'react';
 import { Button } from '../../../components/ui/button';
 import {
-  Activity, RefreshCw, Loader2, CheckCircle2, AlertCircle,
+  Activity, RefreshCw, Loader2, CheckCircle2, AlertCircle, AlertTriangle,
 } from 'lucide-react';
 
-const SEV = (ok) => ok
-  ? { dot: 'bg-emerald-400', text: 'text-emerald-300', ring: 'border-emerald-500/30 bg-emerald-500/5' }
-  : { dot: 'bg-rose-400',    text: 'text-rose-300',    ring: 'border-rose-500/40 bg-rose-500/5' };
+/** Tone lookup for the three health levels. Falls back to the legacy `ok`
+ *  boolean so older payloads still render correctly during a rolling deploy. */
+const TONE = {
+  ok:   { dot: 'bg-emerald-400', text: 'text-emerald-300', ring: 'border-emerald-500/30 bg-emerald-500/5', Icon: CheckCircle2, iconClass: 'text-emerald-400/70' },
+  warn: { dot: 'bg-amber-400',   text: 'text-amber-200',   ring: 'border-amber-500/40 bg-amber-500/5',     Icon: AlertTriangle, iconClass: 'text-amber-400/80' },
+  fail: { dot: 'bg-rose-400',    text: 'text-rose-300',    ring: 'border-rose-500/40 bg-rose-500/5',       Icon: AlertCircle,   iconClass: 'text-rose-400/80' },
+};
+
+const levelOf = (c) => c.level || (c.ok ? 'ok' : 'fail');
 
 /** Full health-check section: header + status pill + per-check tiles. */
 export function OpsHealthCheck({ health, loading, onRefresh }) {
+  const failing = health?.summary?.failing ?? 0;
+  const warning = health?.summary?.warning ?? 0;
   return (
     <section>
       <div className="mb-3 flex items-center justify-between">
@@ -39,16 +47,22 @@ export function OpsHealthCheck({ health, loading, onRefresh }) {
       {health && (
         <div className="mb-3 flex flex-wrap items-center gap-3 text-xs">
           <div className={`rounded-full border px-3 py-1 ${
-            health.summary.failing === 0
-              ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
-              : 'border-rose-500/40 bg-rose-500/10 text-rose-300'
+            failing > 0
+              ? 'border-rose-500/40 bg-rose-500/10 text-rose-300'
+              : warning > 0
+                ? 'border-amber-500/40 bg-amber-500/10 text-amber-200'
+                : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
           }`}>
-            {health.summary.failing === 0
-              ? '✓ All systems operational'
-              : `${health.summary.failing} issue${health.summary.failing > 1 ? 's' : ''} detected`}
+            {failing > 0
+              ? `${failing} issue${failing > 1 ? 's' : ''} detected`
+              : warning > 0
+                ? `${warning} warning${warning > 1 ? 's' : ''} — operational`
+                : '✓ All systems operational'}
           </div>
           <div className="text-tbc-200/60">
-            {health.summary.passing}/{health.summary.total} passing · checked {new Date(health.generated_at).toLocaleTimeString()}
+            {health.summary.passing}/{health.summary.total} passing
+            {warning > 0 ? ` · ${warning} warn` : ''}
+            {' · checked '}{new Date(health.generated_at).toLocaleTimeString()}
           </div>
           <div className="text-tbc-200/40">commit · {health.commit}</div>
         </div>
@@ -59,14 +73,15 @@ export function OpsHealthCheck({ health, loading, onRefresh }) {
       ) : (
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3" data-testid="ops-health-grid">
           {(health?.checks || []).map((c) => {
-            const s = SEV(c.ok);
+            const t = TONE[levelOf(c)] || TONE.fail;
             return (
               <div
                 key={c.key}
                 data-testid={`ops-check-${c.key}`}
-                className={`flex items-start gap-3 rounded-lg border p-3 ${s.ring}`}
+                data-level={levelOf(c)}
+                className={`flex items-start gap-3 rounded-lg border p-3 ${t.ring}`}
               >
-                <span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${s.dot}`} />
+                <span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${t.dot}`} />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-2">
                     <div className="truncate text-sm font-semibold text-tbc-100">{c.label}</div>
@@ -74,13 +89,11 @@ export function OpsHealthCheck({ health, loading, onRefresh }) {
                       <span className="text-[10px] text-tbc-200/50">{c.latency_ms}ms</span>
                     )}
                   </div>
-                  <div className={`mt-0.5 truncate text-xs ${s.text}`} title={c.detail}>
-                    {c.detail || (c.ok ? 'OK' : 'failing')}
+                  <div className={`mt-0.5 truncate text-xs ${t.text}`} title={c.detail}>
+                    {c.detail || (levelOf(c) === 'ok' ? 'OK' : levelOf(c) === 'warn' ? 'warning' : 'failing')}
                   </div>
                 </div>
-                {c.ok
-                  ? <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400/70" />
-                  : <AlertCircle className="h-4 w-4 shrink-0 text-rose-400/80" />}
+                <t.Icon className={`h-4 w-4 shrink-0 ${t.iconClass}`} />
               </div>
             );
           })}

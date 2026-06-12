@@ -2,9 +2,11 @@ import React from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { Button } from './ui/button';
 import { useAuth } from '../context/AuthContext';
-import { LayoutDashboard, LogOut, ShieldCheck, Sparkles, Bot, Coins } from 'lucide-react';
+import { LayoutDashboard, LogOut, ShieldCheck, Sparkles, Bot, Coins, Receipt, Loader2 } from 'lucide-react';
 import Logo from './Logo';
 import CreditsBadge from './CreditsBadge';
+import api from '../lib/api';
+import { toast } from 'sonner';
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent,
   DropdownMenuItem, DropdownMenuSeparator, DropdownMenuLabel,
@@ -15,6 +17,32 @@ export default function Navbar({ minimal = false }) {
   const navigate = useNavigate();
   const loc = useLocation();
   const isActive = (p) => loc.pathname === p;
+  const [openingPortal, setOpeningPortal] = React.useState(false);
+
+  // Stripe Customer Portal: invoices / payment method / cancel. Hidden for
+  // anyone who's never paid (the backend would 404 anyway).
+  const hasBillingHistory = user && user.plan && user.plan !== 'free' && user.role !== 'operator';
+
+  const openBillingPortal = async () => {
+    setOpeningPortal(true);
+    try {
+      const { data } = await api.post('/billing/portal', {
+        return_url: window.location.href,
+      });
+      window.location.href = data.url;
+    } catch (e) {
+      const msg = e?.response?.data?.detail || 'Could not open billing portal';
+      // 404 = no billing history yet — nudge to pricing instead of erroring.
+      if (e?.response?.status === 404) {
+        toast.message('Upgrade your plan first to use the billing portal');
+        navigate('/pricing');
+      } else {
+        toast.error(msg);
+      }
+    } finally {
+      setOpeningPortal(false);
+    }
+  };
 
   return (
     <header className="sticky top-0 z-40 w-full border-b border-slate-800/80 bg-ink-950/70 backdrop-blur-xl">
@@ -110,6 +138,19 @@ export default function Navbar({ minimal = false }) {
                   <Sparkles className="mr-2 h-4 w-4" />
                   {user.role === 'operator' ? 'Manage plans' : (user.credits ?? 0) <= 0 ? 'Buy credits' : 'Upgrade · top up credits'}
                 </DropdownMenuItem>
+                {hasBillingHistory && (
+                  <DropdownMenuItem
+                    data-testid="nav-billing-portal"
+                    onClick={openBillingPortal}
+                    disabled={openingPortal}
+                    className="focus:bg-slate-800 cursor-pointer"
+                  >
+                    {openingPortal
+                      ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      : <Receipt className="mr-2 h-4 w-4 text-tbc-400" />}
+                    Manage billing · invoices
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuSeparator className="bg-slate-800" />
                 <DropdownMenuItem onClick={() => { logout(); navigate('/'); }} className="focus:bg-slate-800 cursor-pointer">
                   <LogOut className="mr-2 h-4 w-4" /> Sign out

@@ -59,11 +59,14 @@ class TestOpsHealth:
         # Top-level keys
         for k in ('generated_at', 'summary', 'commit', 'checks'):
             assert k in data, f"missing key {k}"
-        # summary shape
+        # summary shape — `warning` was added in Feb 2026 to surface non-core
+        # services that aren't RUNNING. `ok` boolean still mirrors `level=ok`
+        # so old clients keep working.
         s = data['summary']
         assert all(k in s for k in ('total', 'passing', 'failing'))
         assert s['total'] == len(data['checks'])
-        assert s['passing'] + s['failing'] == s['total']
+        warning = s.get('warning', 0)
+        assert s['passing'] + warning + s['failing'] == s['total']
         # checks shape — each must have {key, label, ok}
         keys = []
         for c in data['checks']:
@@ -146,3 +149,35 @@ class TestTransactionsExport:
         # PDF magic bytes
         assert r.content[:4] == b'%PDF', 'response body is not a PDF'
         assert len(r.content) > 500, 'PDF unexpectedly small'
+
+
+
+# ---------- billing/portal ----------
+class TestBillingPortal:
+    """Stripe Customer Portal session creation.
+
+    We can't easily simulate a paying customer from the outside, but we *can*
+    verify the endpoint exists, validates auth, validates input shape, and
+    returns the documented 404 for users with no Stripe billing history.
+    """
+
+    def test_unauthenticated_rejected(self):
+        r = requests.post(f"{API}/billing/portal",
+                          json={'return_url': BASE_URL + '/dashboard'},
+                          timeout=10)
+        assert r.status_code == 401, f"unauth caller should get 401, got {r.status_code}"
+
+    def test_operator_with_no_billing_returns_404_or_503(self, operator_session):
+        # Operator account has never paid -> Stripe customer lookup returns
+        # no rows -> we expect 404. If Stripe is not configured on this server
+        # (CI), we accept 503 instead so the test can still pass.
+        r = operator_session.post(
+            f"{API}/billing/portal",
+            json={'return_url': BASE_URL + '/'},
+            timeout=15,
+        )
+        assert r.status_code in (404, 503), (
+            f"expected 404 (no billing history) or 503 (no key), got {r.status_code} {r.text[:200]}"
+        )
+        body = r.json()
+        assert 'detail' in body, 'missing detail in error body'
