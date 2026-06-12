@@ -12,6 +12,20 @@ gold theme. Domain: **tbctools.org**.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
 ## Implemented
+- ✅ **Credit packs auto-seeded** (Feb 2026): `DEFAULT_CREDIT_PACKS` in
+  `payments_ext.py` now seeds three packs at startup
+  (`credits_100` $9, `credits_500` $39, `credits_1000` $69) idempotently —
+  upsert-per-id so re-runs roll forward price edits and existing deployments
+  pick them up on next restart. Packs carry `hidden: True` so the public
+  `/api/payments/plans` (consumed by /pricing) filters them out, while
+  `/api/operator/plans` (Plans tab in the operator console) still lists them
+  for price tuning. `_plan_activation_set` was made credit-pack-aware: for
+  `kind: 'credit_pack'` purchases we only stamp `credits_last_topped_up_at`
+  and rely on the existing `$inc: {credits}` so the user's subscription plan
+  is never overwritten by a top-up. Two new regression tests in
+  `TestCreditPacks` verify the hidden-from-public + visible-to-operator
+  behaviour. Full suite: **19/19 passing**.
+
 - ✅ **Stripe Customer Portal + Credits modal + Ops warn state** (Feb 2026):
   - **Stripe Customer Portal** (`/app/backend/billing_portal_ext.py`,
     `POST /api/billing/portal`): one-tap self-serve invoices / payment method /

@@ -737,9 +737,14 @@ async def list_models():
 @api.get('/payments/plans')
 async def get_plans():
     plans = await get_plans_list(only_enabled=True)
-    # Strip internal fields and return public shape
+    # Strip internal fields and return public shape. Hidden plans (e.g. the
+    # in-chat credit packs surfaced from OutOfCreditsDialog) are excluded so
+    # they don't clutter the public Pricing page; they're still purchasable
+    # via the modal because the checkout endpoint accepts any enabled plan.
     out = []
     for p in plans:
+        if p.get('hidden'):
+            continue
         out.append({
             'id': p['id'],
             'name': p['name'],

@@ -181,3 +181,28 @@ class TestBillingPortal:
         )
         body = r.json()
         assert 'detail' in body, 'missing detail in error body'
+
+
+# ---------- Credit packs ----------
+class TestCreditPacks:
+    """The OutOfCreditsDialog top-up flow needs:
+       (a) The three `credits_<N>` plans to exist (idempotent seed).
+       (b) The public /payments/plans endpoint to NOT list them.
+       (c) The operator /operator/plans endpoint to list them so the operator
+           can still edit the price in the Plans tab.
+    """
+
+    def test_public_plans_excludes_credit_packs(self):
+        r = requests.get(f"{API}/payments/plans", timeout=10)
+        assert r.status_code == 200
+        plan_ids = [p['id'] for p in r.json()]
+        for pack in ('credits_100', 'credits_500', 'credits_1000'):
+            assert pack not in plan_ids, f"public /plans leaked hidden pack {pack}"
+
+    def test_operator_plans_includes_credit_packs(self, operator_session):
+        r = operator_session.get(f"{API}/operator/plans", timeout=10)
+        assert r.status_code == 200
+        plan_ids = [p['id'] for p in r.json()]
+        for pack in ('credits_100', 'credits_500', 'credits_1000'):
+            assert pack in plan_ids, f"credit pack {pack} not seeded"
+

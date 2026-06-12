@@ -38,6 +38,17 @@ DEFAULT_PLANS = [
     {'id': 'enterprise', 'name': 'Enterprise', 'price': 139.0, 'regular_price': 139.0, 'credits': 10000,  'intro': False, 'features': ['10,000 AI messages/mo', 'All frontier models', 'API access', 'Custom integrations', '24/7 support'], 'enabled': True, 'order': 3},
 ]
 
+# One-shot top-up packs surfaced from the in-chat OutOfCreditsDialog. These are
+# `hidden: True` so they don't render on the public /pricing page (the modal
+# drives the only entry point). Updating `price` here keeps the modal & the
+# Plans tab in sync. Adding a new pack is a one-line addition + a matching
+# entry in OutOfCreditsDialog.jsx → TOP_UP_PACKS.
+DEFAULT_CREDIT_PACKS = [
+    {'id': 'credits_100',  'name': 'Quick top-up', 'price': 9.0,  'regular_price': 9.0,  'credits': 100,   'intro': False, 'features': ['100 credits',  'No expiry', 'Applies across every model'], 'enabled': True, 'hidden': True, 'order': 100, 'kind': 'credit_pack'},
+    {'id': 'credits_500',  'name': 'Best value',   'price': 39.0, 'regular_price': 45.0, 'credits': 500,   'intro': True,  'features': ['500 credits',  'No expiry', 'Most popular pack'],           'enabled': True, 'hidden': True, 'order': 101, 'kind': 'credit_pack'},
+    {'id': 'credits_1000', 'name': 'Power pack',   'price': 69.0, 'regular_price': 90.0, 'credits': 1000, 'intro': True,  'features': ['1,000 credits', 'No expiry', 'Best for active builders'],     'enabled': True, 'hidden': True, 'order': 102, 'kind': 'credit_pack'},
+]
+
 
 def _serialize(d):
     if not d:
@@ -54,7 +65,16 @@ def _plan_activation_set(plan: dict) -> dict:
 
     Always sets `plan` + `plan_started_at`. If the plan has `trial_days > 0`,
     also sets `plan_expires_at`; otherwise clears it (permanent plan).
+
+    **Credit-pack purchases are different** — they add credits without
+    changing the user's underlying subscription. For those we return an empty
+    `$set` so the caller's `$inc: {credits}` does all the work.
     """
+    if plan.get('kind') == 'credit_pack':
+        # No plan change — just stamp the last-topped-up time for the operator's
+        # audit trail. Skipping `plan` / `plan_started_at` / `plan_expires_at`
+        # preserves the user's existing subscription window.
+        return {'credits_last_topped_up_at': datetime.now(timezone.utc)}
     now = datetime.now(timezone.utc)
     trial_days = int(plan.get('trial_days') or 0)
     expires = now + timedelta(days=trial_days) if trial_days > 0 else None
@@ -85,6 +105,14 @@ async def seed_defaults():
     if await db.plans.count_documents({}) == 0:
         await db.plans.insert_many(DEFAULT_PLANS)
         logger.info('Seeded default plans')
+    # Credit packs are seeded **idempotently** even on existing deployments so
+    # the OutOfCreditsDialog works end-to-end without an operator step. We use
+    # upsert-per-id rather than insert_many so re-runs don't 11000-collide and
+    # so editing prices in DEFAULT_CREDIT_PACKS rolls forward automatically.
+    for pack in DEFAULT_CREDIT_PACKS:
+        if await db.plans.find_one({'id': pack['id']}) is None:
+            await db.plans.insert_one(pack)
+            logger.info('Seeded credit pack %s', pack['id'])
     if await db.settings.count_documents({'_id': 'payment_settings'}) == 0:
         defaults = PaymentSettings().dict()
         defaults['_id'] = 'payment_settings'
