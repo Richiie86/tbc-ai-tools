@@ -67,6 +67,9 @@ class User(BaseModel):
     # Trial / time-limited plan tracking. None on plan = permanent (no expiry).
     plan_started_at: Optional[datetime] = None
     plan_expires_at: Optional[datetime] = None
+    # Bumped by `Sign out everywhere` — every JWT carries the version it was
+    # issued with; mismatch on decode = forced re-login on this device.
+    token_version: int = 0
     created_at: datetime = Field(default_factory=_now)
 
 

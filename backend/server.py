@@ -362,7 +362,7 @@ async def register(req: RegisterRequest, response: Response):
         except Exception:
             pass
     # Issue token requiring 2FA setup
-    token = create_jwt(user.id, user.email, user.role, pending_2fa=False)
+    token = create_jwt(user.id, user.email, user.role, pending_2fa=False, token_version=user.token_version)
     set_session_cookie(response, token, pending_2fa=False)
     return AuthResponse(token=token, pending_2fa=False, requires_2fa_setup=True, user=_public_user(user.dict()))
 
@@ -377,13 +377,14 @@ async def login(req: LoginRequest, response: Response):
         raise HTTPException(403, 'This account has been deactivated. Please contact support.')
     if user.get('status') == 'paused':
         raise HTTPException(403, 'This account is paused. Contact your administrator to restore access.')
+    tv = int(user.get('token_version') or 0)
     if user.get('totp_enabled'):
         # Issue short-lived pending_2fa token
-        token = create_jwt(user['id'], user['email'], user.get('role', 'user'), pending_2fa=True)
+        token = create_jwt(user['id'], user['email'], user.get('role', 'user'), pending_2fa=True, token_version=tv)
         set_session_cookie(response, token, pending_2fa=True)
         return AuthResponse(token=token, pending_2fa=True, requires_2fa_setup=False, user=_public_user(user))
     # No 2FA setup yet — issue full token but flag for setup
-    token = create_jwt(user['id'], user['email'], user.get('role', 'user'), pending_2fa=False)
+    token = create_jwt(user['id'], user['email'], user.get('role', 'user'), pending_2fa=False, token_version=tv)
     set_session_cookie(response, token, pending_2fa=False)
     return AuthResponse(token=token, pending_2fa=False, requires_2fa_setup=True, user=_public_user(user))
 
@@ -392,6 +393,19 @@ async def login(req: LoginRequest, response: Response):
 async def logout(response: Response):
     """Clear the session cookie. Idempotent — safe to call when already logged out."""
     clear_session_cookie(response)
+    return {'success': True}
+
+
+@api.post('/auth/sign-out-everywhere')
+async def sign_out_everywhere(response: Response, user: dict = Depends(get_current_user)):
+    """Bump the user's `token_version` so every existing JWT is rejected on next use.
+
+    Also clears this device's cookie. Useful when a token might be compromised or
+    after a password change.
+    """
+    await db.users.update_one({'id': user['sub']}, {'$inc': {'token_version': 1}})
+    clear_session_cookie(response)
+    logger.warning('User %s signed out everywhere', user.get('email'))
     return {'success': True}
 
 

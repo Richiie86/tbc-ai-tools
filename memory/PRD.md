@@ -12,6 +12,12 @@ gold theme. Domain: **tbctools.org**.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
 ## Implemented
+- ✅ **Sign-out-everywhere + token rotation** (Feb 2026): every JWT now carries
+  a `tv` (token_version) claim. `POST /api/auth/sign-out-everywhere` bumps the
+  user's `token_version` so every existing JWT is rejected on next decode with
+  "Session ended on another device. Please sign in again." Available in the
+  Dashboard sidebar under regular "Sign out". Cookie is also cleared on the
+  current device for a clean break.
 - ✅ **Auth hardening: localStorage → httpOnly cookies** (Feb 2026): JWT now
   lives in an `tbc_session` cookie set by the backend on login/register/2fa-verify
   with `HttpOnly · Secure · SameSite=Lax · Max-Age=7d`. JavaScript never touches

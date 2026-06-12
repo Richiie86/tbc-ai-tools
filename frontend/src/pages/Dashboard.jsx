@@ -300,8 +300,20 @@ export default function Dashboard({ variant = 'tbc1' }) {
           <Link to="/pricing" className="mb-1 flex items-center gap-2 rounded-md px-2.5 py-2 text-xs font-medium text-slate-300 hover:bg-slate-800">
             <Sparkles className="h-3.5 w-3.5" /> Upgrade plan
           </Link>
-          <button onClick={() => { logout(); navigate('/'); }} className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-xs font-medium text-slate-300 hover:bg-slate-800">
+          <button onClick={() => { logout(); navigate('/'); }} className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-xs font-medium text-slate-300 hover:bg-slate-800" data-testid="sidebar-sign-out">
             <LogOut className="h-3.5 w-3.5" /> Sign out
+          </button>
+          <button
+            data-testid="sidebar-sign-out-everywhere"
+            onClick={async () => {
+              if (!window.confirm('Sign out of every device including this one?\n\nAny token currently in use elsewhere will stop working immediately. You will need to sign in again.')) return;
+              try { await api.post('/auth/sign-out-everywhere'); } catch { /* server already cleared us; navigate regardless */ }
+              logout();
+              navigate('/');
+            }}
+            className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-[11px] font-medium text-rose-300/80 hover:bg-rose-500/10 hover:text-rose-200"
+          >
+            <ShieldCheck className="h-3.5 w-3.5" /> Sign out everywhere
           </button>
         </div>
       </aside>

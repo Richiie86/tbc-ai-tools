@@ -81,12 +81,13 @@ def decode_password_reset_token(token: str) -> dict:
     return payload
 
 
-def create_jwt(user_id: str, email: str, role: str, pending_2fa: bool = False) -> str:
+def create_jwt(user_id: str, email: str, role: str, pending_2fa: bool = False, token_version: int = 0) -> str:
     payload = {
         'sub': user_id,
         'email': email,
         'role': role,
         'pending_2fa': pending_2fa,
+        'tv': int(token_version),  # bumped by "Sign out everywhere" → forces re-login on decode
         'iat': datetime.now(timezone.utc),
         'exp': datetime.now(timezone.utc) + timedelta(hours=JWT_EXP_HOURS if not pending_2fa else 1),
     }
@@ -112,6 +113,9 @@ async def get_current_user(
     then falls back to the `Authorization: Bearer ...` header (curl / mobile /
     scripts). This dual support lets the browser stop touching the token while
     keeping every existing API caller working.
+
+    Also rejects tokens whose `tv` claim is stale — used by "Sign out everywhere"
+    to invalidate every existing session for a single user atomically.
     """
     token = request.cookies.get(SESSION_COOKIE)
     if not token and creds:
@@ -121,6 +125,18 @@ async def get_current_user(
     payload = decode_jwt(token)
     if payload.get('pending_2fa'):
         raise HTTPException(status_code=401, detail='2FA verification required')
+
+    # token-version check. Single small projection — keeps this guard cheap.
+    from db import db  # local import avoids circular at module load
+    stored = await db.users.find_one({'id': payload['sub']}, {'token_version': 1, 'deleted_at': 1, 'status': 1})
+    if not stored:
+        raise HTTPException(status_code=401, detail='User no longer exists')
+    if stored.get('deleted_at') or stored.get('status') == 'deleted':
+        raise HTTPException(status_code=401, detail='Account deactivated')
+    stored_tv = int(stored.get('token_version') or 0)
+    token_tv = int(payload.get('tv') or 0)
+    if token_tv < stored_tv:
+        raise HTTPException(status_code=401, detail='Session ended on another device. Please sign in again.')
     return payload
 
 
