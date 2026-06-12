@@ -183,7 +183,30 @@ export default function SettingsTab() {
 
       <Section icon={Mail} title="Resend (transactional emails)">
         <div className="rounded-md border border-tbc-900/40 bg-ink-950/60 p-3 text-xs text-tbc-200/70">
-          API key + sender are configured via backend env vars (<code className="text-tbc-300">RESEND_API_KEY</code>, <code className="text-tbc-300">SENDER_EMAIL</code>). The button below verifies the key works and that the sender domain is verified at Resend.
+          API key + sender can also be set via backend env vars (<code className="text-tbc-300">RESEND_API_KEY</code>, <code className="text-tbc-300">SENDER_EMAIL</code>). Anything set here in the database overrides env values.
+        </div>
+        <KeyRow
+          label="Resend API key"
+          fieldKey="resend_api_key"
+          isSet={settings.resend_api_key_set}
+          masked={settings.resend_api_key_masked}
+          value={form.resend_api_key}
+          reveal={reveal.resend_api_key}
+          onReveal={() => toggleReveal('resend_api_key')}
+          onChange={(v) => setForm({ ...form, resend_api_key: v })}
+          onSave={() => save({ resend_api_key: form.resend_api_key })}
+          onClear={() => clearKey('resend_api_key')}
+        />
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-tbc-200/60 w-24">Sender email</span>
+          <Input
+            data-testid="settings-sender-email"
+            value={form.sender_email}
+            onChange={(e) => setForm({ ...form, sender_email: e.target.value })}
+            placeholder={settings.sender_email || 'noreply@tbctools.org'}
+            className="h-9 max-w-md bg-ink-950 border-tbc-900/60 text-tbc-100"
+          />
+          <Button size="sm" onClick={() => save({ sender_email: form.sender_email })} className="bg-tbc-500 text-ink-950 hover:bg-tbc-400 font-semibold">Save</Button>
         </div>
         <div className="flex items-center gap-3">
           <Button
@@ -209,7 +232,26 @@ export default function SettingsTab() {
         </div>
       </Section>
 
+      <Section icon={Sparkles} title="Emergent LLM key (AI chat)">
+        <div className="rounded-md border border-tbc-900/40 bg-ink-950/60 p-3 text-xs text-tbc-200/70">
+          Powers GPT, Claude and Gemini in the Builder. Anything set here overrides the env var <code className="text-tbc-300">EMERGENT_LLM_KEY</code>. Rotate at <a href="https://app.emergent.sh" target="_blank" rel="noreferrer" className="text-tbc-300 hover:underline">Emergent → Profile → Universal Key</a>.
+        </div>
+        <KeyRow
+          label="Universal LLM key"
+          fieldKey="emergent_llm_key"
+          isSet={settings.emergent_llm_key_set}
+          masked={settings.emergent_llm_key_masked}
+          value={form.emergent_llm_key}
+          reveal={reveal.emergent_llm_key}
+          onReveal={() => toggleReveal('emergent_llm_key')}
+          onChange={(v) => setForm({ ...form, emergent_llm_key: v })}
+          onSave={() => save({ emergent_llm_key: form.emergent_llm_key })}
+          onClear={() => clearKey('emergent_llm_key')}
+        />
+      </Section>
+
       <Section icon={Lock} title="Enabled payment methods">
+        <MasterPaymentsToggle settings={settings} save={save} />
         <div className="grid gap-2 md:grid-cols-2">
           {[
             { k: 'enable_card', label: 'Card / Apple Pay / Google Pay' },
@@ -241,55 +283,38 @@ function Section({ icon: Icon, title, children }) {
   );
 }
 
-function KeyRow({ label, fieldKey, isSet, masked, value, reveal, onReveal, onChange, onSave, onClear, placeholder }) {
-  return (
-    <div className="flex items-end gap-2">
-      <div className="flex-1">
-        <div className="flex items-center justify-between">
-          <label className="text-xs font-semibold uppercase tracking-wider text-tbc-200/60">{label}</label>
-          {isSet && (
-            <span className="text-[11px] text-tbc-300">
-              Set • {masked || '••••'}
-            </span>
-          )}
-        </div>
-        <div className="relative mt-1.5">
-          <Input
-            className="bg-ink-950 border-tbc-900/60 text-tbc-100 pr-10"
-            type={reveal ? 'text' : 'password'}
-            value={value}
-            onChange={(e) => onChange(e.target.value)}
-            placeholder={placeholder || (isSet ? 'Replace existing key…' : 'Paste key here')}
-          />
-          <button type="button" onClick={onReveal} className="absolute right-2 top-1/2 -translate-y-1/2 text-tbc-200/60 hover:text-tbc-100">
-            {reveal ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-          </button>
-        </div>
-      </div>
-      <Button disabled={!value} onClick={onSave} className="bg-tbc-500 text-ink-950 hover:bg-tbc-400 font-semibold"><Save className="mr-1.5 h-3.5 w-3.5" /> Save</Button>
-      {isSet && (
-        <Button variant="outline" onClick={onClear} className="border-rose-900/60 bg-ink-900 text-rose-300 hover:bg-rose-500/10">Clear</Button>
-      )}
-    </div>
-  );
-}
- checked={!!settings[o.k]} onCheckedChange={(v) => save({ [o.k]: v })} />
-            </div>
-          ))}
-        </div>
-      </Section>
-    </div>
-  );
-}
+const PAYMENT_KEYS = ['enable_card', 'enable_paypal', 'enable_crypto_auto', 'enable_crypto_manual', 'enable_bank'];
 
-function Section({ icon: Icon, title, children }) {
+function MasterPaymentsToggle({ settings, save }) {
+  const enabledCount = PAYMENT_KEYS.filter((k) => settings[k]).length;
+  const allOn = enabledCount === PAYMENT_KEYS.length;
+  const noneOn = enabledCount === 0;
+  const tone = allOn ? 'emerald' : noneOn ? 'rose' : 'amber';
+  const label = allOn ? 'All payment methods enabled' : noneOn ? 'All payment methods disabled' : `${enabledCount} of ${PAYMENT_KEYS.length} enabled`;
+
+  const toggleAll = (on) => {
+    const patch = Object.fromEntries(PAYMENT_KEYS.map((k) => [k, on]));
+    save(patch);
+  };
+
   return (
-    <div className="rounded-xl border border-tbc-900/60 bg-ink-900/40 p-5">
-      <div className="mb-4 flex items-center gap-2">
-        <Icon className="h-4 w-4 text-tbc-300" />
-        <h3 className="text-sm font-bold uppercase tracking-wider text-tbc-100">{title}</h3>
+    <div
+      className={`flex items-center justify-between rounded-lg border bg-ink-950 px-4 py-3 ${tone === 'emerald' ? 'border-emerald-500/40' : tone === 'rose' ? 'border-rose-500/40' : 'border-amber-500/40'}`}
+      data-testid="master-payments-toggle"
+    >
+      <div>
+        <div className="text-sm font-semibold text-tbc-100">Master switch</div>
+        <div className={`text-xs ${tone === 'emerald' ? 'text-emerald-300' : tone === 'rose' ? 'text-rose-300' : 'text-amber-300'}`}>
+          {label}
+        </div>
       </div>
-      <div className="space-y-3">{children}</div>
+      <div className="flex items-center gap-2">
+        <Switch
+          checked={allOn}
+          onCheckedChange={(v) => toggleAll(!!v)}
+          data-testid="master-payments-switch"
+        />
+      </div>
     </div>
   );
 }
