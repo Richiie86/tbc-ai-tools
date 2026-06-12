@@ -12,6 +12,12 @@ gold theme. Domain: **tbctools.org**.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
 ## Implemented
+- ✅ **Bulk-action toolbar on Users** (Feb 2026): Per-row checkboxes + select-all
+  in the header. When selection > 0, a sticky toolbar appears with Pause /
+  Resume / ± Credits (prompts for amount) / Set plan (prompts for plan id) /
+  Soft-delete. Self-protection: the operator's own account is auto-skipped
+  for destructive actions and reported in the response. Endpoint:
+  `POST /api/operator/users/bulk { user_ids, action, credits?, plan? }`.
 - ✅ **Auto-withdraw + manual sweep + daily safety cap** (Feb 2026): Per-provider
   on/off toggles (Stripe → bank, NOWPayments → wallet), threshold gating,
   destination address, and an **operator-adjustable daily safety cap** that

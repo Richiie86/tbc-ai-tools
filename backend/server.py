@@ -1011,6 +1011,69 @@ async def op_delete_user(user_id: str, op: dict = Depends(get_current_operator))
     return {'success': True, 'email': target.get('email')}
 
 
+@api.post('/operator/users/bulk')
+async def op_bulk_user_action(payload: dict, op: dict = Depends(get_current_operator)):
+    """Apply an action to multiple users at once.
+
+    Body: { user_ids: [str], action: 'pause'|'resume'|'delete'|'grant_credits'|'set_plan',
+            credits: int (action=grant_credits), plan: str (action=set_plan) }
+
+    Returns { ok: [ids], skipped: [{id, reason}], action }.
+    """
+    user_ids = payload.get('user_ids') or []
+    action = payload.get('action')
+    if not isinstance(user_ids, list) or not user_ids:
+        raise HTTPException(400, 'user_ids required (non-empty list)')
+    if action not in {'pause', 'resume', 'delete', 'grant_credits', 'set_plan'}:
+        raise HTTPException(400, 'unsupported action')
+
+    op_self_id = op.get('sub')
+    ok: list[str] = []
+    skipped: list[dict] = []
+
+    targets = db.users.find({'id': {'$in': user_ids}}, {'id': 1, 'email': 1, 'role': 1, 'status': 1})
+    target_list = [t async for t in targets]
+    found_ids = {t['id'] for t in target_list}
+    for uid in user_ids:
+        if uid not in found_ids:
+            skipped.append({'id': uid, 'reason': 'not found'})
+
+    for t in target_list:
+        # Safety: never let the operator nuke themselves via bulk.
+        if t.get('role') == 'operator' and t.get('id') == op_self_id and action in {'pause', 'delete'}:
+            skipped.append({'id': t['id'], 'reason': 'cannot bulk-modify your own operator account'})
+            continue
+
+        if action == 'pause':
+            await db.users.update_one({'id': t['id']}, {'$set': {'status': 'paused'}})
+        elif action == 'resume':
+            await db.users.update_one({'id': t['id']}, {'$set': {'status': 'active'}, '$unset': {'deleted_at': ''}})
+        elif action == 'delete':
+            await db.users.update_one(
+                {'id': t['id']},
+                {'$set': {'status': 'deleted', 'deleted_at': datetime.now(timezone.utc)}},
+            )
+        elif action == 'grant_credits':
+            credits = int(payload.get('credits') or 0)
+            if credits == 0:
+                skipped.append({'id': t['id'], 'reason': 'credits=0 (no-op)'})
+                continue
+            await db.users.update_one({'id': t['id']}, {'$inc': {'credits': credits}})
+        elif action == 'set_plan':
+            plan = payload.get('plan')
+            if not plan:
+                skipped.append({'id': t['id'], 'reason': 'plan required'})
+                continue
+            await db.users.update_one({'id': t['id']}, {'$set': {'plan': plan}})
+
+        ok.append(t['id'])
+
+    logger.warning('Operator %s bulk %s on %d users (skipped=%d)', op.get('email'), action, len(ok), len(skipped))
+    return {'action': action, 'ok': ok, 'skipped': skipped, 'total': len(user_ids)}
+
+
+
+
 # --- Codes browser (operator-only, read-only) ---
 import os.path
 

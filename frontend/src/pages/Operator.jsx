@@ -50,6 +50,50 @@ export default function Operator() {
   const [contacts, setContacts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [userSearch, setUserSearch] = useState('');
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
+
+  // Clear selection whenever the user list reloads (avoid stale IDs).
+  const clearSelection = () => setSelectedIds(new Set());
+
+  const toggleSelect = (id) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+  const toggleSelectAll = (visible) => {
+    setSelectedIds((prev) => {
+      const allSelected = visible.every((u) => prev.has(u.id));
+      if (allSelected) return new Set();
+      const next = new Set(prev);
+      visible.forEach((u) => next.add(u.id));
+      return next;
+    });
+  };
+
+  const runBulk = async (action, extra = {}) => {
+    if (selectedIds.size === 0) return;
+    let confirmMsg = `${action.replace('_', ' ')} ${selectedIds.size} user${selectedIds.size === 1 ? '' : 's'}?`;
+    if (action === 'delete') confirmMsg += '\n\nSoft-delete keeps history but blocks login.';
+    if (!window.confirm(confirmMsg)) return;
+    setBulkBusy(true);
+    try {
+      const { data } = await api.post('/operator/users/bulk', {
+        user_ids: Array.from(selectedIds), action, ...extra,
+      });
+      const okCount = (data.ok || []).length;
+      const skippedCount = (data.skipped || []).length;
+      toast.success(`${okCount} updated${skippedCount ? ` · ${skippedCount} skipped` : ''}`);
+      clearSelection();
+      loadAll();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Bulk action failed');
+    } finally {
+      setBulkBusy(false);
+    }
+  };
 
   const loadAll = async () => {
     setLoading(true);
@@ -159,11 +203,72 @@ export default function Operator() {
                     <Input value={userSearch} onChange={(e) => setUserSearch(e.target.value)} placeholder="Search by email or name..." className="border-tbc-900/60 bg-ink-900 pl-9 text-tbc-100" />
                   </div>
                   <div className="text-xs text-tbc-200/60">{filteredUsers.length} of {users.length} users</div>
+                  {selectedIds.size > 0 && (
+                    <button
+                      data-testid="bulk-clear"
+                      onClick={clearSelection}
+                      className="ml-auto rounded border border-tbc-900/60 bg-ink-900 px-2 py-1 text-[11px] text-tbc-200 hover:bg-ink-950"
+                    >
+                      Clear selection
+                    </button>
+                  )}
                 </div>
+
+                {selectedIds.size > 0 && (
+                  <div data-testid="bulk-toolbar" className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-tbc-500/40 bg-tbc-500/10 px-3 py-2">
+                    <span className="text-xs font-bold text-tbc-100">
+                      {selectedIds.size} selected
+                    </span>
+                    <span className="text-tbc-200/40">·</span>
+                    <Button data-testid="bulk-pause" size="sm" disabled={bulkBusy} variant="outline"
+                      className="border-amber-500/40 bg-ink-900 text-amber-300 hover:bg-amber-500/10"
+                      onClick={() => runBulk('pause')}>
+                      {bulkBusy ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : null}
+                      Pause
+                    </Button>
+                    <Button data-testid="bulk-resume" size="sm" disabled={bulkBusy} variant="outline"
+                      className="border-emerald-500/40 bg-ink-900 text-emerald-300 hover:bg-emerald-500/10"
+                      onClick={() => runBulk('resume')}>
+                      Resume
+                    </Button>
+                    <Button data-testid="bulk-grant-credits" size="sm" disabled={bulkBusy} variant="outline"
+                      className="border-tbc-500/40 bg-ink-900 text-tbc-300 hover:bg-tbc-500/10"
+                      onClick={() => {
+                        const v = window.prompt('Grant how many credits per user? (negative to deduct)', '100');
+                        const amt = parseInt(v, 10);
+                        if (!isNaN(amt)) runBulk('grant_credits', { credits: amt });
+                      }}>
+                      ± Credits
+                    </Button>
+                    <Button data-testid="bulk-set-plan" size="sm" disabled={bulkBusy} variant="outline"
+                      className="border-sky-500/40 bg-ink-900 text-sky-300 hover:bg-sky-500/10"
+                      onClick={() => {
+                        const v = window.prompt('Set plan id for selected users (e.g. starter / pro / trial7):', 'starter');
+                        if (v) runBulk('set_plan', { plan: v.trim() });
+                      }}>
+                      Set plan
+                    </Button>
+                    <Button data-testid="bulk-delete" size="sm" disabled={bulkBusy} variant="outline"
+                      className="border-rose-500/40 bg-ink-900 text-rose-300 hover:bg-rose-500/10"
+                      onClick={() => runBulk('delete')}>
+                      Soft-delete
+                    </Button>
+                  </div>
+                )}
+
                 <div className="rounded-xl border border-tbc-900/60 bg-ink-900/40">
                   <Table>
                     <TableHeader>
                       <TableRow className="border-tbc-900/60 hover:bg-transparent">
+                        <TableHead className="w-10">
+                          <input
+                            type="checkbox"
+                            data-testid="bulk-select-all"
+                            className="h-4 w-4 cursor-pointer accent-tbc-500"
+                            checked={filteredUsers.length > 0 && filteredUsers.every((u) => selectedIds.has(u.id))}
+                            onChange={() => toggleSelectAll(filteredUsers)}
+                          />
+                        </TableHead>
                         <TableHead>Email</TableHead>
                         <TableHead>Name</TableHead>
                         <TableHead>Status</TableHead>
@@ -177,7 +282,16 @@ export default function Operator() {
                     </TableHeader>
                     <TableBody>
                       {filteredUsers.map((u) => (
-                        <TableRow key={u.id} className="border-tbc-900/60 hover:bg-ink-900/60">
+                        <TableRow key={u.id} className={`border-tbc-900/60 hover:bg-ink-900/60 ${selectedIds.has(u.id) ? 'bg-tbc-500/5' : ''}`}>
+                          <TableCell>
+                            <input
+                              type="checkbox"
+                              data-testid={`bulk-select-${u.id}`}
+                              className="h-4 w-4 cursor-pointer accent-tbc-500"
+                              checked={selectedIds.has(u.id)}
+                              onChange={() => toggleSelect(u.id)}
+                            />
+                          </TableCell>
                           <TableCell className="font-medium text-tbc-100">{u.email}</TableCell>
                           <TableCell className="text-tbc-200/80">{u.name || '—'}</TableCell>
                           <TableCell>
