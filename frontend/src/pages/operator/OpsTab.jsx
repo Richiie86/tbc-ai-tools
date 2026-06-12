@@ -40,8 +40,9 @@ export default function OpsTab() {
     try {
       const { data } = await api.get('/operator/ops/deploy-info');
       setDeployInfo(data);
-    } catch {
-      // silent — non-critical
+    } catch (e) {
+      // Non-critical: deploy info is decorative. Log so it shows up in console.
+      console.warn('deploy-info fetch failed', e?.response?.status, e?.message);
     }
   }, []);
 
@@ -368,8 +369,8 @@ export default function OpsTab() {
             </div>
             {trialRun.events?.length > 0 && (
               <ul className="mt-3 space-y-1 text-xs">
-                {trialRun.events.slice(0, 8).map((ev, idx) => (
-                  <li key={idx} className="flex items-center justify-between rounded bg-ink-950 px-2 py-1">
+                {trialRun.events.slice(0, 8).map((ev) => (
+                  <li key={`${ev.type}-${ev.email}`} className="flex items-center justify-between rounded bg-ink-950 px-2 py-1">
                     <span className="text-tbc-100">{ev.email}</span>
                     <span className={ev.error ? 'text-rose-300' : ev.type === 't3' ? 'text-sky-300' : 'text-rose-200'}>
                       {ev.error ? `error: ${ev.error}` : ev.type === 't3' ? `T-${ev.days_left}` : 'expired'}
