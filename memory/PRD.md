@@ -12,6 +12,16 @@ gold theme. Domain: **tbctools.org**.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
 ## Implemented
+- ✅ **Operator → Ops tab** (Feb 2026): Live health check (MongoDB ping, env keys
+  present, DB-backed settings keys, frontend reachability, supervisor service state,
+  disk usage, master-payments flag), one-click Code Review (ruff lint + format
+  with inline diffable output), Restart Backend/Frontend/All (supervisor soft-restart),
+  and a Deploy/Redeploy guidance card with live latest-commit info.
+- ✅ **Projects → "Launch in TBC chat"** (Feb 2026): One click on any project
+  card spins up a new chat session pre-seeded with the project brief
+  (title, stage, tags, link, description) as the first prompt, then navigates
+  the operator straight into `/dashboard/<session_id>`. Cross-links the new
+  session back to `projects.chat_session_id` for easy reopen.
 - ✅ **Projects tab — 5-stage lifecycle sub-sections** (Feb 2026):
   `Code to expand` → `Start new project` → `Under development` → `Launched` → `Running`.
   Per-stage counts, color-coded pills, quick "Promote →" action, legacy status

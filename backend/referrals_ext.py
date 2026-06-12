@@ -338,6 +338,66 @@ async def op_delete_project(pid: str, user: dict = Depends(get_current_operator)
     return {'success': True}
 
 
+@router.post('/operator/projects/{pid}/launch-chat')
+async def op_launch_project_chat(pid: str, user: dict = Depends(get_current_operator)):
+    """One-click 'Open in TBC chat' — creates a new chat session pre-seeded with
+    the project context (title, status, description, tags, link) so the LLM
+    treats the next prompt as a continuation of building this project.
+
+    Returns `{ session_id }` — the frontend then navigates to `/dashboard/{session_id}`.
+    """
+    db = await get_db()
+    p = await db.projects.find_one({'id': pid, 'owner_id': user['sub']})
+    if not p:
+        raise HTTPException(404, 'Project not found')
+
+    stage_label = {
+        'expand': 'Code to expand (reusable boilerplate)',
+        'idea': 'Start new project (scoping & planning)',
+        'dev': 'Under development (actively building)',
+        'launched': 'Launched (shipped)',
+        'running': 'Running (live & maintained)',
+    }.get(p.get('status') or 'idea', 'Idea')
+
+    tag_line = ', '.join(p.get('tags') or []) or 'none'
+    link_line = p.get('link_url') or 'n/a'
+    description = (p.get('description') or '').strip() or 'No description yet.'
+
+    primer = (
+        f"PROJECT BRIEF — {p.get('title')}\n"
+        f"Stage: {stage_label}\n"
+        f"Tags: {tag_line}\n"
+        f"External link: {link_line}\n\n"
+        f"Description:\n{description}\n\n"
+        f"You are continuing work on this project as the TBC AI builder. "
+        f"Acknowledge the brief in one short sentence, then ask the single most "
+        f"useful next-step question to move the project forward."
+    )
+
+    # Create session + seed first user message (so history primes the LLM).
+    from models import ChatSession, ChatMessage  # local import to avoid circular at module load
+    s = ChatSession(
+        user_id=user['sub'],
+        title=f"📁 {p.get('title')[:48]}",
+        model='gpt-4o-mini',
+        variant='tbc1',
+    )
+    sd = s.dict()
+    sd['project_id'] = p['id']
+    await db.chat_sessions.insert_one(sd)
+
+    msg = ChatMessage(session_id=s.id, user_id=user['sub'], role='user', content=primer)
+    await db.chat_messages.insert_one(msg.dict())
+
+    # Cross-link: store session_id back on the project for quick reopen later.
+    await db.projects.update_one(
+        {'id': pid},
+        {'$set': {'chat_session_id': s.id, 'updated_at': datetime.now(timezone.utc)}},
+    )
+
+    return {'session_id': s.id, 'project_id': p['id']}
+
+
 # ===================================================================
 # Helpers used by server.py
 # ===================================================================

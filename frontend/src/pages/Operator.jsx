@@ -13,6 +13,7 @@ import {
   Users, CreditCard, MessageSquare, DollarSign, Loader2, ShieldCheck, Mail,
   Code2, ChevronRight, ChevronDown, FileCode, Folder, FolderOpen, Search,
   Download, Copy, Check, Sparkles, Wallet, KeyRound, Settings as SettingsIcon, Coins, FolderKanban,
+  Activity,
 } from 'lucide-react';
 
 import PlansTab from './operator/PlansTab';
@@ -22,6 +23,7 @@ import PaymentsTab from './operator/PaymentsTab';
 import LicensesTab from './operator/LicensesTab';
 import RoyaltiesTab from './operator/RoyaltiesTab';
 import ProjectsTab from './operator/ProjectsTab';
+import OpsTab from './operator/OpsTab';
 
 const PLANS = ['free', 'starter', 'pro', 'enterprise'];
 
@@ -143,6 +145,7 @@ export default function Operator() {
                 <TabTrigger value="licenses" icon={KeyRound}>Licenses</TabTrigger>
                 <TabTrigger value="royalties" icon={Coins}>Royalties</TabTrigger>
                 <TabTrigger value="settings" icon={SettingsIcon}>Security</TabTrigger>
+                <TabTrigger value="ops" icon={Activity}>Ops</TabTrigger>
                 <TabTrigger value="contacts" icon={Mail}>Contacts</TabTrigger>
                 <TabTrigger value="codes" icon={Code2}>Codes</TabTrigger>
               </TabsList>
@@ -263,6 +266,7 @@ export default function Operator() {
               <TabsContent value="licenses" className="mt-5"><LicensesTab /></TabsContent>
               <TabsContent value="royalties" className="mt-5"><RoyaltiesTab /></TabsContent>
               <TabsContent value="settings" className="mt-5"><SettingsTab /></TabsContent>
+              <TabsContent value="ops" className="mt-5"><OpsTab /></TabsContent>
 
               <TabsContent value="contacts" className="mt-5">
                 <div className="space-y-3">

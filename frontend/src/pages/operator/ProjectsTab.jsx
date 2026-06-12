@@ -12,7 +12,7 @@ import {
 import { toast } from 'sonner';
 import {
   Plus, Pencil, Trash2, Loader2, ExternalLink, MessageSquare, Tag,
-  Code2, Lightbulb, Hammer, Rocket, Activity, ArrowRight,
+  Code2, Lightbulb, Hammer, Rocket, Activity, ArrowRight, Sparkles,
 } from 'lucide-react';
 
 const EMPTY = { title: '', description: '', status: 'idea', tags: [], link_url: '', chat_session_id: '' };
@@ -158,6 +158,17 @@ export default function ProjectsTab() {
       load();
     } catch {
       toast.error('Move failed');
+    }
+  };
+
+  const launchInChat = async (p) => {
+    try {
+      const { data } = await api.post(`/operator/projects/${p.id}/launch-chat`);
+      toast.success(`Opening ${p.title} in TBC chat…`);
+      // Send the user to the new session.
+      window.location.href = `/dashboard/${data.session_id}`;
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Failed to open chat');
     }
   };
 
@@ -379,6 +390,14 @@ export default function ProjectsTab() {
               )}
 
               <div className="mt-3 flex flex-wrap items-center gap-2">
+                <button
+                  data-testid={`project-launch-chat-${p.id}`}
+                  onClick={() => launchInChat(p)}
+                  title="Open this project in a new TBC chat — its brief is auto-injected as the first prompt"
+                  className="inline-flex items-center gap-1 rounded-md bg-tbc-500 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wider text-ink-950 hover:bg-tbc-400"
+                >
+                  <Sparkles className="h-3 w-3" /> Launch in chat
+                </button>
                 <Select value={p.status} onValueChange={(v) => moveTo(p, v)}>
                   <SelectTrigger
                     data-testid={`project-move-${p.id}`}

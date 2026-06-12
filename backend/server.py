@@ -38,6 +38,7 @@ from models import (
 )
 from payments_ext import router as payments_router, seed_defaults as seed_payment_defaults, get_plans_list, get_settings_doc
 from referrals_ext import router as referrals_router, record_referral_signup, record_referral_earning, get_or_create_referral_code
+from ops_ext import router as ops_router
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger('tbc')
@@ -989,6 +990,7 @@ async def op_code_file(path: str = Query(...), _: dict = Depends(get_current_ope
 app.include_router(api)
 app.include_router(payments_router)
 app.include_router(referrals_router)
+app.include_router(ops_router)
 # app.include_router(marketplace_router)  # Marketplace deferred — skipped per user.
 app.add_middleware(
     CORSMiddleware,
