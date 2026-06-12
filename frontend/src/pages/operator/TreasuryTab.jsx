@@ -69,6 +69,12 @@ export default function TreasuryTab() {
 
   return (
     <div>
+      <div className="mb-4 rounded-lg border border-tbc-500/20 bg-tbc-500/5 p-3 text-xs text-tbc-200/80 leading-relaxed">
+        <div className="font-semibold text-tbc-200 mb-1">💡 Treasury covers MANUAL payments only</div>
+        <p>Manual bank transfers and crypto deposits land <strong>directly in the accounts/wallets you list below</strong>.
+        Automated payments (Stripe / PayPal / NOWPayments) keep funds in their own dashboards until you withdraw —
+        configure payout rules in <em>their</em> dashboards (Stripe Settings → Payouts, PayPal Wallet, NOWPayments Balance).</p>
+      </div>
       <div className="mb-3 flex items-center justify-between">
         <p className="text-sm text-tbc-200/60">Configure where incoming payments are sent. Activate one bank and one crypto destination at a time.</p>
         <Dialog open={open} onOpenChange={setOpen}>

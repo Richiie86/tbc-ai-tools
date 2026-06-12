@@ -217,7 +217,7 @@ export default function Dashboard({ variant = 'tbc1' }) {
 
         <div className="p-3">
           <Button onClick={newChat} className="w-full justify-start gap-2 bg-tbc-500 text-slate-950 hover:bg-tbc-400 font-semibold">
-            <Plus className="h-4 w-4" /> New chat
+            <Plus className="h-4 w-4" /> New session
           </Button>
         </div>
 

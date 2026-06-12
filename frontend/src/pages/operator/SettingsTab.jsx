@@ -7,7 +7,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '../../components/ui/select';
 import { toast } from 'sonner';
-import { Loader2, KeyRound, Save, Lock, Eye, EyeOff, Plug, Mail } from 'lucide-react';
+import { Loader2, KeyRound, Save, Lock, Eye, EyeOff, Plug, Mail, Sparkles } from 'lucide-react';
 
 export default function SettingsTab() {
   const [settings, setSettings] = useState(null);
@@ -19,6 +19,9 @@ export default function SettingsTab() {
     nowpayments_ipn_secret: '',
     paypal_client_id: '',
     paypal_client_secret: '',
+    emergent_llm_key: '',
+    resend_api_key: '',
+    sender_email: '',
   });
   const [reveal, setReveal] = useState({});
 
@@ -218,6 +221,59 @@ export default function SettingsTab() {
             <div key={o.k} className="flex items-center justify-between rounded-lg border border-tbc-900/60 bg-ink-950 px-3 py-2">
               <span className="text-sm text-tbc-100">{o.label}</span>
               <Switch checked={!!settings[o.k]} onCheckedChange={(v) => save({ [o.k]: v })} />
+            </div>
+          ))}
+        </div>
+      </Section>
+    </div>
+  );
+}
+
+function Section({ icon: Icon, title, children }) {
+  return (
+    <div className="rounded-xl border border-tbc-900/60 bg-ink-900/40 p-5">
+      <div className="mb-4 flex items-center gap-2">
+        <Icon className="h-4 w-4 text-tbc-300" />
+        <h3 className="text-sm font-bold uppercase tracking-wider text-tbc-100">{title}</h3>
+      </div>
+      <div className="space-y-3">{children}</div>
+    </div>
+  );
+}
+
+function KeyRow({ label, fieldKey, isSet, masked, value, reveal, onReveal, onChange, onSave, onClear, placeholder }) {
+  return (
+    <div className="flex items-end gap-2">
+      <div className="flex-1">
+        <div className="flex items-center justify-between">
+          <label className="text-xs font-semibold uppercase tracking-wider text-tbc-200/60">{label}</label>
+          {isSet && (
+            <span className="text-[11px] text-tbc-300">
+              Set • {masked || '••••'}
+            </span>
+          )}
+        </div>
+        <div className="relative mt-1.5">
+          <Input
+            className="bg-ink-950 border-tbc-900/60 text-tbc-100 pr-10"
+            type={reveal ? 'text' : 'password'}
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            placeholder={placeholder || (isSet ? 'Replace existing key…' : 'Paste key here')}
+          />
+          <button type="button" onClick={onReveal} className="absolute right-2 top-1/2 -translate-y-1/2 text-tbc-200/60 hover:text-tbc-100">
+            {reveal ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+          </button>
+        </div>
+      </div>
+      <Button disabled={!value} onClick={onSave} className="bg-tbc-500 text-ink-950 hover:bg-tbc-400 font-semibold"><Save className="mr-1.5 h-3.5 w-3.5" /> Save</Button>
+      {isSet && (
+        <Button variant="outline" onClick={onClear} className="border-rose-900/60 bg-ink-900 text-rose-300 hover:bg-rose-500/10">Clear</Button>
+      )}
+    </div>
+  );
+}
+ checked={!!settings[o.k]} onCheckedChange={(v) => save({ [o.k]: v })} />
             </div>
           ))}
         </div>

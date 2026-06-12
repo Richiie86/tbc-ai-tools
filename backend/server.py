@@ -772,6 +772,23 @@ async def stripe_webhook(request: Request):
 async def submit_contact(req: ContactRequest):
     sub = ContactSubmission(**req.dict())
     await db.contacts.insert_one(sub.dict())
+    # Fire-and-forget operator notification — don't fail the form if email send breaks
+    try:
+        op_email = os.environ.get('OPERATOR_EMAIL', '').strip()
+        if op_email:
+            safe_subj = (req.subject or 'New contact form submission').strip()
+            safe_msg = (req.message or '').replace('<', '&lt;').replace('>', '&gt;').replace('\n', '<br>')
+            html = f"""<!doctype html><html><body style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;background:#0a0a0c;color:#e7e3d6;padding:24px;">
+<div style="max-width:560px;margin:0 auto;background:#13131a;border:1px solid #3a2c08;border-radius:14px;padding:28px;">
+<div style="font-size:11px;letter-spacing:2px;text-transform:uppercase;color:#d4a93a;font-weight:700;">TBC AI Tools · New contact</div>
+<h1 style="margin:14px 0 8px 0;font-size:20px;color:#f4eed5;">{safe_subj}</h1>
+<div style="font-size:13px;color:#a8a092;margin-bottom:18px;">From <strong style="color:#d4a93a;">{req.name}</strong> &lt;{req.email}&gt;</div>
+<div style="font-size:14px;color:#e7e3d6;line-height:1.55;background:#0e0e14;border-left:3px solid #d4a93a;padding:14px 16px;border-radius:6px;">{safe_msg}</div>
+<div style="font-size:11px;color:#7e7768;margin-top:18px;">Reply directly to this email to respond to the sender.</div>
+</div></body></html>"""
+            await send_email(op_email, f'[TBC AI Tools] {safe_subj}', html)
+    except Exception as e:
+        logger.warning('Contact-form operator notification failed: %s', e)
     return {'success': True, 'id': sub.id}
 
 
