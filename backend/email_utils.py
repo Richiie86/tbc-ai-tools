@@ -7,18 +7,26 @@ import resend
 
 logger = logging.getLogger('tbc.email')
 
-RESEND_API_KEY = os.environ.get('RESEND_API_KEY', '')
-SENDER_EMAIL = os.environ.get('SENDER_EMAIL', 'onboarding@resend.dev')
 
-if RESEND_API_KEY:
-    resend.api_key = RESEND_API_KEY
+async def _get_runtime_creds():
+    """DB-stored Resend key + sender override env vars. Falls back to env."""
+    try:
+        from db import db
+        s = await db.settings.find_one({'_id': 'payment_settings'}) or {}
+    except Exception:
+        s = {}
+    api_key = s.get('resend_api_key') or os.environ.get('RESEND_API_KEY', '')
+    sender = s.get('sender_email') or os.environ.get('SENDER_EMAIL', 'onboarding@resend.dev')
+    return api_key, sender
 
 
 async def send_email(to: str, subject: str, html: str) -> dict:
     """Send a transactional email. Raises on failure."""
-    if not RESEND_API_KEY:
-        raise RuntimeError('RESEND_API_KEY not configured')
-    params = {'from': SENDER_EMAIL, 'to': [to], 'subject': subject, 'html': html}
+    api_key, sender = await _get_runtime_creds()
+    if not api_key:
+        raise RuntimeError('RESEND_API_KEY not configured (env or operator settings)')
+    resend.api_key = api_key
+    params = {'from': sender, 'to': [to], 'subject': subject, 'html': html}
     result = await asyncio.to_thread(resend.Emails.send, params)
     logger.info('Email sent to %s (id=%s)', to, result.get('id'))
     return result

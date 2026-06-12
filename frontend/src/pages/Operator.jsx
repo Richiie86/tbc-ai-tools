@@ -142,7 +142,7 @@ export default function Operator() {
                 <TabTrigger value="treasury" icon={Wallet}>Treasury</TabTrigger>
                 <TabTrigger value="licenses" icon={KeyRound}>Licenses</TabTrigger>
                 <TabTrigger value="royalties" icon={Coins}>Royalties</TabTrigger>
-                <TabTrigger value="settings" icon={SettingsIcon}>Settings</TabTrigger>
+                <TabTrigger value="settings" icon={SettingsIcon}>Security</TabTrigger>
                 <TabTrigger value="contacts" icon={Mail}>Contacts</TabTrigger>
                 <TabTrigger value="codes" icon={Code2}>Codes</TabTrigger>
               </TabsList>

@@ -448,6 +448,11 @@ async def op_get_settings(_: dict = Depends(get_current_operator)):
         'enable_crypto_auto': doc.get('enable_crypto_auto', False),
         'enable_crypto_manual': doc.get('enable_crypto_manual', True),
         'enable_bank': doc.get('enable_bank', True),
+        'emergent_llm_key_set': bool(doc.get('emergent_llm_key')),
+        'emergent_llm_key_masked': _mask_key(doc.get('emergent_llm_key')),
+        'resend_api_key_set': bool(doc.get('resend_api_key')),
+        'resend_api_key_masked': _mask_key(doc.get('resend_api_key')),
+        'sender_email': doc.get('sender_email') or os.environ.get('SENDER_EMAIL', ''),
     }
 
 
@@ -460,6 +465,7 @@ async def op_update_settings(payload: dict, _: dict = Depends(get_current_operat
         'nowpayments_api_key', 'nowpayments_ipn_secret',
         'paypal_client_id', 'paypal_client_secret', 'paypal_mode',
         'enable_card', 'enable_paypal', 'enable_crypto_auto', 'enable_crypto_manual', 'enable_bank',
+        'emergent_llm_key', 'resend_api_key', 'sender_email',
     }
     updates = {}
     for k, v in payload.items():
@@ -476,7 +482,7 @@ async def op_update_settings(payload: dict, _: dict = Depends(get_current_operat
 @router.post('/operator/settings/clear')
 async def op_clear_secret(key: str = Query(...), _: dict = Depends(get_current_operator)):
     db = await get_db()
-    if key not in {'stripe_secret_key', 'nowpayments_api_key', 'nowpayments_ipn_secret', 'paypal_client_id', 'paypal_client_secret'}:
+    if key not in {'stripe_secret_key', 'nowpayments_api_key', 'nowpayments_ipn_secret', 'paypal_client_id', 'paypal_client_secret', 'emergent_llm_key', 'resend_api_key'}:
         raise HTTPException(400, 'Cannot clear this key')
     await db.settings.update_one({'_id': 'payment_settings'}, {'$set': {key: None}})
     return {'success': True}

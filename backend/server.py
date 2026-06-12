@@ -509,8 +509,11 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
     ).sort('created_at', 1).limit(100)
     history = [m async for m in history_cursor]
 
+    # Use operator-overridden LLM key from DB if present, else env var
+    settings_doc = await db.settings.find_one({'_id': 'payment_settings'}) or {}
+    llm_key = settings_doc.get('emergent_llm_key') or EMERGENT_LLM_KEY
     chat = LlmChat(
-        api_key=EMERGENT_LLM_KEY,
+        api_key=llm_key,
         session_id=session_id,
         system_message=SYSTEM_PROMPT,
     )
