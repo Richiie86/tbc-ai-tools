@@ -43,77 +43,86 @@ def _run(cmd: list[str], cwd: str | None = None, timeout: int = 60) -> dict:
 
 
 # ---------- HEALTH CHECK ----------
-@router.get('/health')
-async def ops_health(_user: dict = Depends(get_current_operator)):
-    """Aggregated health snapshot. Each check returns {ok, latency_ms, detail?}."""
-    checks: list[dict] = []
-
-    # Mongo ping
+async def _check_mongo() -> dict:
     started = datetime.now(timezone.utc)
     try:
         await db.command('ping')
         ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
-        checks.append({'key': 'mongo', 'label': 'MongoDB', 'ok': True, 'latency_ms': ms, 'detail': 'ping ok'})
+        return {'key': 'mongo', 'label': 'MongoDB', 'ok': True, 'latency_ms': ms, 'detail': 'ping ok'}
     except Exception as e:
-        checks.append({'key': 'mongo', 'label': 'MongoDB', 'ok': False, 'detail': str(e)[:200]})
+        return {'key': 'mongo', 'label': 'MongoDB', 'ok': False, 'detail': str(e)[:200]}
 
-    # Env keys (presence only — never echo values)
+
+def _check_env_keys() -> list[dict]:
+    """Required envs must be set; optional ones surface as info-only rows."""
     env_required = ['MONGO_URL', 'DB_NAME', 'JWT_SECRET']
     env_optional = ['EMERGENT_LLM_KEY', 'RESEND_API_KEY', 'STRIPE_API_KEY']
+    out: list[dict] = []
     for k in env_required:
-        checks.append({'key': f'env.{k}', 'label': f'env · {k}', 'ok': bool(os.environ.get(k)), 'detail': 'set' if os.environ.get(k) else 'missing (required)'})
+        present = bool(os.environ.get(k))
+        out.append({'key': f'env.{k}', 'label': f'env · {k}', 'ok': present,
+                    'detail': 'set' if present else 'missing (required)'})
     for k in env_optional:
         present = bool(os.environ.get(k))
-        checks.append({'key': f'env.{k}', 'label': f'env · {k}', 'ok': True, 'detail': 'set' if present else 'unset (operator may configure in Security tab)'})
+        out.append({'key': f'env.{k}', 'label': f'env · {k}', 'ok': True,
+                    'detail': 'set' if present else 'unset (operator may configure in Security tab)'})
+    return out
 
-    # Brand settings DB-backed keys
+
+async def _check_settings_keys() -> list[dict]:
+    """DB-backed API keys (presence only)."""
     s = await db.settings.find_one({'_id': 'payment_settings'}) or {}
-    has_keys = {
-        'emergent_llm_key': bool(s.get('emergent_llm_key')),
-        'stripe_secret_key': bool(s.get('stripe_secret_key')),
-        'paypal_client_id': bool(s.get('paypal_client_id')),
-        'resend_api_key': bool(s.get('resend_api_key')),
-        'nowpayments_api_key': bool(s.get('nowpayments_api_key')),
-    }
-    for k, v in has_keys.items():
-        checks.append({'key': f'settings.{k}', 'label': f'settings · {k}', 'ok': True, 'detail': 'configured' if v else 'not configured'})
+    keys = [
+        'emergent_llm_key', 'stripe_secret_key', 'paypal_client_id',
+        'resend_api_key', 'nowpayments_api_key',
+    ]
+    return [
+        {'key': f'settings.{k}', 'label': f'settings · {k}', 'ok': True,
+         'detail': 'configured' if s.get(k) else 'not configured'}
+        for k in keys
+    ]
 
-    # Master payments flag
+
+async def _check_master_payments() -> dict:
     bs = await db.settings.find_one({'_id': 'brand_settings'}) or {}
-    checks.append({
-        'key': 'payments.master_switch',
-        'label': 'Master Payments',
-        'ok': bool(bs.get('master_payments_enabled', True)),
-        'detail': 'ON' if bs.get('master_payments_enabled', True) else 'OFF (no payments will process)',
-    })
+    on = bool(bs.get('master_payments_enabled', True))
+    return {
+        'key': 'payments.master_switch', 'label': 'Master Payments',
+        'ok': on, 'detail': 'ON' if on else 'OFF (no payments will process)',
+    }
 
-    # Frontend reachable
+
+async def _check_frontend() -> dict:
     frontend_url = os.environ.get('FRONTEND_URL') or 'http://localhost:3000'
     started = datetime.now(timezone.utc)
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
             r = await client.get(frontend_url)
         ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
-        checks.append({'key': 'frontend', 'label': 'Frontend', 'ok': r.status_code < 500, 'latency_ms': ms, 'detail': f'HTTP {r.status_code}'})
+        return {'key': 'frontend', 'label': 'Frontend', 'ok': r.status_code < 500,
+                'latency_ms': ms, 'detail': f'HTTP {r.status_code}'}
     except Exception as e:
-        checks.append({'key': 'frontend', 'label': 'Frontend', 'ok': False, 'detail': str(e)[:200]})
+        return {'key': 'frontend', 'label': 'Frontend', 'ok': False, 'detail': str(e)[:200]}
 
-    # Disk usage
+
+def _check_disk() -> dict:
     try:
         usage = shutil.disk_usage('/app')
         pct = round(usage.used / usage.total * 100, 1)
-        checks.append({
-            'key': 'disk',
-            'label': 'Disk (/app)',
+        return {
+            'key': 'disk', 'label': 'Disk (/app)',
             'ok': pct < 90,
             'detail': f'{pct}% used · {usage.free // (1024**3)} GB free',
-        })
+        }
     except Exception as e:
-        checks.append({'key': 'disk', 'label': 'Disk (/app)', 'ok': False, 'detail': str(e)[:200]})
+        return {'key': 'disk', 'label': 'Disk (/app)', 'ok': False, 'detail': str(e)[:200]}
 
-    # Supervisor service state — only treat core services as required for "healthy".
+
+def _check_services() -> list[dict]:
+    """Only treat the trio core services as required for "healthy"."""
     CORE_SERVICES = {'backend', 'frontend', 'mongodb'}
     res = _run(['sudo', 'supervisorctl', 'status'], timeout=10)
+    rows: list[dict] = []
     for line in (res.get('stdout') or '').splitlines():
         parts = line.split()
         if not parts:
@@ -125,22 +134,32 @@ async def ops_health(_user: dict = Depends(get_current_operator)):
         detail = ' '.join(parts[1:]) if len(parts) > 1 else 'unknown'
         if not is_core and state != 'RUNNING':
             detail = f'{detail} · non-critical'
-        checks.append({
-            'key': f'svc.{name}',
-            'label': f'svc · {name}',
-            'ok': ok,
-            'detail': detail,
-        })
+        rows.append({'key': f'svc.{name}', 'label': f'svc · {name}', 'ok': ok, 'detail': detail})
+    return rows
 
-    # Recent git commit
+
+def _check_commit() -> str:
     git = _run(['git', '-C', '/app', 'log', '-1', '--pretty=%h · %s · %cr'], timeout=5)
-    commit = (git.get('stdout') or '').strip() or 'unknown'
+    return (git.get('stdout') or '').strip() or 'unknown'
+
+
+@router.get('/health')
+async def ops_health(_user: dict = Depends(get_current_operator)):
+    """Aggregated health snapshot. Each check returns {ok, latency_ms, detail?}."""
+    checks: list[dict] = []
+    checks.append(await _check_mongo())
+    checks.extend(_check_env_keys())
+    checks.extend(await _check_settings_keys())
+    checks.append(await _check_master_payments())
+    checks.append(await _check_frontend())
+    checks.append(_check_disk())
+    checks.extend(_check_services())
 
     ok_count = sum(1 for c in checks if c['ok'])
     return {
         'generated_at': _now_iso(),
         'summary': {'total': len(checks), 'passing': ok_count, 'failing': len(checks) - ok_count},
-        'commit': commit,
+        'commit': _check_commit(),
         'checks': checks,
     }
 

@@ -509,85 +509,103 @@ async def op_clear_secret(key: str = Query(...), _: dict = Depends(get_current_o
 # ===================================================================
 # Operator: Test integration connections
 # ===================================================================
+async def _test_paypal(settings: dict) -> dict:
+    if not (settings.get('paypal_client_id') and settings.get('paypal_client_secret')):
+        return {'ok': False, 'message': 'PayPal credentials not configured.'}
+    mode = settings.get('paypal_mode', 'sandbox')
+    base = PAYPAL_BASES.get(mode, PAYPAL_BASES['sandbox'])
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            r = await client.post(
+                f'{base}/v1/oauth2/token',
+                auth=(settings['paypal_client_id'], settings['paypal_client_secret']),
+                data={'grant_type': 'client_credentials'},
+                headers={'Accept': 'application/json'},
+            )
+        except httpx.HTTPError as e:
+            return {'ok': False, 'message': f'Network error reaching PayPal: {e}'}
+    if r.status_code == 200:
+        data = r.json()
+        return {'ok': True,
+                'message': f"Connected to PayPal {mode.upper()} · app_id={data.get('app_id') or 'n/a'} · scope OK"}
+    try:
+        err = r.json()
+    except Exception:
+        err = {'error_description': r.text[:200]}
+    return {'ok': False,
+            'message': f"PayPal {r.status_code}: {err.get('error_description') or err.get('error') or 'unknown error'}"}
+
+
+async def _test_stripe(settings: dict) -> dict:
+    key = settings.get('stripe_secret_key') or os.environ.get('STRIPE_API_KEY', '')
+    if not key:
+        return {'ok': False, 'message': 'Stripe secret key not configured.'}
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            r = await client.get('https://api.stripe.com/v1/account',
+                                 headers={'Authorization': f'Bearer {key}'})
+        except httpx.HTTPError as e:
+            return {'ok': False, 'message': f'Network error reaching Stripe: {e}'}
+    if r.status_code == 200:
+        data = r.json()
+        label = data.get('business_profile', {}).get('name') or data.get('email') or data.get('id', 'account')
+        mode = 'LIVE' if not key.startswith('sk_test_') else 'TEST'
+        return {'ok': True, 'message': f'Connected to Stripe {mode} · {label}'}
+    try:
+        err = r.json().get('error', {})
+    except Exception:
+        err = {'message': r.text[:200]}
+    return {'ok': False,
+            'message': f"Stripe {r.status_code}: {err.get('message') or err.get('code') or 'unknown error'}"}
+
+
+async def _test_resend(_settings: dict) -> dict:
+    api_key = os.environ.get('RESEND_API_KEY', '')
+    if not api_key:
+        return {'ok': False, 'message': 'RESEND_API_KEY not configured in backend .env'}
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            r = await client.get('https://api.resend.com/domains',
+                                 headers={'Authorization': f'Bearer {api_key}'})
+        except httpx.HTTPError as e:
+            return {'ok': False, 'message': f'Network error reaching Resend: {e}'}
+    if r.status_code != 200:
+        return {'ok': False, 'message': f"Resend {r.status_code}: {r.text[:200]}"}
+    try:
+        data = r.json().get('data', [])
+    except Exception:
+        data = []
+    verified = [d for d in data if d.get('status') == 'verified']
+    sender = os.environ.get('SENDER_EMAIL', 'onboarding@resend.dev')
+    sender_domain = sender.split('@')[-1] if '@' in sender else sender
+    sender_ok = sender_domain == 'resend.dev' or any(
+        d.get('name') == sender_domain and d.get('status') == 'verified' for d in data
+    )
+    msg = f"Connected to Resend · {len(verified)}/{len(data)} domain(s) verified · sender '{sender}'"
+    msg += ' ✅' if sender_ok else ' ⚠️  (sender domain not verified — emails will be rejected)'
+    return {'ok': sender_ok, 'message': msg}
+
+
+# Provider → test-handler dispatch table. Adding a new provider here is the
+# only edit needed to surface a new "Test connection" button on the UI.
+_CONNECTION_TESTERS = {
+    'paypal': _test_paypal,
+    'stripe': _test_stripe,
+    'resend': _test_resend,
+}
+
+
 @router.post('/operator/test-connection/{provider}')
 async def op_test_connection(provider: str, _: dict = Depends(get_current_operator)):
     """Ping a third-party API with the operator's saved keys and report success/failure.
 
     Supported providers: paypal | stripe | resend
     """
-    if provider == 'paypal':
-        settings = await get_settings_doc()
-        if not (settings.get('paypal_client_id') and settings.get('paypal_client_secret')):
-            return {'ok': False, 'message': 'PayPal credentials not configured.'}
-        mode = settings.get('paypal_mode', 'sandbox')
-        base = PAYPAL_BASES.get(mode, PAYPAL_BASES['sandbox'])
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            try:
-                r = await client.post(
-                    f'{base}/v1/oauth2/token',
-                    auth=(settings['paypal_client_id'], settings['paypal_client_secret']),
-                    data={'grant_type': 'client_credentials'},
-                    headers={'Accept': 'application/json'},
-                )
-            except httpx.HTTPError as e:
-                return {'ok': False, 'message': f'Network error reaching PayPal: {e}'}
-        if r.status_code == 200:
-            data = r.json()
-            return {
-                'ok': True,
-                'message': f"Connected to PayPal {mode.upper()} · app_id={data.get('app_id') or 'n/a'} · scope OK",
-            }
-        try:
-            err = r.json()
-        except Exception:
-            err = {'error_description': r.text[:200]}
-        return {'ok': False, 'message': f"PayPal {r.status_code}: {err.get('error_description') or err.get('error') or 'unknown error'}"}
-
-    if provider == 'stripe':
-        settings = await get_settings_doc()
-        key = settings.get('stripe_secret_key') or os.environ.get('STRIPE_API_KEY', '')
-        if not key:
-            return {'ok': False, 'message': 'Stripe secret key not configured.'}
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            try:
-                r = await client.get('https://api.stripe.com/v1/account', headers={'Authorization': f'Bearer {key}'})
-            except httpx.HTTPError as e:
-                return {'ok': False, 'message': f'Network error reaching Stripe: {e}'}
-        if r.status_code == 200:
-            data = r.json()
-            label = data.get('business_profile', {}).get('name') or data.get('email') or data.get('id', 'account')
-            mode = 'LIVE' if not key.startswith('sk_test_') else 'TEST'
-            return {'ok': True, 'message': f'Connected to Stripe {mode} · {label}'}
-        try:
-            err = r.json().get('error', {})
-        except Exception:
-            err = {'message': r.text[:200]}
-        return {'ok': False, 'message': f"Stripe {r.status_code}: {err.get('message') or err.get('code') or 'unknown error'}"}
-
-    if provider == 'resend':
-        api_key = os.environ.get('RESEND_API_KEY', '')
-        if not api_key:
-            return {'ok': False, 'message': 'RESEND_API_KEY not configured in backend .env'}
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            try:
-                r = await client.get('https://api.resend.com/domains', headers={'Authorization': f'Bearer {api_key}'})
-            except httpx.HTTPError as e:
-                return {'ok': False, 'message': f'Network error reaching Resend: {e}'}
-        if r.status_code == 200:
-            try:
-                data = r.json().get('data', [])
-            except Exception:
-                data = []
-            verified = [d for d in data if d.get('status') == 'verified']
-            sender = os.environ.get('SENDER_EMAIL', 'onboarding@resend.dev')
-            sender_domain = sender.split('@')[-1] if '@' in sender else sender
-            sender_ok = sender_domain == 'resend.dev' or any(d.get('name') == sender_domain and d.get('status') == 'verified' for d in data)
-            msg = f"Connected to Resend · {len(verified)}/{len(data)} domain(s) verified · sender '{sender}'"
-            msg += ' ✅' if sender_ok else ' ⚠️  (sender domain not verified — emails will be rejected)'
-            return {'ok': sender_ok, 'message': msg}
-        return {'ok': False, 'message': f"Resend {r.status_code}: {r.text[:200]}"}
-
-    raise HTTPException(400, f'Unknown provider: {provider}')
+    tester = _CONNECTION_TESTERS.get(provider)
+    if not tester:
+        raise HTTPException(400, f'Unknown provider: {provider}')
+    settings = await get_settings_doc()
+    return await tester(settings)
 
 
 # ===================================================================
@@ -666,59 +684,53 @@ async def op_tx_receipt(tx_id: str, _: dict = Depends(get_current_operator)):
     return Response(content=pdf, media_type='application/pdf', headers={'Content-Disposition': f'attachment; filename={fname}'})
 
 
-@router.get('/operator/transactions/export')
-async def op_tx_export(
-    from_date: Optional[str] = Query(None, alias='from'),
-    to_date: Optional[str] = Query(None, alias='to'),
-    only_paid: bool = Query(True),
-    _: dict = Depends(get_current_operator),
-):
-    """Export receipts for date range as a single combined PDF."""
-    db = await get_db()
-    q = {}
-    if only_paid:
-        q['payment_status'] = 'paid'
-    if from_date or to_date:
-        q['created_at'] = {}
-        try:
-            if from_date:
-                q['created_at']['$gte'] = datetime.fromisoformat(from_date.replace('Z', '+00:00'))
-            if to_date:
-                q['created_at']['$lte'] = datetime.fromisoformat(to_date.replace('Z', '+00:00'))
-        except Exception:
-            raise HTTPException(400, 'Invalid date format. Use YYYY-MM-DD.')
-        if not q['created_at']:
-            del q['created_at']
+def _parse_export_date_range(from_date: Optional[str], to_date: Optional[str]) -> dict:
+    """Translate the optional from/to query params into a Mongo `$gte/$lte` filter.
 
-    cursor = db.payment_transactions.find(q).sort('created_at', 1)
-    txs = [t async for t in cursor]
+    Raises 400 on a malformed ISO date. Returns an empty dict when both inputs
+    are None so the caller can omit `created_at` from the query.
+    """
+    if not (from_date or to_date):
+        return {}
+    rng: dict = {}
+    try:
+        if from_date:
+            rng['$gte'] = datetime.fromisoformat(from_date.replace('Z', '+00:00'))
+        if to_date:
+            rng['$lte'] = datetime.fromisoformat(to_date.replace('Z', '+00:00'))
+    except Exception:
+        raise HTTPException(400, 'Invalid date format. Use YYYY-MM-DD.')
+    return rng
 
-    if not txs:
-        raise HTTPException(404, 'No transactions in selected range')
 
-    # Combined PDF
+def _build_tx_export_pdf(txs: list[dict], from_date: Optional[str], to_date: Optional[str]) -> bytes:
+    """Render the combined transactions report as a single PDF byte string."""
     buf = io.BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=20*mm, rightMargin=20*mm, topMargin=18*mm, bottomMargin=15*mm)
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=20*mm, rightMargin=20*mm,
+                            topMargin=18*mm, bottomMargin=15*mm)
     styles = getSampleStyleSheet()
-    h1 = ParagraphStyle('h1', parent=styles['Heading1'], fontName='Helvetica-Bold', fontSize=20, textColor=colors.HexColor('#c89c2a'), spaceAfter=4)
-    h2 = ParagraphStyle('h2', parent=styles['Heading2'], fontName='Helvetica-Bold', fontSize=12, textColor=colors.HexColor('#3a2c08'), spaceAfter=6)  # noqa: F841
-    body = ParagraphStyle('body', parent=styles['BodyText'], fontName='Helvetica', fontSize=10, textColor=colors.HexColor('#1f2937'))
-    muted = ParagraphStyle('m', parent=styles['BodyText'], fontName='Helvetica', fontSize=9, textColor=colors.HexColor('#6b7280'))
+    h1 = ParagraphStyle('h1', parent=styles['Heading1'], fontName='Helvetica-Bold',
+                        fontSize=20, textColor=colors.HexColor('#c89c2a'), spaceAfter=4)
+    body = ParagraphStyle('body', parent=styles['BodyText'], fontName='Helvetica',
+                          fontSize=10, textColor=colors.HexColor('#1f2937'))
+    muted = ParagraphStyle('m', parent=styles['BodyText'], fontName='Helvetica',
+                           fontSize=9, textColor=colors.HexColor('#6b7280'))
 
-    story = []
-    story.append(Paragraph('TBC AI Tools — Transactions Report', h1))
-    rng = []
+    rng_parts = []
     if from_date:
-        rng.append(f"from {from_date}")
+        rng_parts.append(f'from {from_date}')
     if to_date:
-        rng.append(f"to {to_date}")
-    story.append(Paragraph('Range: ' + (' '.join(rng) if rng else 'all time'), muted))
-    story.append(Paragraph(f"Total transactions: {len(txs)}", muted))
+        rng_parts.append(f'to {to_date}')
     total = sum(float(t.get('amount', 0)) for t in txs)
-    story.append(Paragraph(f"Total amount (paid): ${total:.2f}", body))
-    story.append(Spacer(1, 14))
 
-    # Summary table
+    story = [
+        Paragraph('TBC AI Tools — Transactions Report', h1),
+        Paragraph('Range: ' + (' '.join(rng_parts) if rng_parts else 'all time'), muted),
+        Paragraph(f'Total transactions: {len(txs)}', muted),
+        Paragraph(f'Total amount (paid): ${total:.2f}', body),
+        Spacer(1, 14),
+    ]
+
     head = [['Date', 'Customer', 'Plan', 'Amount', 'Method', 'Status']]
     rows = []
     for t in txs:
@@ -750,10 +762,34 @@ async def op_tx_export(
     ]))
     story.append(tbl)
     doc.build(story)
+    return buf.getvalue()
 
-    pdf = buf.getvalue()
+
+@router.get('/operator/transactions/export')
+async def op_tx_export(
+    from_date: Optional[str] = Query(None, alias='from'),
+    to_date: Optional[str] = Query(None, alias='to'),
+    only_paid: bool = Query(True),
+    _: dict = Depends(get_current_operator),
+):
+    """Export receipts for date range as a single combined PDF."""
+    db = await get_db()
+    q: dict = {}
+    if only_paid:
+        q['payment_status'] = 'paid'
+    rng = _parse_export_date_range(from_date, to_date)
+    if rng:
+        q['created_at'] = rng
+
+    cursor = db.payment_transactions.find(q).sort('created_at', 1)
+    txs = [t async for t in cursor]
+    if not txs:
+        raise HTTPException(404, 'No transactions in selected range')
+
+    pdf = _build_tx_export_pdf(txs, from_date, to_date)
     fname = f"tbc_transactions_{(from_date or 'all')}_{(to_date or 'all')}.pdf"
-    return Response(content=pdf, media_type='application/pdf', headers={'Content-Disposition': f'attachment; filename={fname}'})
+    return Response(content=pdf, media_type='application/pdf',
+                    headers={'Content-Disposition': f'attachment; filename={fname}'})
 
 
 # ===================================================================

@@ -1,0 +1,36 @@
+{
+  "summary": "P1 refactor regression pass. Backend: 9/9 new endpoint-shape tests for the refactored helpers pass (ops/health, withdraw/cron, test-connection dispatch, transactions/export) and the previous P0 suite still passes (15 passed, 1 skipped — same prod-shape forgot-password skip as iteration_1). Frontend: Operator Console renders Total Users / Paid / Messages / Revenue tiles; Users tab is default with per-row +100 / Pause / Delete / Reset 2FA visible; Projects, Money, and Ops tabs all open with their key sub-sections (Stripe / PayPal / NOWPayments cards, Recent payments table, Auto-withdraw, Withdrawal history, Run health check / Run code review / Restart / Deploy). Dashboard sidebar (New session, refer banner, ENTERPRISE plan, Operator console link, Sign out, Sign out everywhere) renders correctly. No console errors beyond a single benign /auth/me 401 probe before the cookie is set. No regressions detected from the pure decomposition refactor.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_p1_refactor.py",
+    "/app/backend/tests/test_p0_review.py",
+    "/app/test_reports/pytest/p1_refactor.xml",
+    "/app/test_reports/pytest/p1_full.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "autowithdraw_ext.run_auto_withdraw_once iterates `for sweep in (_sweep_stripe(...), _sweep_nowpayments(...)):` then awaits each row. This works but creates the second coroutine before the first is awaited; if you ever decide to parallelise these, switch to asyncio.gather(_sweep_stripe(s), _sweep_nowpayments(s)) — both helpers are independent IO.",
+    "payments_ext._CONNECTION_TESTERS dispatch is clean. Suggest adding a runtime assertion (or unit test) that the dispatch table keys match the documented supported set, so future providers aren't silently 400-ing.",
+    "ops_ext._check_services treats any non-RUNNING non-core service as ok=True but tags 'non-critical' in detail. Operator console grid may show all-green even when a sidecar (e.g. trial-emails worker) is stopped. Consider surfacing a 'warn' state distinct from ok=True/false to avoid silent regressions.",
+    "_parse_export_date_range swallows the original parse exception with a generic 400. Including the offending date in the detail (e.g. 'Invalid date \"foo\"; use YYYY-MM-DD') would speed up triage with no security impact.",
+    "OpsTab orchestrator no longer renders the literal 'Quick actions' label — the three neon-indigo buttons render in OpsQuickActions but the section heading was dropped during the refactor. Cosmetic; not a behavioural regression."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_p1_refactor.py"
+  ],
+  "success_rate": {"backend": "100% (9/9 new + 6/6 prior = 15/15, 1 prior skip preserved)", "frontend": "100% (operator console + dashboard render, no JS errors)"},
+  "test_credentials": "Operator rac.investments.swe@gmail.com / 123Admin@98. Operator boots with RESET_OPERATOR_PASSWORD=true, so login lands on /setup-2fa; navigate directly to /operator or /dashboard afterwards.",
+  "seed_data_creation": "None — black-box only. Tests reuse the operator account; transactions/export PDF path is exercised against existing paid txs in the DB (1 paid tx present).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Regression suite now lives in two files: /app/backend/tests/test_p0_review.py (cookie/2FA/codes-file) and /app/backend/tests/test_p1_refactor.py (extracted helpers: ops/health, withdraw/cron, test-connection dispatch, transactions/export). Run the whole folder with `pytest /app/backend/tests/ -v`. Note the health-check key is `payments.master_switch` (not `master_payments`). The operator must be 2FA-cleared (RESET_OPERATOR_PASSWORD=true) for the operator-only tests to skip-vs-pass meaningfully.",
+  "rca of the issue": "N/A — refactor verified clean. Initial test failure on missing `master_payments` key was a test-only assumption mismatch (actual key emitted by _check_master_payments is `payments.master_switch`); fixed in the test file, not in product code."
+}

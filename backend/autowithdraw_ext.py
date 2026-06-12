@@ -21,7 +21,7 @@ Money tab can render history.
 import os
 import logging
 from datetime import datetime, timezone
-from typing import Optional, List
+from typing import Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -216,80 +216,120 @@ async def withdraw_nowpayments_now(req: ManualCryptoPayoutRequest, request: Requ
 
 
 # ============== AUTO CRON ==============
+async def _sweep_stripe(settings: dict) -> dict:
+    """One Stripe auto-payout pass. Returns an attempt summary row.
+
+    Pulled out of `run_auto_withdraw_once` so the orchestrator stays linear and
+    each provider can be unit-tested / patched in isolation.
+    """
+    if not settings.get('autopay_stripe_enabled'):
+        return {'provider': 'stripe', 'status': 'disabled'}
+    if not settings.get('stripe_secret_key'):
+        return {'provider': 'stripe', 'status': 'skipped', 'reason': 'Stripe key not configured'}
+    try:
+        avail = await _stripe_balance_available_usd(settings)
+        threshold = float(settings.get('autopay_stripe_threshold_usd', 100.0))
+        if avail < threshold:
+            return {'provider': 'stripe', 'status': 'skipped',
+                    'reason': f'available ${avail:.2f} < threshold ${threshold:.2f}'}
+        # Apply daily safety cap (auto payouts only).
+        cap = float(settings.get('autopay_stripe_daily_cap_usd', 5000.0))
+        paid = await _auto_paid_last_24h('stripe')
+        headroom = max(0.0, cap - paid)
+        if headroom <= 0.0:
+            return {'provider': 'stripe', 'status': 'skipped',
+                    'reason': f'daily cap reached (${paid:.2f}/${cap:.2f})'}
+        payout_amt = min(avail, headroom)
+        result = await _stripe_payout(settings, payout_amt)
+        await _record('stripe', 'auto', payout_amt, 'success',
+                      f"Auto payout {result.get('id')} · cap {paid + payout_amt:.2f}/{cap:.2f}", result)
+        return {
+            'provider': 'stripe', 'status': 'success',
+            'amount_usd': payout_amt, 'capped': payout_amt < avail,
+            'cap_remaining_after': max(0.0, cap - paid - payout_amt),
+        }
+    except Exception as e:
+        await _record('stripe', 'auto', 0, 'failed', str(e)[:300])
+        return {'provider': 'stripe', 'status': 'failed', 'error': str(e)[:200]}
+
+
+async def _nowpay_currency_balance(settings: dict, currency: str) -> float:
+    """Best-effort lookup of the auto-pay currency balance on NOWPayments.
+
+    NOWPayments' /balance response shape has varied historically — sometimes
+    `{balances: {btc: {...}}}`, sometimes `{btc: 0.1}`. We accept both shapes.
+    """
+    cur = (currency or '').lower()
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        r = await client.get(
+            'https://api.nowpayments.io/v1/balance',
+            headers={'x-api-key': settings['nowpayments_api_key']},
+        )
+    body = r.json() or {}
+    balances = body.get('balances') or body
+    row = balances.get(cur) or balances.get(cur.upper())
+    if isinstance(row, dict):
+        return float(row.get('amount', 0))
+    return float(row or 0)
+
+
+async def _sweep_nowpayments(settings: dict) -> dict:
+    """One NOWPayments auto-payout pass. Returns an attempt summary row."""
+    if not settings.get('autopay_nowpay_enabled'):
+        return {'provider': 'nowpayments', 'status': 'disabled'}
+    if (not settings.get('nowpayments_api_key')
+            or not settings.get('autopay_nowpay_address')
+            or not settings.get('autopay_nowpay_currency')):
+        return {'provider': 'nowpayments', 'status': 'skipped',
+                'reason': 'key/address/currency missing'}
+    try:
+        cur = (settings.get('autopay_nowpay_currency') or '').lower()
+        addr = settings.get('autopay_nowpay_address')
+        threshold = float(settings.get('autopay_nowpay_threshold_usd', 25.0))
+        amt = await _nowpay_currency_balance(settings, cur)
+        if amt < threshold:
+            return {'provider': 'nowpayments', 'status': 'skipped',
+                    'reason': f'balance {amt} < threshold {threshold}'}
+        # Apply daily safety cap (asset units, auto only).
+        cap = float(settings.get('autopay_nowpay_daily_cap', 1.0))
+        paid = await _auto_paid_last_24h('nowpayments')
+        headroom = max(0.0, cap - paid)
+        if headroom <= 0.0:
+            return {'provider': 'nowpayments', 'status': 'skipped',
+                    'reason': f'daily cap reached ({paid}/{cap} {cur})'}
+        payout_amt = min(amt, headroom)
+        result = await _nowpayments_payout(settings, payout_amt, cur, addr)
+        await _record('nowpayments', 'auto', payout_amt, 'success',
+                      f"Auto {payout_amt} {cur} → {addr[:10]}… · cap {paid + payout_amt:.4f}/{cap:.4f}",
+                      result)
+        return {
+            'provider': 'nowpayments', 'status': 'success',
+            'amount': payout_amt, 'currency': cur, 'capped': payout_amt < amt,
+            'cap_remaining_after': max(0.0, cap - paid - payout_amt),
+        }
+    except Exception as e:
+        await _record('nowpayments', 'auto', 0, 'failed', str(e)[:300])
+        return {'provider': 'nowpayments', 'status': 'failed', 'error': str(e)[:200]}
+
+
 async def run_auto_withdraw_once() -> dict:
     """Single auto-withdraw sweep — Stripe + NOWPayments. Idempotency relies on
-    the operator setting a sensible threshold so we don't spin payouts every hour."""
+    the operator setting a sensible threshold so we don't spin payouts every hour.
+
+    Skipped (disabled) providers are omitted from the response to keep the
+    summary tight; explicitly-skipped ones (missing config, cap reached, etc.)
+    stay so the operator can see why nothing happened.
+    """
     settings = await get_settings_doc()
-    summary: dict = {'ran_at': datetime.now(timezone.utc).isoformat(), 'attempts': []}
-
-    # Stripe ---------------------------------------------------------------
-    if settings.get('autopay_stripe_enabled'):
-        if not settings.get('stripe_secret_key'):
-            summary['attempts'].append({'provider': 'stripe', 'status': 'skipped', 'reason': 'Stripe key not configured'})
-        else:
-            try:
-                avail = await _stripe_balance_available_usd(settings)
-                threshold = float(settings.get('autopay_stripe_threshold_usd', 100.0))
-                if avail < threshold:
-                    summary['attempts'].append({'provider': 'stripe', 'status': 'skipped', 'reason': f'available ${avail:.2f} < threshold ${threshold:.2f}'})
-                else:
-                    # Apply daily safety cap (auto payouts only).
-                    cap = float(settings.get('autopay_stripe_daily_cap_usd', 5000.0))
-                    paid = await _auto_paid_last_24h('stripe')
-                    headroom = max(0.0, cap - paid)
-                    if headroom <= 0.0:
-                        summary['attempts'].append({'provider': 'stripe', 'status': 'skipped', 'reason': f'daily cap reached (${paid:.2f}/${cap:.2f})'})
-                    else:
-                        payout_amt = min(avail, headroom)
-                        result = await _stripe_payout(settings, payout_amt)
-                        await _record('stripe', 'auto', payout_amt, 'success', f"Auto payout {result.get('id')} · cap {paid + payout_amt:.2f}/{cap:.2f}", result)
-                        summary['attempts'].append({
-                            'provider': 'stripe', 'status': 'success',
-                            'amount_usd': payout_amt, 'capped': payout_amt < avail,
-                            'cap_remaining_after': max(0.0, cap - paid - payout_amt),
-                        })
-            except Exception as e:
-                await _record('stripe', 'auto', 0, 'failed', str(e)[:300])
-                summary['attempts'].append({'provider': 'stripe', 'status': 'failed', 'error': str(e)[:200]})
-
-    # NOWPayments ----------------------------------------------------------
-    if settings.get('autopay_nowpay_enabled'):
-        if not settings.get('nowpayments_api_key') or not settings.get('autopay_nowpay_address') or not settings.get('autopay_nowpay_currency'):
-            summary['attempts'].append({'provider': 'nowpayments', 'status': 'skipped', 'reason': 'key/address/currency missing'})
-        else:
-            try:
-                cur = (settings.get('autopay_nowpay_currency') or '').lower()
-                addr = settings.get('autopay_nowpay_address')
-                threshold = float(settings.get('autopay_nowpay_threshold_usd', 25.0))
-                # Fetch balance row for the configured currency
-                async with httpx.AsyncClient(timeout=10.0) as client:
-                    r = await client.get('https://api.nowpayments.io/v1/balance', headers={'x-api-key': settings['nowpayments_api_key']})
-                balances = (r.json() or {}).get('balances') or r.json() or {}
-                row = balances.get(cur) or balances.get(cur.upper())
-                amt = float((row or {}).get('amount', 0)) if isinstance(row, dict) else float(row or 0)
-                if amt < threshold:
-                    summary['attempts'].append({'provider': 'nowpayments', 'status': 'skipped', 'reason': f'balance {amt} < threshold {threshold}'})
-                else:
-                    # Apply daily safety cap (asset units, auto only).
-                    cap = float(settings.get('autopay_nowpay_daily_cap', 1.0))
-                    paid = await _auto_paid_last_24h('nowpayments')
-                    headroom = max(0.0, cap - paid)
-                    if headroom <= 0.0:
-                        summary['attempts'].append({'provider': 'nowpayments', 'status': 'skipped', 'reason': f'daily cap reached ({paid}/{cap} {cur})'})
-                    else:
-                        payout_amt = min(amt, headroom)
-                        result = await _nowpayments_payout(settings, payout_amt, cur, addr)
-                        await _record('nowpayments', 'auto', payout_amt, 'success', f"Auto {payout_amt} {cur} → {addr[:10]}… · cap {paid + payout_amt:.4f}/{cap:.4f}", result)
-                        summary['attempts'].append({
-                            'provider': 'nowpayments', 'status': 'success',
-                            'amount': payout_amt, 'currency': cur, 'capped': payout_amt < amt,
-                            'cap_remaining_after': max(0.0, cap - paid - payout_amt),
-                        })
-            except Exception as e:
-                await _record('nowpayments', 'auto', 0, 'failed', str(e)[:300])
-                summary['attempts'].append({'provider': 'nowpayments', 'status': 'failed', 'error': str(e)[:200]})
-
-    return summary
+    attempts: list[dict] = []
+    for sweep in (_sweep_stripe(settings), _sweep_nowpayments(settings)):
+        row = await sweep
+        if row.get('status') != 'disabled':
+            attempts.append(row)
+    return {
+        'ran_at': datetime.now(timezone.utc).isoformat(),
+        'attempts': attempts,
+    }
 
 
 @router.post('/cron')
