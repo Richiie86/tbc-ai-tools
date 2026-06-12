@@ -12,6 +12,33 @@ gold theme. Domain: **tbctools.org**.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
 ## Implemented
+- ✅ **P1 refactor — pure decomposition** (Feb 2026): no behaviour change, all 15/15
+  regression tests pass.
+  - **Backend** `autowithdraw_ext.py` `run_auto_withdraw_once` split into
+    `_sweep_stripe` / `_sweep_nowpayments` / `_nowpay_currency_balance`.
+  - **Backend** `ops_ext.py` `ops_health` split into eight `_check_*` helpers
+    (mongo / env keys / settings keys / master payments / frontend / disk /
+    services / commit). Same JSON shape preserved (`payments.master_switch`,
+    not `master_payments`).
+  - **Backend** `payments_ext.py` `op_test_connection` now dispatches through a
+    `_CONNECTION_TESTERS = {paypal, stripe, resend}` table; per-provider helpers
+    extracted. `op_tx_export` split into `_parse_export_date_range` (input
+    parsing) and `_build_tx_export_pdf` (PDF rendering).
+  - **Frontend** large pages broken into focused sub-components under
+    `pages/dashboard/` and `pages/operator/<feature>/`:
+    Dashboard 486→295 LOC (`TrialBanner`, `ChatMessages` {EmptyState +
+    MessageBubble}, `ChatComposer`, `DashboardSidebar`),
+    Operator 587→311 LOC (`UsersBulkToolbar`, `UsersTable`, `CodesBrowser`,
+    `ContactsList`),
+    OpsTab 474→132 LOC (`OpsQuickActions`, `OpsHealthCheck`, `OpsCodeReview`,
+    `OpsRestartAndDeploy`, `OpsTrialEmailCron`),
+    ProjectsTab 486→180 LOC (`stages.js`, `ProjectStageNav`, `ProjectCard`,
+    `ProjectFormDialog`),
+    MoneyTab 566→143 LOC (`format.js`, `MoneyTiles`, `ProviderBalances`,
+    `RevenueSparkline`, `RecentTransactions`, `WithdrawSettings`,
+    `WithdrawHistory`). Regression suite at
+    `/app/backend/tests/test_p1_refactor.py` (9 new helper-shape tests).
+
 - ✅ **Code Review #2 P0 fixes** (Feb 2026): (1) `server.py` codes/file endpoint
   now initialises `content = ''` before the file-read try/except so any future
   refactor cannot end up returning an unbound name; (2) `auth_utils.decode_password_reset_token`
