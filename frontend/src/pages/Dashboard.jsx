@@ -100,12 +100,29 @@ export default function Dashboard({ variant = 'tbc1' }) {
   }
 
   async function newChat() {
-    setCurrentId(null);
+    // Reset UI first so the empty-state shows immediately even on slow connections.
     setMessages([]);
     setStreamText('');
     setInput('');
-    navigate(basePath);
-    setTimeout(() => taRef.current?.focus(), 100);
+    try {
+      const { data } = await api.post('/chat/sessions', {
+        title: 'New Chat',
+        model,
+        variant,
+      });
+      // Prepend so it sits at the top of "Today" in the sidebar.
+      setSessions((prev) => [data, ...prev.filter((s) => s.id !== data.id)]);
+      setCurrentId(data.id);
+      navigate(`${basePath}/${data.id}`);
+      setTimeout(() => taRef.current?.focus(), 100);
+    } catch (e) {
+      // Fallback to the lazy-create flow so chatting still works even if the API hiccups.
+      console.error('Create session failed, falling back to lazy create', e);
+      toast.error('Could not create session — type a message to start one');
+      setCurrentId(null);
+      navigate(basePath);
+      setTimeout(() => taRef.current?.focus(), 100);
+    }
   }
 
   async function deleteSession(id, e) {
