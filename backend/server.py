@@ -249,11 +249,18 @@ async def register(req: RegisterRequest):
     strength_err = validate_password_strength(req.password)
     if strength_err:
         raise HTTPException(400, strength_err)
+    # Resolve the operator-configured default plan for new users (defaults to "starter")
+    settings_doc = await db.settings.find_one({'_id': 'payment_settings'}) or {}
+    default_plan_id = settings_doc.get('default_plan_id') or 'starter'
+    default_plan_doc = await db.plans.find_one({'id': default_plan_id})
+    starting_credits = int((default_plan_doc or {}).get('credits') or 50)
     user = User(
         email=email,
         password_hash=hash_password(req.password),
         name=req.name,
         role='operator' if email == OPERATOR_EMAIL else 'user',
+        plan=default_plan_id,
+        credits=starting_credits,
     )
     await db.users.insert_one(user.dict())
     # Auto-generate referral code for the new user

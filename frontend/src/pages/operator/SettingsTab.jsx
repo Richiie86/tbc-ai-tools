@@ -7,7 +7,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '../../components/ui/select';
 import { toast } from 'sonner';
-import { Loader2, KeyRound, Save, Lock, Eye, EyeOff, Plug, Mail, Sparkles } from 'lucide-react';
+import { Loader2, KeyRound, Save, Lock, Eye, EyeOff, Plug, Mail, Sparkles, UserPlus } from 'lucide-react';
 
 export default function SettingsTab() {
   const [settings, setSettings] = useState(null);
@@ -67,6 +67,29 @@ export default function SettingsTab() {
 
   return (
     <div className="grid gap-5">
+      <Section icon={UserPlus} title="New user defaults">
+        <div className="rounded-md border border-tbc-900/40 bg-ink-950/60 p-3 text-xs text-tbc-200/70">
+          Every newly-registered user is automatically placed on the plan you choose here. No manual action needed.
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-tbc-200/60 w-32">Default plan</span>
+          <Select
+            value={settings.default_plan_id || 'starter'}
+            onValueChange={(v) => save({ default_plan_id: v })}
+          >
+            <SelectTrigger className="h-9 w-56 bg-ink-950 border-tbc-900/60 text-tbc-100" data-testid="settings-default-plan">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent className="bg-ink-900 border-tbc-900/60 text-tbc-100">
+              <SelectItem value="free">Free (50 credits)</SelectItem>
+              <SelectItem value="starter">Starter / Beginner</SelectItem>
+              <SelectItem value="pro">Pro</SelectItem>
+              <SelectItem value="enterprise">Enterprise</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </Section>
+
       <Section icon={KeyRound} title="Stripe (cards, Apple Pay, Google Pay)">
         <KeyRow
           label="Stripe secret key"

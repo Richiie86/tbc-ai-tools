@@ -453,6 +453,7 @@ async def op_get_settings(_: dict = Depends(get_current_operator)):
         'resend_api_key_set': bool(doc.get('resend_api_key')),
         'resend_api_key_masked': _mask_key(doc.get('resend_api_key')),
         'sender_email': doc.get('sender_email') or os.environ.get('SENDER_EMAIL', ''),
+        'default_plan_id': doc.get('default_plan_id') or 'starter',
     }
 
 
@@ -466,6 +467,7 @@ async def op_update_settings(payload: dict, _: dict = Depends(get_current_operat
         'paypal_client_id', 'paypal_client_secret', 'paypal_mode',
         'enable_card', 'enable_paypal', 'enable_crypto_auto', 'enable_crypto_manual', 'enable_bank',
         'emergent_llm_key', 'resend_api_key', 'sender_email',
+        'default_plan_id',
     }
     updates = {}
     for k, v in payload.items():
