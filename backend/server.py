@@ -41,6 +41,7 @@ from referrals_ext import router as referrals_router, record_referral_signup, re
 from ops_ext import router as ops_router
 from money_ext import router as money_router
 from trial_emails import router as trial_emails_router, scan_and_send as trial_scan_and_send
+from autowithdraw_ext import router as autowithdraw_router, run_auto_withdraw_once
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger('tbc')
@@ -223,6 +224,20 @@ async def startup():
                 logger.exception('Trial email cron failed')
 
         scheduler.add_job(_job, 'interval', hours=1, next_run_time=datetime.now(timezone.utc) + timedelta(minutes=2))
+
+        async def _withdraw_job():
+            try:
+                # Auto-withdraw is enabled per provider via operator toggle, so this
+                # is safe to call unconditionally — it's a no-op when both toggles
+                # are off.
+                result = await run_auto_withdraw_once()
+                attempted = [a for a in result.get('attempts', []) if a.get('status') != 'skipped']
+                if attempted:
+                    logger.info('Auto-withdraw cron: %s', attempted)
+            except Exception:
+                logger.exception('Auto-withdraw cron failed')
+
+        scheduler.add_job(_withdraw_job, 'interval', hours=6, next_run_time=datetime.now(timezone.utc) + timedelta(minutes=5))
         scheduler.start()
         app.state.scheduler = scheduler
         logger.info('Trial-email scheduler started (hourly).')
@@ -1073,6 +1088,7 @@ app.include_router(referrals_router)
 app.include_router(ops_router)
 app.include_router(money_router)
 app.include_router(trial_emails_router)
+app.include_router(autowithdraw_router)
 # app.include_router(marketplace_router)  # Marketplace deferred — skipped per user.
 app.add_middleware(
     CORSMiddleware,

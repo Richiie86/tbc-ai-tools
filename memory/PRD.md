@@ -12,6 +12,16 @@ gold theme. Domain: **tbctools.org**.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
 ## Implemented
+- ✅ **Auto-withdraw + manual sweep** (Feb 2026): Per-provider on/off toggles
+  (Stripe → bank, NOWPayments → wallet), threshold gating, destination address.
+  APScheduler runs every 6 hours; operator can also click "Run sweep now".
+  Failed/successful payouts logged to `db.withdrawals` and shown in a history
+  table in the Money tab. PayPal payouts intentionally out of scope (needs
+  account-level Payouts entitlement). Endpoints:
+  - `GET/PUT /api/operator/withdraw/settings`
+  - `POST /api/operator/withdraw/stripe/now` + `…/nowpayments/now`
+  - `POST /api/operator/withdraw/cron`
+  - `GET /api/operator/withdraw/history`
 - ✅ **Trial reminder emails** (Feb 2026): APScheduler runs every hour
   in-process and dispatches via Resend. Per-user idempotency through
   `users.trial_email_3d_sent_at` and `users.trial_email_expired_sent_at`.

@@ -1,10 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import api from '../../lib/api';
 import { Button } from '../../components/ui/button';
+import { Input } from '../../components/ui/input';
+import { Switch } from '../../components/ui/switch';
 import { toast } from 'sonner';
 import {
   Wallet, RefreshCw, Loader2, ArrowUpRight, AlertCircle,
   CheckCircle2, DollarSign, Coins, Activity, Clock, TrendingUp,
+  Banknote, Power, Send,
 } from 'lucide-react';
 
 const fmt = (n, currency = 'USD') =>
@@ -13,18 +16,67 @@ const fmt = (n, currency = 'USD') =>
 export default function MoneyTab() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [withdrawSettings, setWithdrawSettings] = useState(null);
+  const [withdrawHistory, setWithdrawHistory] = useState([]);
+  const [savingWithdraw, setSavingWithdraw] = useState(false);
+  const [runningCron, setRunningCron] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await api.get('/operator/money/dashboard');
+      const [r, s, h] = await Promise.all([
+        api.get('/operator/money/dashboard'),
+        api.get('/operator/withdraw/settings'),
+        api.get('/operator/withdraw/history'),
+      ]);
       setData(r.data);
+      setWithdrawSettings(s.data);
+      setWithdrawHistory(h.data);
     } catch (e) {
       toast.error(e?.response?.data?.detail || 'Failed to load money dashboard');
     } finally {
       setLoading(false);
     }
   }, []);
+
+  const saveWithdrawSettings = async (patch) => {
+    if (!withdrawSettings) return;
+    const next = { ...withdrawSettings, ...patch };
+    setWithdrawSettings(next);
+    setSavingWithdraw(true);
+    try {
+      const payload = {
+        autopay_stripe_enabled: !!next.autopay_stripe_enabled,
+        autopay_stripe_threshold_usd: Number(next.autopay_stripe_threshold_usd || 0),
+        autopay_nowpay_enabled: !!next.autopay_nowpay_enabled,
+        autopay_nowpay_threshold_usd: Number(next.autopay_nowpay_threshold_usd || 0),
+        autopay_nowpay_address: next.autopay_nowpay_address || null,
+        autopay_nowpay_currency: next.autopay_nowpay_currency || null,
+      };
+      await api.put('/operator/withdraw/settings', payload);
+      toast.success('Auto-withdraw settings saved');
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Save failed');
+    } finally {
+      setSavingWithdraw(false);
+    }
+  };
+
+  const runWithdrawNow = async () => {
+    setRunningCron(true);
+    try {
+      const { data: res } = await api.post('/operator/withdraw/cron');
+      const summary = res.attempts.map((a) => `${a.provider}: ${a.status}${a.reason ? ` (${a.reason})` : ''}`).join(' · ') || 'nothing to do';
+      toast.message(`Auto-withdraw: ${summary}`);
+      // Refresh history
+      const h = await api.get('/operator/withdraw/history');
+      setWithdrawHistory(h.data);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Cron failed');
+    } finally {
+      setRunningCron(false);
+    }
+  };
 
   useEffect(() => { load(); }, [load]);
 
@@ -122,6 +174,171 @@ export default function MoneyTab() {
           </table>
         </div>
       </section>
+
+      {/* WITHDRAWALS */}
+      <section data-testid="money-withdrawals">
+        <div className="mb-2 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <h4 className="text-xs font-bold uppercase tracking-wider text-tbc-200/60">Auto-withdraw</h4>
+            {savingWithdraw && <Loader2 className="h-3 w-3 animate-spin text-tbc-400" />}
+          </div>
+          <Button
+            data-testid="withdraw-cron-run"
+            onClick={runWithdrawNow}
+            disabled={runningCron}
+            variant="outline"
+            className="border-tbc-900/60 bg-ink-900 text-tbc-100 hover:bg-ink-950"
+          >
+            {runningCron
+              ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              : <Send className="mr-2 h-4 w-4" />}
+            Run sweep now
+          </Button>
+        </div>
+
+        {withdrawSettings && (
+          <div className="grid gap-3 lg:grid-cols-2">
+            {/* Stripe row */}
+            <div className="rounded-xl border border-tbc-900/60 bg-ink-900/60 p-4" data-testid="autopay-stripe">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="grid h-9 w-9 place-items-center rounded-lg bg-emerald-500/15 text-emerald-300">
+                    <Banknote className="h-4 w-4" />
+                  </span>
+                  <div>
+                    <div className="text-sm font-bold text-tbc-100">Stripe → Bank</div>
+                    <div className="text-[11px] text-tbc-200/50">
+                      {withdrawSettings.stripe_configured ? 'Pays out USD to your linked Stripe bank account' : 'Stripe key not configured'}
+                    </div>
+                  </div>
+                </div>
+                <Switch
+                  data-testid="autopay-stripe-toggle"
+                  disabled={!withdrawSettings.stripe_configured}
+                  checked={!!withdrawSettings.autopay_stripe_enabled}
+                  onCheckedChange={(v) => saveWithdrawSettings({ autopay_stripe_enabled: v })}
+                />
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-3">
+                <Field label="Trigger threshold (USD)">
+                  <Input
+                    data-testid="autopay-stripe-threshold"
+                    type="number" min="0" step="10"
+                    className="bg-ink-950 border-tbc-900/60 text-tbc-100"
+                    value={withdrawSettings.autopay_stripe_threshold_usd}
+                    onChange={(e) => saveWithdrawSettings({ autopay_stripe_threshold_usd: e.target.value })}
+                  />
+                </Field>
+                <div className="text-[11px] text-tbc-200/50 self-end pb-2">
+                  When balance ≥ threshold, the next sweep pays out the full available balance.
+                </div>
+              </div>
+            </div>
+
+            {/* NOWPayments row */}
+            <div className="rounded-xl border border-tbc-900/60 bg-ink-900/60 p-4" data-testid="autopay-nowpay">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="grid h-9 w-9 place-items-center rounded-lg bg-violet-500/15 text-violet-300">
+                    <Coins className="h-4 w-4" />
+                  </span>
+                  <div>
+                    <div className="text-sm font-bold text-tbc-100">NOWPayments → Wallet</div>
+                    <div className="text-[11px] text-tbc-200/50">
+                      {withdrawSettings.nowpay_configured ? 'Auto-payout crypto to a single configured address' : 'NOWPayments key not configured'}
+                    </div>
+                  </div>
+                </div>
+                <Switch
+                  data-testid="autopay-nowpay-toggle"
+                  disabled={!withdrawSettings.nowpay_configured}
+                  checked={!!withdrawSettings.autopay_nowpay_enabled}
+                  onCheckedChange={(v) => saveWithdrawSettings({ autopay_nowpay_enabled: v })}
+                />
+              </div>
+              <div className="mt-3 grid grid-cols-3 gap-3">
+                <Field label="Currency">
+                  <Input
+                    data-testid="autopay-nowpay-currency"
+                    className="bg-ink-950 border-tbc-900/60 text-tbc-100"
+                    value={withdrawSettings.autopay_nowpay_currency || ''}
+                    placeholder="btc / eth / usdttrc20"
+                    onChange={(e) => saveWithdrawSettings({ autopay_nowpay_currency: e.target.value })}
+                  />
+                </Field>
+                <Field label="Destination address">
+                  <Input
+                    data-testid="autopay-nowpay-address"
+                    className="bg-ink-950 border-tbc-900/60 text-tbc-100 font-mono text-xs"
+                    value={withdrawSettings.autopay_nowpay_address || ''}
+                    placeholder="bc1q..."
+                    onChange={(e) => saveWithdrawSettings({ autopay_nowpay_address: e.target.value })}
+                  />
+                </Field>
+                <Field label="Threshold (in asset)">
+                  <Input
+                    data-testid="autopay-nowpay-threshold"
+                    type="number" min="0" step="0.001"
+                    className="bg-ink-950 border-tbc-900/60 text-tbc-100"
+                    value={withdrawSettings.autopay_nowpay_threshold_usd}
+                    onChange={(e) => saveWithdrawSettings({ autopay_nowpay_threshold_usd: e.target.value })}
+                  />
+                </Field>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* History */}
+        <div className="mt-4 overflow-hidden rounded-xl border border-tbc-900/60 bg-ink-900/60">
+          <div className="border-b border-tbc-900/40 bg-ink-950/60 px-4 py-2 text-[10px] uppercase tracking-wider text-tbc-200/50">
+            Withdrawal history
+          </div>
+          <table className="w-full text-sm" data-testid="withdraw-history-table">
+            <thead className="text-[10px] uppercase tracking-wider text-tbc-200/50">
+              <tr>
+                <th className="px-4 py-2 text-left">When</th>
+                <th className="px-4 py-2 text-left">Provider</th>
+                <th className="px-4 py-2 text-left">Kind</th>
+                <th className="px-4 py-2 text-left">Status</th>
+                <th className="px-4 py-2 text-right">Amount</th>
+                <th className="px-4 py-2 text-left">Detail</th>
+              </tr>
+            </thead>
+            <tbody>
+              {withdrawHistory.length === 0 && (
+                <tr><td colSpan={6} className="px-4 py-8 text-center text-xs text-tbc-200/50">No withdrawals yet</td></tr>
+              )}
+              {withdrawHistory.map((w) => (
+                <tr key={w.id} className="border-t border-tbc-900/40">
+                  <td className="px-4 py-2 text-xs text-tbc-200/70">{new Date(w.created_at).toLocaleString()}</td>
+                  <td className="px-4 py-2 capitalize text-tbc-100">{w.provider}</td>
+                  <td className="px-4 py-2 text-xs">
+                    <span className={`rounded-full border px-2 py-0.5 text-[10px] uppercase ${w.kind === 'auto' ? 'border-violet-500/30 bg-violet-500/10 text-violet-300' : 'border-sky-500/30 bg-sky-500/10 text-sky-300'}`}>{w.kind}</span>
+                  </td>
+                  <td className="px-4 py-2 text-xs">
+                    <span className={`rounded-full border px-2 py-0.5 text-[10px] uppercase ${
+                      w.status === 'success' ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+                      : w.status === 'failed' ? 'border-rose-500/40 bg-rose-500/10 text-rose-300'
+                      : 'border-amber-500/30 bg-amber-500/10 text-amber-300'}`}>{w.status}</span>
+                  </td>
+                  <td className="px-4 py-2 text-right font-semibold text-tbc-100">${Number(w.amount_usd || 0).toFixed(2)}</td>
+                  <td className="px-4 py-2 text-[11px] text-tbc-200/70">{w.detail}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function Field({ label, children }) {
+  return (
+    <div>
+      <label className="text-[10px] font-semibold uppercase tracking-wider text-tbc-200/60">{label}</label>
+      <div className="mt-1">{children}</div>
     </div>
   );
 }

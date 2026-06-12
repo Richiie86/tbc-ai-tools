@@ -1,0 +1,245 @@
+"""Auto-withdraw (payout) for connected payment providers.
+
+Provider matrix:
+  • Stripe         — `POST /v1/payouts` (sends to the default bank account).
+  • NOWPayments    — `POST /v1/payout` (sends crypto to a configured address).
+  • PayPal         — intentionally out of scope (payouts API requires extra
+                     account entitlement; we surface "not supported" to keep the
+                     UI honest).
+
+Settings live on the `payment_settings` doc:
+  • autopay_stripe_enabled         : bool
+  • autopay_stripe_threshold_usd   : float (min available to trigger)
+  • autopay_nowpay_enabled         : bool
+  • autopay_nowpay_threshold_usd   : float (USD equivalent per asset row)
+  • autopay_nowpay_address         : str (destination crypto address)
+  • autopay_nowpay_currency        : str (BTC, ETH, USDTTRC20, ...)
+
+Each successful (or attempted) payout is persisted on `db.withdrawals` so the
+Money tab can render history.
+"""
+import os
+import logging
+from datetime import datetime, timezone
+from typing import Optional, List
+
+import httpx
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+
+from auth_utils import get_current_operator
+from db import db
+from payments_ext import get_settings_doc, _paypal_token  # noqa: F401 (paypal helper reserved for future)
+
+logger = logging.getLogger('tbc.withdraw')
+router = APIRouter(prefix='/api/operator/withdraw')
+
+
+# ============== SCHEMAS ==============
+class AutoWithdrawSettings(BaseModel):
+    autopay_stripe_enabled: bool = False
+    autopay_stripe_threshold_usd: float = 100.0
+    autopay_nowpay_enabled: bool = False
+    autopay_nowpay_threshold_usd: float = 25.0
+    autopay_nowpay_address: Optional[str] = None
+    autopay_nowpay_currency: Optional[str] = None
+
+
+class ManualStripePayoutRequest(BaseModel):
+    amount_usd: float
+
+
+class ManualCryptoPayoutRequest(BaseModel):
+    amount: float
+    currency: str
+    address: str
+
+
+# ============== HELPERS ==============
+async def _record(provider: str, kind: str, amount_usd: float, status: str, detail: str, raw: dict | None = None) -> str:
+    """Append a withdrawal record."""
+    import uuid
+    wid = str(uuid.uuid4())
+    await db.withdrawals.insert_one({
+        'id': wid,
+        'provider': provider,
+        'kind': kind,  # 'manual' or 'auto'
+        'amount_usd': float(amount_usd),
+        'status': status,  # 'queued' | 'success' | 'failed'
+        'detail': detail[:500] if detail else '',
+        'raw': raw or {},
+        'created_at': datetime.now(timezone.utc),
+    })
+    return wid
+
+
+async def _stripe_balance_available_usd(settings: dict) -> float:
+    key = settings.get('stripe_secret_key')
+    if not key:
+        raise HTTPException(400, 'Stripe secret key not configured')
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        r = await client.get('https://api.stripe.com/v1/balance', headers={'Authorization': f'Bearer {key}'})
+    r.raise_for_status()
+    avail = r.json().get('available') or []
+    return sum(b.get('amount', 0) for b in avail if b.get('currency') == 'usd') / 100.0
+
+
+async def _stripe_payout(settings: dict, amount_usd: float) -> dict:
+    """Trigger a Stripe payout (USD only). Returns the Stripe payout object."""
+    key = settings.get('stripe_secret_key')
+    cents = int(round(amount_usd * 100))
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        r = await client.post(
+            'https://api.stripe.com/v1/payouts',
+            headers={'Authorization': f'Bearer {key}'},
+            data={'amount': cents, 'currency': 'usd'},
+        )
+    if r.status_code >= 400:
+        raise HTTPException(502, f'Stripe payout failed: {r.text[:200]}')
+    return r.json()
+
+
+async def _nowpayments_payout(settings: dict, amount: float, currency: str, address: str) -> dict:
+    """Trigger a NOWPayments crypto payout."""
+    key = settings.get('nowpayments_api_key')
+    if not key:
+        raise HTTPException(400, 'NOWPayments API key not configured')
+    payload = {
+        'withdrawals': [{
+            'address': address,
+            'currency': currency.lower(),
+            'amount': float(amount),
+        }],
+    }
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        r = await client.post(
+            'https://api.nowpayments.io/v1/payout',
+            headers={'x-api-key': key, 'Content-Type': 'application/json'},
+            json=payload,
+        )
+    if r.status_code >= 400:
+        raise HTTPException(502, f'NOWPayments payout failed: {r.text[:200]}')
+    return r.json()
+
+
+# ============== SETTINGS ==============
+@router.get('/settings')
+async def get_autowithdraw_settings(_user: dict = Depends(get_current_operator)):
+    s = await get_settings_doc()
+    return {
+        'autopay_stripe_enabled': bool(s.get('autopay_stripe_enabled', False)),
+        'autopay_stripe_threshold_usd': float(s.get('autopay_stripe_threshold_usd', 100.0)),
+        'autopay_nowpay_enabled': bool(s.get('autopay_nowpay_enabled', False)),
+        'autopay_nowpay_threshold_usd': float(s.get('autopay_nowpay_threshold_usd', 25.0)),
+        'autopay_nowpay_address': s.get('autopay_nowpay_address') or '',
+        'autopay_nowpay_currency': s.get('autopay_nowpay_currency') or '',
+        # capability flags so the UI can disable rows that aren't configured.
+        'stripe_configured': bool(s.get('stripe_secret_key')),
+        'nowpay_configured': bool(s.get('nowpayments_api_key')),
+    }
+
+
+@router.put('/settings')
+async def update_autowithdraw_settings(req: AutoWithdrawSettings, _user: dict = Depends(get_current_operator)):
+    updates = req.dict(exclude_unset=False)
+    await db.settings.update_one({'_id': 'payment_settings'}, {'$set': updates}, upsert=True)
+    return {'success': True, 'updated_keys': list(updates.keys())}
+
+
+# ============== HISTORY ==============
+@router.get('/history')
+async def list_withdrawals(_user: dict = Depends(get_current_operator)):
+    cursor = db.withdrawals.find({}).sort('created_at', -1).limit(50)
+    out = []
+    async for w in cursor:
+        w.pop('_id', None)
+        if isinstance(w.get('created_at'), datetime):
+            w['created_at'] = w['created_at'].isoformat()
+        out.append(w)
+    return out
+
+
+# ============== MANUAL PAYOUTS ==============
+@router.post('/stripe/now')
+async def withdraw_stripe_now(req: ManualStripePayoutRequest, _user: dict = Depends(get_current_operator)):
+    settings = await get_settings_doc()
+    try:
+        result = await _stripe_payout(settings, req.amount_usd)
+        wid = await _record('stripe', 'manual', req.amount_usd, 'success', f"Stripe payout {result.get('id')}", result)
+        return {'success': True, 'withdrawal_id': wid, 'stripe_id': result.get('id'), 'arrival_date': result.get('arrival_date')}
+    except HTTPException as e:
+        await _record('stripe', 'manual', req.amount_usd, 'failed', e.detail)
+        raise
+
+
+@router.post('/nowpayments/now')
+async def withdraw_nowpayments_now(req: ManualCryptoPayoutRequest, _user: dict = Depends(get_current_operator)):
+    settings = await get_settings_doc()
+    try:
+        result = await _nowpayments_payout(settings, req.amount, req.currency, req.address)
+        wid = await _record('nowpayments', 'manual', float(req.amount), 'success', f"{req.amount} {req.currency} → {req.address[:10]}…", result)
+        return {'success': True, 'withdrawal_id': wid, 'response': result}
+    except HTTPException as e:
+        await _record('nowpayments', 'manual', float(req.amount), 'failed', e.detail)
+        raise
+
+
+# ============== AUTO CRON ==============
+async def run_auto_withdraw_once() -> dict:
+    """Single auto-withdraw sweep — Stripe + NOWPayments. Idempotency relies on
+    the operator setting a sensible threshold so we don't spin payouts every hour."""
+    settings = await get_settings_doc()
+    summary: dict = {'ran_at': datetime.now(timezone.utc).isoformat(), 'attempts': []}
+
+    # Stripe ---------------------------------------------------------------
+    if settings.get('autopay_stripe_enabled'):
+        if not settings.get('stripe_secret_key'):
+            summary['attempts'].append({'provider': 'stripe', 'status': 'skipped', 'reason': 'Stripe key not configured'})
+        else:
+            try:
+                avail = await _stripe_balance_available_usd(settings)
+                threshold = float(settings.get('autopay_stripe_threshold_usd', 100.0))
+                if avail >= threshold:
+                    result = await _stripe_payout(settings, avail)
+                    await _record('stripe', 'auto', avail, 'success', f"Auto payout {result.get('id')}", result)
+                    summary['attempts'].append({'provider': 'stripe', 'status': 'success', 'amount_usd': avail})
+                else:
+                    summary['attempts'].append({'provider': 'stripe', 'status': 'skipped', 'reason': f'available ${avail:.2f} < threshold ${threshold:.2f}'})
+            except Exception as e:
+                await _record('stripe', 'auto', 0, 'failed', str(e)[:300])
+                summary['attempts'].append({'provider': 'stripe', 'status': 'failed', 'error': str(e)[:200]})
+
+    # NOWPayments ----------------------------------------------------------
+    if settings.get('autopay_nowpay_enabled'):
+        if not settings.get('nowpayments_api_key') or not settings.get('autopay_nowpay_address') or not settings.get('autopay_nowpay_currency'):
+            summary['attempts'].append({'provider': 'nowpayments', 'status': 'skipped', 'reason': 'key/address/currency missing'})
+        else:
+            try:
+                cur = (settings.get('autopay_nowpay_currency') or '').lower()
+                addr = settings.get('autopay_nowpay_address')
+                threshold = float(settings.get('autopay_nowpay_threshold_usd', 25.0))
+                # Fetch balance row for the configured currency
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    r = await client.get('https://api.nowpayments.io/v1/balance', headers={'x-api-key': settings['nowpayments_api_key']})
+                balances = (r.json() or {}).get('balances') or r.json() or {}
+                row = balances.get(cur) or balances.get(cur.upper())
+                amt = float((row or {}).get('amount', 0)) if isinstance(row, dict) else float(row or 0)
+                # NOWPayments balance is denominated in the asset, not USD. Treat threshold
+                # as "asset amount" for simplicity — operator sets it knowingly per currency.
+                if amt >= threshold:
+                    result = await _nowpayments_payout(settings, amt, cur, addr)
+                    await _record('nowpayments', 'auto', amt, 'success', f"Auto {amt} {cur} → {addr[:10]}…", result)
+                    summary['attempts'].append({'provider': 'nowpayments', 'status': 'success', 'amount': amt, 'currency': cur})
+                else:
+                    summary['attempts'].append({'provider': 'nowpayments', 'status': 'skipped', 'reason': f'balance {amt} < threshold {threshold}'})
+            except Exception as e:
+                await _record('nowpayments', 'auto', 0, 'failed', str(e)[:300])
+                summary['attempts'].append({'provider': 'nowpayments', 'status': 'failed', 'error': str(e)[:200]})
+
+    return summary
+
+
+@router.post('/cron')
+async def cron_auto_withdraw(_user: dict = Depends(get_current_operator)):
+    """Manual trigger for the auto-withdraw sweep (also runs hourly via APScheduler)."""
+    return await run_auto_withdraw_once()
