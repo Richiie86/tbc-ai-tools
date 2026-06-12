@@ -45,6 +45,7 @@ from trial_emails import router as trial_emails_router, scan_and_send as trial_s
 from autowithdraw_ext import router as autowithdraw_router, run_auto_withdraw_once
 from audit_ext import router as audit_router, record_audit
 from billing_portal_ext import router as billing_portal_router
+from deploy_projects_ext import setup_routers as setup_deploy_routers
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger('tbc')
@@ -1202,6 +1203,7 @@ app.include_router(trial_emails_router)
 app.include_router(autowithdraw_router)
 app.include_router(audit_router)
 app.include_router(billing_portal_router)
+setup_deploy_routers(app)
 # app.include_router(marketplace_router)  # Marketplace deferred — skipped per user.
 app.add_middleware(
     CORSMiddleware,

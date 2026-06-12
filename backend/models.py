@@ -235,6 +235,14 @@ class PaymentSettings(BaseModel):
     enable_crypto_auto: bool = False
     enable_crypto_manual: bool = True
     enable_bank: bool = True
+    # Vercel deploy integration — operator pastes a Vercel Personal Access Token
+    # and (optionally) a Team ID; the platform uses these for Deploy/Redeploy/
+    # Preview buttons and the programmatic /api/projects API.
+    vercel_token: Optional[str] = None
+    vercel_team_id: Optional[str] = None
+    # Bearer token external AI programs use to POST projects to
+    # `/api/projects`. Generate-once, store-once, never exposed back to UI.
+    ai_api_key: Optional[str] = None
 
 
 class CheckoutMethod(str):

@@ -7,6 +7,7 @@ import { OpsHealthCheck }       from './ops/OpsHealthCheck';
 import { OpsCodeReview }        from './ops/OpsCodeReview';
 import { OpsRestartAndDeploy }  from './ops/OpsRestartAndDeploy';
 import { OpsTrialEmailCron }    from './ops/OpsTrialEmailCron';
+import { OpsDeploySection }     from './ops/OpsDeploySection';
 
 export default function OpsTab() {
   const [health, setHealth] = useState(null);
@@ -118,6 +119,7 @@ export default function OpsTab() {
         healthSummary={health?.summary}
       />
       <OpsHealthCheck health={health} loading={healthLoading} onRefresh={loadHealth} />
+      <OpsDeploySection />
       <OpsCodeReview review={review} loading={reviewLoading} onRun={runReview} />
       <OpsRestartAndDeploy
         restartingSvc={restartingSvc}

@@ -206,3 +206,80 @@ class TestCreditPacks:
         for pack in ('credits_100', 'credits_500', 'credits_1000'):
             assert pack in plan_ids, f"credit pack {pack} not seeded"
 
+
+# ---------- Deploy projects API ----------
+class TestDeployProjectsAPI:
+    """Bearer-token-authenticated /api/projects CRUD + operator key-mgmt."""
+
+    def test_unauthenticated_rejected(self):
+        r = requests.post(f"{API}/projects", json={
+            'projectName': 'x', 'repo': 'a/b', 'domain': 'x.test',
+        }, timeout=10)
+        assert r.status_code == 401
+
+    def test_invalid_bearer_rejected(self):
+        r = requests.get(f"{API}/projects",
+                         headers={'Authorization': 'Bearer wrong-token'},
+                         timeout=10)
+        assert r.status_code == 401
+
+    def test_full_lifecycle(self, operator_session):
+        # Generate fresh AI API key as operator
+        r = operator_session.post(f"{API}/operator/deploy/key",
+                                  json={'regenerate_ai_api_key': True},
+                                  timeout=10)
+        assert r.status_code == 200
+        key = r.json()['revealed_ai_api_key']
+        assert key and key.startswith('tbc_')
+        H = {'Authorization': f'Bearer {key}', 'Content-Type': 'application/json'}
+
+        # Create
+        r = requests.post(f"{API}/projects", headers=H, timeout=10, json={
+            'projectName': 'Regression Test App',
+            'repo': 'tbctools/regression',
+            'domain': 'regression.test.tbctools.org',
+            'gitRef': 'main',
+        })
+        assert r.status_code == 201, r.text
+        pid = r.json()['project']['id']
+        assert pid.startswith('regression-test-app-')
+
+        # List should contain it
+        r = requests.get(f"{API}/projects", headers=H, timeout=10)
+        assert r.status_code == 200
+        assert any(p['id'] == pid for p in r.json())
+
+        # Get
+        r = requests.get(f"{API}/projects/{pid}", headers=H, timeout=10)
+        assert r.status_code == 200
+        assert r.json()['domain'] == 'regression.test.tbctools.org'
+
+        # Update via same id
+        r = requests.post(f"{API}/projects", headers=H, timeout=10, json={
+            'id': pid, 'projectName': 'Regression Test App',
+            'repo': 'tbctools/regression', 'domain': 'updated.tbctools.org',
+        })
+        assert r.status_code in (200, 201)
+        assert r.json()['project']['domain'] == 'updated.tbctools.org'
+
+        # Delete
+        r = requests.delete(f"{API}/projects/{pid}", headers=H, timeout=10)
+        assert r.status_code == 200
+
+        # 404 after delete
+        r = requests.get(f"{API}/projects/{pid}", headers=H, timeout=10)
+        assert r.status_code == 404
+
+    def test_key_status_endpoint_never_echoes_secrets(self, operator_session):
+        # generate first
+        operator_session.post(f"{API}/operator/deploy/key",
+                              json={'regenerate_ai_api_key': True}, timeout=10)
+        r = operator_session.get(f"{API}/operator/deploy/key", timeout=10)
+        assert r.status_code == 200
+        body = r.json()
+        # The endpoint must only report presence booleans, never the values.
+        assert body['has_ai_api_key'] is True
+        for forbidden in ('ai_api_key', 'vercel_token'):
+            assert forbidden not in body, f"secret '{forbidden}' leaked from /key status"
+
+
