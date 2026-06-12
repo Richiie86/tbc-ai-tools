@@ -687,19 +687,23 @@ async def op_tx_receipt(tx_id: str, _: dict = Depends(get_current_operator)):
 def _parse_export_date_range(from_date: Optional[str], to_date: Optional[str]) -> dict:
     """Translate the optional from/to query params into a Mongo `$gte/$lte` filter.
 
-    Raises 400 on a malformed ISO date. Returns an empty dict when both inputs
-    are None so the caller can omit `created_at` from the query.
+    Raises 400 with the offending value embedded in the message so the operator
+    can spot a typo at a glance. Returns an empty dict when both inputs are None
+    so the caller can omit `created_at` from the query.
     """
     if not (from_date or to_date):
         return {}
     rng: dict = {}
-    try:
-        if from_date:
+    if from_date:
+        try:
             rng['$gte'] = datetime.fromisoformat(from_date.replace('Z', '+00:00'))
-        if to_date:
+        except Exception:
+            raise HTTPException(400, f'Invalid `from` date "{from_date}". Use YYYY-MM-DD.')
+    if to_date:
+        try:
             rng['$lte'] = datetime.fromisoformat(to_date.replace('Z', '+00:00'))
-    except Exception:
-        raise HTTPException(400, 'Invalid date format. Use YYYY-MM-DD.')
+        except Exception:
+            raise HTTPException(400, f'Invalid `to` date "{to_date}". Use YYYY-MM-DD.')
     return rng
 
 

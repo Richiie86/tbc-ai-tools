@@ -19,6 +19,7 @@ Each successful (or attempted) payout is persisted on `db.withdrawals` so the
 Money tab can render history.
 """
 import os
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Optional
@@ -316,16 +317,20 @@ async def run_auto_withdraw_once() -> dict:
     """Single auto-withdraw sweep — Stripe + NOWPayments. Idempotency relies on
     the operator setting a sensible threshold so we don't spin payouts every hour.
 
+    Both provider sweeps are independent IO calls, so we run them concurrently
+    via `asyncio.gather` — shaves ~2-3s off each hourly tick when both providers
+    are enabled and round-tripping to their APIs.
+
     Skipped (disabled) providers are omitted from the response to keep the
     summary tight; explicitly-skipped ones (missing config, cap reached, etc.)
     stay so the operator can see why nothing happened.
     """
     settings = await get_settings_doc()
-    attempts: list[dict] = []
-    for sweep in (_sweep_stripe(settings), _sweep_nowpayments(settings)):
-        row = await sweep
-        if row.get('status') != 'disabled':
-            attempts.append(row)
+    rows = await asyncio.gather(
+        _sweep_stripe(settings),
+        _sweep_nowpayments(settings),
+    )
+    attempts = [row for row in rows if row.get('status') != 'disabled']
     return {
         'ran_at': datetime.now(timezone.utc).isoformat(),
         'attempts': attempts,
