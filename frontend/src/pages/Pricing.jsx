@@ -46,6 +46,11 @@ export default function Pricing() {
                 {featured && (
                   <div className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-tbc-500 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-950">Most popular</div>
                 )}
+                {p.trial_days > 0 && (
+                  <div className="absolute -top-3 right-4 rounded-full border border-sky-400/40 bg-sky-500/20 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-sky-200" data-testid={`pricing-trial-badge-${p.id}`}>
+                    {p.trial_days}-day free trial
+                  </div>
+                )}
                 <div className="flex items-center gap-3">
                   <div className={`grid h-11 w-11 place-items-center rounded-lg ${featured ? 'bg-tbc-500 text-slate-950' : 'bg-tbc-500/15 text-tbc-300'}`}>
                     <Icon className="h-5 w-5" />

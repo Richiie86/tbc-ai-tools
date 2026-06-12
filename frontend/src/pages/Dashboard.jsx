@@ -19,7 +19,7 @@ import ReferBanner from '../components/ReferBanner';
 import { toast } from 'sonner';
 import {
   Cpu, Send, Plus, Trash2, MessageSquare, Loader2, LogOut,
-  Sparkles, ChevronLeft, Menu, ShieldCheck, Edit3,
+  Sparkles, ChevronLeft, Menu, ShieldCheck, Edit3, Clock, AlertCircle,
 } from 'lucide-react';
 
 function sidebarTimeLabel(iso) {
@@ -339,6 +339,8 @@ export default function Dashboard({ variant = 'tbc1' }) {
           </div>
         </div>
 
+        <TrialBanner user={user} />
+
         <div ref={scrollRef} className="flex-1 overflow-y-auto">
           <div className="mx-auto max-w-3xl px-5 py-8">
             {messages.length === 0 && !streaming ? (
@@ -382,14 +384,51 @@ export default function Dashboard({ variant = 'tbc1' }) {
   );
 }
 
+function TrialBanner({ user }) {
+  if (!user) return null;
+  const expires = user.plan_expires_at;
+  if (!expires) return null;
+  const isExpired = !!user.plan_is_expired;
+  const days = user.plan_days_remaining ?? 0;
+  // Hide for already-expired & no upsell — but we DO show an expired banner.
+  const tone = isExpired
+    ? 'border-rose-500/40 bg-rose-500/10 text-rose-200'
+    : days <= 3
+    ? 'border-amber-500/40 bg-amber-500/10 text-amber-100'
+    : 'border-sky-500/30 bg-sky-500/10 text-sky-100';
+  const Icon = isExpired ? AlertCircle : Clock;
+  return (
+    <div className={`flex items-center justify-between gap-3 border-b px-5 py-2 text-xs ${tone}`} data-testid="trial-banner">
+      <div className="flex items-center gap-2">
+        <Icon className="h-3.5 w-3.5" />
+        {isExpired ? (
+          <span>
+            Your <strong>{user.plan}</strong> trial has expired. Upgrade to keep building without interruption.
+          </span>
+        ) : (
+          <span>
+            <strong>{days}</strong> day{days === 1 ? '' : 's'} left on your <strong>{user.plan}</strong> trial · auto-downgrades when it ends.
+          </span>
+        )}
+      </div>
+      <Link
+        to="/pricing"
+        data-testid="trial-banner-upgrade"
+        className="rounded-md bg-tbc-500 px-3 py-1 text-[11px] font-bold uppercase tracking-wider text-ink-950 hover:bg-tbc-400"
+      >
+        Upgrade now
+      </Link>
+    </div>
+  );
+}
+
 function EmptyState({ onPick, model }) {
   const suggestions = [
     'Build me a simple to-do app with React + FastAPI',
     'Explain JWT vs session-based auth in 100 words',
     'Write a Python script to backtest a moving average strategy',
     'Design a MongoDB schema for an e-commerce store',
-  ];
-  return (
+  ];  return (
     <div className="flex flex-col items-center justify-center py-16 text-center">
       <div className="grid h-14 w-14 place-items-center rounded-2xl bg-gradient-to-br from-tbc-300 to-tbc-500 shadow-lg shadow-tbc-500/30">
         <Cpu className="h-7 w-7 text-slate-950" strokeWidth={2.4} />

@@ -224,6 +224,19 @@ def _serialize(doc):
 
 
 def _public_user(u: dict) -> dict:
+    expires_at = u.get('plan_expires_at')
+    started_at = u.get('plan_started_at')
+    days_remaining = None
+    is_expired = False
+    if expires_at:
+        # Normalize to datetime in case Mongo returns ISO string.
+        exp = expires_at if isinstance(expires_at, datetime) else datetime.fromisoformat(str(expires_at))
+        if exp.tzinfo is None:
+            exp = exp.replace(tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
+        delta = exp - now
+        days_remaining = max(0, int(delta.total_seconds() // 86400)) + (1 if delta.total_seconds() % 86400 > 0 and delta.total_seconds() > 0 else 0)
+        is_expired = exp <= now
     return {
         'id': u['id'],
         'email': u['email'],
@@ -232,7 +245,29 @@ def _public_user(u: dict) -> dict:
         'plan': u.get('plan', 'free'),
         'credits': u.get('credits', 0),
         'totp_enabled': u.get('totp_enabled', False),
+        'plan_started_at': started_at.isoformat() if isinstance(started_at, datetime) else started_at,
+        'plan_expires_at': expires_at.isoformat() if isinstance(expires_at, datetime) else expires_at,
+        'plan_days_remaining': days_remaining,
+        'plan_is_expired': is_expired,
     }
+
+
+async def _activate_plan_for_user(user_id: str, plan_doc: dict | None) -> dict:
+    """Apply a plan to a user: set `plan`, add credits, and compute expiry.
+
+    Returns the fields that were set so callers can include them in update_one.
+    `plan_doc` is the full plan record from `db.plans` (or None to clear).
+    """
+    now = datetime.now(timezone.utc)
+    update_set: dict = {'plan_started_at': now}
+    if plan_doc:
+        update_set['plan'] = plan_doc['id']
+        trial_days = int(plan_doc.get('trial_days') or 0)
+        update_set['plan_expires_at'] = now + timedelta(days=trial_days) if trial_days > 0 else None
+    else:
+        update_set['plan'] = 'free'
+        update_set['plan_expires_at'] = None
+    return update_set
 
 
 # ===== HEALTH =====
@@ -255,6 +290,9 @@ async def register(req: RegisterRequest):
     default_plan_id = settings_doc.get('default_plan_id') or 'starter'
     default_plan_doc = await db.plans.find_one({'id': default_plan_id})
     starting_credits = int((default_plan_doc or {}).get('credits') or 50)
+    # If the default plan has trial_days set, mark expiry on registration.
+    now_dt = datetime.now(timezone.utc)
+    trial_days = int((default_plan_doc or {}).get('trial_days') or 0)
     user = User(
         email=email,
         password_hash=hash_password(req.password),
@@ -262,6 +300,8 @@ async def register(req: RegisterRequest):
         role='operator' if email == OPERATOR_EMAIL else 'user',
         plan=default_plan_id,
         credits=starting_credits,
+        plan_started_at=now_dt,
+        plan_expires_at=now_dt + timedelta(days=trial_days) if trial_days > 0 else None,
     )
     await db.users.insert_one(user.dict())
     # Auto-generate referral code for the new user
@@ -491,6 +531,16 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
     if db_user.get('role') != 'operator' and db_user.get('credits', 0) <= 0:
         raise HTTPException(402, 'No credits remaining. Please upgrade your plan.')
 
+    # Trial / time-limited plan expiry check (operator bypass)
+    if db_user.get('role') != 'operator':
+        exp = db_user.get('plan_expires_at')
+        if exp:
+            exp_dt = exp if isinstance(exp, datetime) else datetime.fromisoformat(str(exp))
+            if exp_dt.tzinfo is None:
+                exp_dt = exp_dt.replace(tzinfo=timezone.utc)
+            if exp_dt <= datetime.now(timezone.utc):
+                raise HTTPException(402, 'Your trial has expired. Please upgrade your plan to continue.')
+
     # Ensure session
     session_id = req.session_id
     if not session_id:
@@ -624,6 +674,7 @@ async def get_plans():
             'credits': p['credits'],
             'intro': p.get('intro', False),
             'features': p.get('features', []),
+            'trial_days': p.get('trial_days', 0),
         })
     return out
 

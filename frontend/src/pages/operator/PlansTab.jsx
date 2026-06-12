@@ -8,9 +8,9 @@ import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger,
 } from '../../components/ui/dialog';
 import { toast } from 'sonner';
-import { Plus, Pencil, Trash2, Loader2, Sparkles } from 'lucide-react';
+import { Plus, Pencil, Trash2, Loader2, Sparkles, Clock } from 'lucide-react';
 
-const EMPTY_PLAN = { id: '', name: '', price: 0, regular_price: 0, credits: 0, intro: false, features: [], enabled: true, order: 0 };
+const EMPTY_PLAN = { id: '', name: '', price: 0, regular_price: 0, credits: 0, intro: false, features: [], enabled: true, order: 0, trial_days: 0 };
 
 export default function PlansTab() {
   const [plans, setPlans] = useState([]);
@@ -54,6 +54,7 @@ export default function PlansTab() {
         regular_price: Number(form.regular_price || form.price),
         credits: Number(form.credits),
         order: Number(form.order || 0),
+        trial_days: Number(form.trial_days || 0),
       };
       if (editing) {
         await api.put(`/operator/plans/${editing}`, payload);
@@ -98,8 +99,18 @@ export default function PlansTab() {
               <Field label="Features (one per line)">
                 <Textarea rows={4} className="bg-ink-950 border-tbc-900/60 text-tbc-100" value={featuresText} onChange={(e)=>setFeaturesText(e.target.value)} />
               </Field>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-4 gap-3">
                 <Field label="Order"><Input type="number" className="bg-ink-950 border-tbc-900/60 text-tbc-100" value={form.order} onChange={(e)=>setForm({...form, order:e.target.value})} /></Field>
+                <Field label="Trial days (0 = permanent)">
+                  <Input
+                    type="number"
+                    min="0"
+                    data-testid="plans-form-trial-days"
+                    className="bg-ink-950 border-tbc-900/60 text-tbc-100"
+                    value={form.trial_days ?? 0}
+                    onChange={(e)=>setForm({...form, trial_days:e.target.value})}
+                  />
+                </Field>
                 <Field label="Intro pricing"><div className="pt-2"><Switch checked={!!form.intro} onCheckedChange={(v)=>setForm({...form, intro:v})} /></div></Field>
                 <Field label="Enabled"><div className="pt-2"><Switch checked={!!form.enabled} onCheckedChange={(v)=>setForm({...form, enabled:v})} /></div></Field>
               </div>
@@ -122,6 +133,11 @@ export default function PlansTab() {
                   <div className="flex items-center gap-2">
                     <span className="text-base font-bold text-tbc-100">{p.name}</span>
                     {!p.enabled && <span className="rounded-full bg-rose-500/15 px-2 py-0.5 text-[10px] uppercase text-rose-300">disabled</span>}
+                    {p.trial_days > 0 && (
+                      <span className="inline-flex items-center gap-1 rounded-full border border-sky-500/30 bg-sky-500/15 px-2 py-0.5 text-[10px] uppercase text-sky-300" data-testid={`plan-trial-badge-${p.id}`}>
+                        <Clock className="h-2.5 w-2.5" /> {p.trial_days}-day trial
+                      </span>
+                    )}
                   </div>
                   <div className="text-[10px] uppercase tracking-wider text-tbc-200/50">{p.id}</div>
                 </div>

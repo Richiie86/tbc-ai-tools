@@ -12,6 +12,15 @@ gold theme. Domain: **tbctools.org**.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
 ## Implemented
+- ✅ **Free-trial / time-limited plans** (Feb 2026): `PlanModel.trial_days` field
+  (operator-editable in Plans tab). On activation (registration into default plan,
+  Stripe/PayPal/manual confirm) the user gets `plan_started_at` and
+  `plan_expires_at` set automatically. Chat API enforces expiry with HTTP 402.
+  Dashboard shows a live trial banner (days remaining → amber under 3 days →
+  rose when expired) with Upgrade-now CTA. Pricing page shows a "{N}-day free
+  trial" badge on trial-enabled plans.
+- ✅ **"New session" button** now actually creates a session via API and
+  prepends it to the sidebar (was previously only clearing local state).
 - ✅ **Operator → Ops tab** (Feb 2026): Live health check (MongoDB ping, env keys
   present, DB-backed settings keys, frontend reachability, supervisor service state,
   disk usage, master-payments flag), one-click Code Review (ruff lint + format

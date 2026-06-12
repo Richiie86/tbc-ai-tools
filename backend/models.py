@@ -60,10 +60,13 @@ class User(BaseModel):
     role: Literal['operator', 'user'] = 'user'
     totp_secret: Optional[str] = None
     totp_enabled: bool = False
-    plan: Literal['free', 'starter', 'pro', 'enterprise'] = 'free'
+    plan: str = 'free'  # any plan id (free, starter, pro, enterprise, custom trial plans, ...)
     credits: int = 50  # free tier messages
     referral_code: Optional[str] = None
     referred_by_code: Optional[str] = None
+    # Trial / time-limited plan tracking. None on plan = permanent (no expiry).
+    plan_started_at: Optional[datetime] = None
+    plan_expires_at: Optional[datetime] = None
     created_at: datetime = Field(default_factory=_now)
 
 
@@ -161,6 +164,8 @@ class PlanModel(BaseModel):
     features: List[str] = []
     enabled: bool = True
     order: int = 0
+    # If > 0, this plan auto-expires N days after activation. 0 = permanent.
+    trial_days: int = 0
 
 
 class PlanUpsertRequest(BaseModel):
@@ -173,6 +178,7 @@ class PlanUpsertRequest(BaseModel):
     features: List[str] = []
     enabled: bool = True
     order: int = 0
+    trial_days: int = 0
 
 
 # ===== TREASURY =====

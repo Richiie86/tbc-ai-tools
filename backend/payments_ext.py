@@ -3,7 +3,7 @@ import os
 import io
 import base64
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 
 import httpx
@@ -47,6 +47,22 @@ def _serialize(d):
         if isinstance(v, datetime):
             d[k] = v.isoformat()
     return d
+
+
+def _plan_activation_set(plan: dict) -> dict:
+    """Build the $set dict for activating `plan` on a user.
+
+    Always sets `plan` + `plan_started_at`. If the plan has `trial_days > 0`,
+    also sets `plan_expires_at`; otherwise clears it (permanent plan).
+    """
+    now = datetime.now(timezone.utc)
+    trial_days = int(plan.get('trial_days') or 0)
+    expires = now + timedelta(days=trial_days) if trial_days > 0 else None
+    return {
+        'plan': plan['id'],
+        'plan_started_at': now,
+        'plan_expires_at': expires,
+    }
 
 
 def _mask_key(k: Optional[str]) -> Optional[str]:
@@ -263,7 +279,7 @@ async def paypal_capture_order(order_id: str, user: dict = Depends(get_current_u
     if plan:
         await db.users.update_one(
             {'id': tx['user_id']},
-            {'$set': {'plan': plan['id']}, '$inc': {'credits': int(plan['credits'])}},
+            {'$set': _plan_activation_set(plan), '$inc': {'credits': int(plan['credits'])}},
         )
     return {'success': True, 'plan_id': tx['plan_id']}
 
@@ -320,7 +336,7 @@ async def op_confirm_transaction(tx_id: str, _: dict = Depends(get_current_opera
     if plan:
         await db.users.update_one(
             {'id': tx['user_id']},
-            {'$set': {'plan': plan['id']}, '$inc': {'credits': int(plan['credits'])}},
+            {'$set': _plan_activation_set(plan), '$inc': {'credits': int(plan['credits'])}},
         )
     return {'success': True}
 
