@@ -12,6 +12,12 @@ gold theme. Domain: **tbctools.org**.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
 ## Implemented
+- ✅ **About page copy + compact team cards** (Feb 2026): updated team blurb
+  attributing the engine to Emergent; team cards reduced to ~⅓ size with
+  smaller avatars/names/role text.
+- ✅ **Bulk Users → Export CSV** (Feb 2026): one-click download of selected
+  users as CSV (email, name, plan, credits, status, role, totp_enabled,
+  joined). Pure client-side — no backend round-trip.
 - ✅ **Bulk-action toolbar on Users** (Feb 2026): Per-row checkboxes + select-all
   in the header. When selection > 0, a sticky toolbar appears with Pause /
   Resume / ± Credits (prompts for amount) / Set plan (prompts for plan id) /

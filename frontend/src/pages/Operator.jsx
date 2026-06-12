@@ -95,6 +95,39 @@ export default function Operator() {
     }
   };
 
+  const exportSelectedCsv = () => {
+    if (selectedIds.size === 0) return;
+    const rows = users.filter((u) => selectedIds.has(u.id));
+    const escape = (v) => {
+      const s = v === null || v === undefined ? '' : String(v);
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const header = ['email', 'name', 'plan', 'credits', 'status', 'role', 'totp_enabled', 'joined'];
+    const lines = [header.join(',')];
+    for (const u of rows) {
+      lines.push([
+        escape(u.email),
+        escape(u.name || ''),
+        escape(u.plan || ''),
+        escape(u.credits ?? 0),
+        escape(u.deleted_at ? 'deleted' : (u.status || 'active')),
+        escape(u.role || 'user'),
+        escape(u.totp_enabled ? 'yes' : 'no'),
+        escape(u.created_at ? new Date(u.created_at).toISOString() : ''),
+      ].join(','));
+    }
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `tbc-users-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast.success(`Exported ${rows.length} user${rows.length === 1 ? '' : 's'} to CSV`);
+  };
+
   const loadAll = async () => {
     setLoading(true);
     try {
@@ -220,6 +253,11 @@ export default function Operator() {
                       {selectedIds.size} selected
                     </span>
                     <span className="text-tbc-200/40">·</span>
+                    <Button data-testid="bulk-export-csv" size="sm" disabled={bulkBusy} variant="outline"
+                      className="border-tbc-900/60 bg-ink-900 text-tbc-100 hover:bg-ink-950"
+                      onClick={exportSelectedCsv}>
+                      <Download className="mr-1.5 h-3 w-3" /> Export CSV
+                    </Button>
                     <Button data-testid="bulk-pause" size="sm" disabled={bulkBusy} variant="outline"
                       className="border-amber-500/40 bg-ink-900 text-amber-300 hover:bg-amber-500/10"
                       onClick={() => runBulk('pause')}>

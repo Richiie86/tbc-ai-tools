@@ -36,20 +36,21 @@ export default function About() {
 
         <div className="mt-20">
           <h2 className="text-3xl font-bold tracking-tight text-white">The team behind the engine</h2>
-          <p className="mt-3 max-w-3xl text-slate-400">
-            TradeBridge Club operators ship and maintain TBC AI Tools with a small senior team focused on
-            reliability, privacy and rapid model adoption. New models are integrated within days of release.
+          <p className="mt-3 max-w-3xl text-sm text-slate-400">
+            Tradebridge Club have copied the AI engine and the real team behind it is Emergent — a small senior
+            team focused on reliability, privacy and rapid model adoption. New models are integrated within
+            days of release.
           </p>
-          <div className="mt-8 grid gap-5 md:grid-cols-3">
+          <div className="mt-6 grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 max-w-4xl">
             {[
               { name: 'Sandra Pereira', role: 'Head of Operations' },
               { name: 'Marc Liu',       role: 'Lead AI Engineer' },
               { name: 'Aisha Khan',     role: 'Security Architect' },
             ].map((p) => (
-              <div key={p.name} className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6">
-                <div className="grid h-12 w-12 place-items-center rounded-full bg-tbc-500/20 text-lg font-bold text-tbc-300">{p.name.split(' ').map((s)=>s[0]).join('')}</div>
-                <div className="mt-3 text-base font-semibold text-white">{p.name}</div>
-                <div className="text-xs uppercase tracking-wider text-slate-500">{p.role}</div>
+              <div key={p.name} className="rounded-xl border border-slate-800 bg-slate-900/60 p-3">
+                <div className="grid h-7 w-7 place-items-center rounded-full bg-tbc-500/20 text-[10px] font-bold text-tbc-300">{p.name.split(' ').map((s)=>s[0]).join('')}</div>
+                <div className="mt-2 text-xs font-semibold text-white">{p.name}</div>
+                <div className="text-[9px] uppercase tracking-wider text-slate-500">{p.role}</div>
               </div>
             ))}
           </div>
