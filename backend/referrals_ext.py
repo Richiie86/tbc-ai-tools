@@ -34,6 +34,20 @@ def _serialize(d):
     return d
 
 
+# Map legacy Project statuses → new 5-stage lifecycle.
+_LEGACY_PROJECT_STATUS = {'active': 'dev', 'paused': 'dev', 'done': 'launched'}
+
+
+def _migrate_project_status(p: dict) -> dict:
+    """Normalize any legacy 'active'/'paused'/'done' status to the new lifecycle."""
+    if not p:
+        return p
+    s = p.get('status')
+    if s in _LEGACY_PROJECT_STATUS:
+        p['status'] = _LEGACY_PROJECT_STATUS[s]
+    return p
+
+
 def _slug_from_email(email: str) -> str:
     base = email.split('@', 1)[0]
     s = re.sub(r'[^a-z0-9]+', '-', base.lower()).strip('-')
@@ -293,7 +307,7 @@ async def op_update_brand_settings(payload: dict, _: dict = Depends(get_current_
 async def op_list_projects(user: dict = Depends(get_current_operator)):
     db = await get_db()
     cursor = db.projects.find({'owner_id': user['sub']}).sort('updated_at', -1).limit(500)
-    return [_serialize(p) async for p in cursor]
+    return [_serialize(_migrate_project_status(p)) async for p in cursor]
 
 
 @router.post('/operator/projects')
@@ -312,7 +326,7 @@ async def op_update_project(pid: str, req: ProjectUpsertRequest, user: dict = De
     if res.matched_count == 0:
         raise HTTPException(404, 'Project not found')
     doc = await db.projects.find_one({'id': pid})
-    return _serialize(doc)
+    return _serialize(_migrate_project_status(doc))
 
 
 @router.delete('/operator/projects/{pid}')

@@ -345,7 +345,7 @@ class Project(BaseModel):
     owner_id: str
     title: str
     description: Optional[str] = None
-    status: Literal['idea', 'active', 'paused', 'done'] = 'idea'
+    status: Literal['expand', 'idea', 'dev', 'launched', 'running'] = 'idea'
     tags: List[str] = []
     link_url: Optional[str] = None
     chat_session_id: Optional[str] = None
@@ -362,7 +362,7 @@ class Project(BaseModel):
 class ProjectUpsertRequest(BaseModel):
     title: str
     description: Optional[str] = None
-    status: Literal['idea', 'active', 'paused', 'done'] = 'idea'
+    status: Literal['expand', 'idea', 'dev', 'launched', 'running'] = 'idea'
     tags: List[str] = []
     link_url: Optional[str] = None
     chat_session_id: Optional[str] = None

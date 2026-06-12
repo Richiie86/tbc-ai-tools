@@ -12,6 +12,10 @@ gold theme. Domain: **tbctools.org**.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
 ## Implemented
+- ✅ **Projects tab — 5-stage lifecycle sub-sections** (Feb 2026):
+  `Code to expand` → `Start new project` → `Under development` → `Launched` → `Running`.
+  Per-stage counts, color-coded pills, quick "Promote →" action, legacy status
+  auto-migration (`active`/`paused`→`dev`, `done`→`launched`) on list + update.
 - ✅ React + FastAPI + MongoDB stack with dark ink / champagne gold theme.
 - ✅ Auth (email/password) + TOTP 2FA.
 - ✅ Multi-LLM chat (GPT-5, Claude, Gemini) via **Emergent LLM Key**, SSE streaming.

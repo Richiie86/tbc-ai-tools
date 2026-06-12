@@ -989,7 +989,7 @@ async def op_code_file(path: str = Query(...), _: dict = Depends(get_current_ope
 app.include_router(api)
 app.include_router(payments_router)
 app.include_router(referrals_router)
-app.include_router(marketplace_router)
+# app.include_router(marketplace_router)  # Marketplace deferred — skipped per user.
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
