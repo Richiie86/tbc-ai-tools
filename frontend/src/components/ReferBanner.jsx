@@ -17,7 +17,7 @@ export default function ReferBanner() {
     let cancelled = false;
     api.get('/referral/me')
       .then((r) => { if (!cancelled) setInfo(r.data); })
-      .catch(() => { /* silent — banner just won't render */ });
+      .catch((err) => { console.warn('Referral fetch failed — banner hidden', err); });
     return () => { cancelled = true; };
   }, []);
 

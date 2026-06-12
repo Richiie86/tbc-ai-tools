@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import api from '../../lib/api';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -25,13 +25,13 @@ export default function SettingsTab() {
   });
   const [reveal, setReveal] = useState({});
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try { const { data } = await api.get('/operator/settings'); setSettings(data); }
     catch { toast.error('Failed to load settings'); }
     finally { setLoading(false); }
-  };
-  useEffect(() => { load(); }, []);
+  }, []);
+  useEffect(() => { load(); }, [load]);
 
   const save = async (payload) => {
     setSaving(true);
@@ -285,12 +285,26 @@ function Section({ icon: Icon, title, children }) {
 
 const PAYMENT_KEYS = ['enable_card', 'enable_paypal', 'enable_crypto_auto', 'enable_crypto_manual', 'enable_bank'];
 
+function toneFor(enabledCount, total) {
+  if (enabledCount === total) return 'emerald';
+  if (enabledCount === 0) return 'rose';
+  return 'amber';
+}
+
+function masterLabel(enabledCount, total) {
+  if (enabledCount === total) return 'All payment methods enabled';
+  if (enabledCount === 0) return 'All payment methods disabled';
+  return `${enabledCount} of ${total} enabled`;
+}
+
+const TONE_BORDER = { emerald: 'border-emerald-500/40', rose: 'border-rose-500/40', amber: 'border-amber-500/40' };
+const TONE_TEXT = { emerald: 'text-emerald-300', rose: 'text-rose-300', amber: 'text-amber-300' };
+
 function MasterPaymentsToggle({ settings, save }) {
   const enabledCount = PAYMENT_KEYS.filter((k) => settings[k]).length;
-  const allOn = enabledCount === PAYMENT_KEYS.length;
-  const noneOn = enabledCount === 0;
-  const tone = allOn ? 'emerald' : noneOn ? 'rose' : 'amber';
-  const label = allOn ? 'All payment methods enabled' : noneOn ? 'All payment methods disabled' : `${enabledCount} of ${PAYMENT_KEYS.length} enabled`;
+  const total = PAYMENT_KEYS.length;
+  const allOn = enabledCount === total;
+  const tone = toneFor(enabledCount, total);
 
   const toggleAll = (on) => {
     const patch = Object.fromEntries(PAYMENT_KEYS.map((k) => [k, on]));
@@ -299,14 +313,12 @@ function MasterPaymentsToggle({ settings, save }) {
 
   return (
     <div
-      className={`flex items-center justify-between rounded-lg border bg-ink-950 px-4 py-3 ${tone === 'emerald' ? 'border-emerald-500/40' : tone === 'rose' ? 'border-rose-500/40' : 'border-amber-500/40'}`}
+      className={`flex items-center justify-between rounded-lg border bg-ink-950 px-4 py-3 ${TONE_BORDER[tone]}`}
       data-testid="master-payments-toggle"
     >
       <div>
         <div className="text-sm font-semibold text-tbc-100">Master switch</div>
-        <div className={`text-xs ${tone === 'emerald' ? 'text-emerald-300' : tone === 'rose' ? 'text-rose-300' : 'text-amber-300'}`}>
-          {label}
-        </div>
+        <div className={`text-xs ${TONE_TEXT[tone]}`}>{masterLabel(enabledCount, total)}</div>
       </div>
       <div className="flex items-center gap-2">
         <Switch
