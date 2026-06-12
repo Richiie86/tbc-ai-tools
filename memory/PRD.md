@@ -12,6 +12,20 @@ gold theme. Domain: **tbctools.org**.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
 ## Implemented
+- ✅ **Code Review #2 P0 fixes** (Feb 2026): (1) `server.py` codes/file endpoint
+  now initialises `content = ''` before the file-read try/except so any future
+  refactor cannot end up returning an unbound name; (2) `auth_utils.decode_password_reset_token`
+  initialises `payload: dict = {}` before the JWT decode try/except for the same
+  reason; (3) **sessionStorage XSS removal** — `Login.jsx` no longer mirrors the
+  pending-2FA JWT into `sessionStorage`, and `Verify2FA.jsx` was rewritten to
+  call `api.post('/auth/2fa/verify', { code })` which relies entirely on the
+  short-lived `tbc_session` httpOnly cookie set by the backend at login time;
+  (4) **React hook deps** — `Dashboard.jsx` `loadSessions`/`loadMessages`
+  converted to `useCallback` with explicit deps and the three `useEffect`s now
+  list correct dependencies (no more `eslint-disable-next-line`); the URL→state
+  sync effect uses functional setState to avoid the `currentId` loop; (5)
+  `ProjectsTab.jsx` `load` is also `useCallback` now. Regression suite:
+  `/app/backend/tests/test_p0_review.py` (6/6 passed).
 - ✅ **Sign-out-everywhere + token rotation** (Feb 2026): every JWT now carries
   a `tv` (token_version) claim. `POST /api/auth/sign-out-everywhere` bumps the
   user's `token_version` so every existing JWT is rejected on next decode with
