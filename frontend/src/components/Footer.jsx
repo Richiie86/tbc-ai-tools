@@ -10,10 +10,10 @@ export default function Footer() {
         <div>
           <Link to="/" className="flex items-center gap-2.5">
             <div className="grid h-9 w-9 place-items-center overflow-hidden rounded-lg bg-ink-950 ring-1 ring-tbc-500/30">
-              <img src="/brand/logo.jpg" alt="TBC AI Control" className="h-full w-full object-cover" draggable={false} />
+              <img src="/brand/logo.jpg" alt="TBC AI Tools" className="h-full w-full object-cover" draggable={false} />
             </div>
             <div className="leading-tight">
-              <div className="text-[15px] font-bold text-white">TBC AI Control</div>
+              <div className="text-[15px] font-bold text-white">TBC AI Tools</div>
               <div className="text-[10px] uppercase tracking-[0.18em] text-tbc-400/80">TradeBridge Club</div>
             </div>
           </Link>
@@ -52,7 +52,19 @@ export default function Footer() {
       </div>
       <div className="mx-auto mt-10 max-w-7xl border-t border-slate-800/60 px-5 pt-6 text-xs text-slate-500 flex flex-col sm:flex-row justify-between gap-2">
         <div>© {new Date().getFullYear()} TradeBridge Club. All rights reserved.</div>
-        <div>Built with TBC AI Control • tbctools.org</div>
+        <div className="flex items-center gap-3">
+          <span>tbctools.org</span>
+          <span className="text-slate-700">·</span>
+          <a
+            href="https://emergent.sh"
+            target="_blank"
+            rel="noreferrer"
+            className="text-slate-600 hover:text-tbc-400/80 transition-colors"
+            data-testid="footer-emergent-credit"
+          >
+            Powered by Emergent
+          </a>
+        </div>
       </div>
     </footer>
   );

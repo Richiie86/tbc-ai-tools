@@ -8,10 +8,10 @@ export default function About() {
     <div className="min-h-screen bg-ink-950">
       <Navbar />
       <section className="mx-auto max-w-5xl px-5 py-20">
-        <div className="text-xs font-semibold uppercase tracking-[0.2em] text-tbc-400">About TBC AI Control</div>
+        <div className="text-xs font-semibold uppercase tracking-[0.2em] text-tbc-400">About TBC AI Tools</div>
         <h1 className="mt-3 text-5xl font-bold tracking-tight text-white md:text-6xl">A copy of an elite AI builder — yours to operate.</h1>
         <p className="mt-6 max-w-3xl text-lg leading-relaxed text-slate-300">
-          TBC AI Control was created for the TradeBridge Club to put the power of frontier large language
+          TBC AI Tools was created for the TradeBridge Club to put the power of frontier large language
           models behind a single, polished, operator-grade interface. Every conversation is private,
           persistent, and secured with two-factor authentication.
         </p>
@@ -37,7 +37,7 @@ export default function About() {
         <div className="mt-20">
           <h2 className="text-3xl font-bold tracking-tight text-white">The team behind the engine</h2>
           <p className="mt-3 max-w-3xl text-slate-400">
-            TradeBridge Club operators ship and maintain TBC AI Control with a small senior team focused on
+            TradeBridge Club operators ship and maintain TBC AI Tools with a small senior team focused on
             reliability, privacy and rapid model adoption. New models are integrated within days of release.
           </p>
           <div className="mt-8 grid gap-5 md:grid-cols-3">

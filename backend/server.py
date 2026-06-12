@@ -1,4 +1,4 @@
-"""TBC AI Control - FastAPI backend.
+"""TBC AI Tools - FastAPI backend.
 
 Endpoints:
 - Auth: register, login, 2FA setup/verify, me
@@ -61,12 +61,12 @@ PLANS = {
 }
 
 # ===== APP =====
-app = FastAPI(title='TBC AI Control')
+app = FastAPI(title='TBC AI Tools')
 api = APIRouter(prefix='/api')
 
 
 SYSTEM_PROMPT = (
-    "You are TBC AI Control — an elite AI coding & application-building assistant created for the "
+    "You are TBC AI Tools — an elite AI coding & application-building assistant created for the "
     "TradeBridge Club. You help users design, plan, and build full-stack applications, write production-grade "
     "code (React, FastAPI, MongoDB, Python, JavaScript), debug issues, explain concepts clearly, and "
     "recommend best practices. Be concise, confident, friendly, and structured. Use Markdown formatting "
@@ -237,7 +237,7 @@ def _public_user(u: dict) -> dict:
 # ===== HEALTH =====
 @api.get('/')
 async def root():
-    return {'service': 'TBC AI Control', 'status': 'online'}
+    return {'service': 'TBC AI Tools', 'status': 'online'}
 
 
 # ===== AUTH =====
@@ -278,6 +278,10 @@ async def login(req: LoginRequest):
     user = await db.users.find_one({'email': email})
     if not user or not verify_password(req.password, user['password_hash']):
         raise HTTPException(401, 'Invalid email or password')
+    if user.get('deleted_at'):
+        raise HTTPException(403, 'This account has been deactivated. Please contact support.')
+    if user.get('status') == 'paused':
+        raise HTTPException(403, 'This account is paused. Contact your administrator to restore access.')
     if user.get('totp_enabled'):
         # Issue short-lived pending_2fa token
         token = create_jwt(user['id'], user['email'], user.get('role', 'user'), pending_2fa=True)
@@ -323,7 +327,7 @@ async def forgot_password(req: ForgotPasswordRequest, request: Request):
         reset_url = f'{app_url}/reset-password?token={token}'
         try:
             html = render_password_reset_email(user.get('name') or user['email'], reset_url)
-            await send_email(user['email'], 'Reset your TBC AI Control password', html)
+            await send_email(user['email'], 'Reset your TBC AI Tools password', html)
         except Exception as e:
             # Don't leak failures to caller — log and still return 200.
             logger.error('Password reset email failed for %s: %s', email, e)
@@ -851,6 +855,36 @@ async def op_reset_2fa(user_id: str, op: dict = Depends(get_current_operator)):
         {'$unset': {'totp_secret': '', 'totp_enabled': '', 'totp_pending_secret': ''}},
     )
     logger.info('Operator %s reset 2FA for %s', op.get('email'), target.get('email'))
+    return {'success': True, 'email': target.get('email')}
+
+
+@api.post('/operator/users/{user_id}/pause')
+async def op_pause_user(user_id: str, op: dict = Depends(get_current_operator)):
+    """Toggle a user's paused status. Paused users cannot log in."""
+    target = await db.users.find_one({'id': user_id}, {'id': 1, 'email': 1, 'status': 1, 'role': 1})
+    if not target:
+        raise HTTPException(404, 'User not found')
+    if target.get('role') == 'operator' and target.get('id') == op.get('sub'):
+        raise HTTPException(400, 'You cannot pause your own operator account.')
+    new_status = 'active' if target.get('status') == 'paused' else 'paused'
+    await db.users.update_one({'id': user_id}, {'$set': {'status': new_status}})
+    logger.info('Operator %s set status=%s for %s', op.get('email'), new_status, target.get('email'))
+    return {'success': True, 'status': new_status, 'email': target.get('email')}
+
+
+@api.post('/operator/users/{user_id}/delete')
+async def op_delete_user(user_id: str, op: dict = Depends(get_current_operator)):
+    """Soft-delete a user — preserves audit trail and referral/payment history."""
+    target = await db.users.find_one({'id': user_id}, {'id': 1, 'email': 1, 'role': 1})
+    if not target:
+        raise HTTPException(404, 'User not found')
+    if target.get('role') == 'operator' and target.get('id') == op.get('sub'):
+        raise HTTPException(400, 'You cannot delete your own operator account.')
+    await db.users.update_one(
+        {'id': user_id},
+        {'$set': {'deleted_at': datetime.now(timezone.utc), 'status': 'deleted'}},
+    )
+    logger.warning('Operator %s soft-deleted user %s', op.get('email'), target.get('email'))
     return {'success': True, 'email': target.get('email')}
 
 

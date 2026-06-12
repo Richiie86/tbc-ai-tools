@@ -33,10 +33,10 @@ def render_password_reset_email(name: str, reset_url: str) -> str:
     <tr><td align="center">
       <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;background:#13131a;border:1px solid #3a2c08;border-radius:14px;overflow:hidden;">
         <tr><td style="padding:32px 36px 16px 36px;">
-          <div style="font-size:11px;letter-spacing:2px;text-transform:uppercase;color:#d4a93a;font-weight:700;">TBC AI Control</div>
+          <div style="font-size:11px;letter-spacing:2px;text-transform:uppercase;color:#d4a93a;font-weight:700;">TBC AI Tools</div>
           <h1 style="margin:18px 0 6px 0;font-size:22px;color:#f4eed5;font-weight:700;">Reset your password</h1>
           <p style="margin:6px 0 22px 0;font-size:14px;line-height:1.55;color:#a8a092;">
-            Hi {safe_name}, we received a request to reset the password on your TBC AI Control account.
+            Hi {safe_name}, we received a request to reset the password on your TBC AI Tools account.
             Click the button below to choose a new one. The link expires in 30 minutes.
           </p>
           <table role="presentation" cellpadding="0" cellspacing="0">
@@ -51,7 +51,7 @@ def render_password_reset_email(name: str, reset_url: str) -> str:
           </p>
         </td></tr>
         <tr><td style="padding:18px 36px;background:#0e0e14;border-top:1px solid #2a2316;font-size:11px;color:#7e7768;">
-          TBC AI Control · tbctools.org · This is a transactional email.
+          TBC AI Tools · tbctools.org · This is a transactional email.
         </td></tr>
       </table>
     </td></tr>

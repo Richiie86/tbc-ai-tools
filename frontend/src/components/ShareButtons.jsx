@@ -6,7 +6,7 @@ import { toast } from 'sonner';
  * Social share row. By default shares the brand share URL.
  * Pass `url` to share a custom link (e.g., a personal referral link).
  */
-export default function ShareButtons({ url = 'https://www.tbctools.org', text = 'I’m using TBC AI Control to build apps faster. Try it:', compact = false }) {
+export default function ShareButtons({ url = 'https://www.tbctools.org', text = 'I’m using TBC AI Tools to build apps faster. Try it:', compact = false }) {
   const encoded = encodeURIComponent(url);
   const encodedText = encodeURIComponent(text);
 

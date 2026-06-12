@@ -84,6 +84,23 @@ export default function Operator() {
       loadAll();
     } catch (e) { toast.error(e?.response?.data?.detail || 'Could not reset 2FA'); }
   };
+  const togglePause = async (userId, email, currentStatus) => {
+    const action = currentStatus === 'paused' ? 'resume' : 'pause';
+    if (!window.confirm(`${action === 'pause' ? 'Pause' : 'Resume'} ${email}?\n\n${action === 'pause' ? 'They will be blocked from logging in until resumed.' : 'They will be able to log in again.'}`)) return;
+    try {
+      const { data } = await api.post(`/operator/users/${userId}/pause`);
+      toast.success(`${email} is now ${data.status}`);
+      loadAll();
+    } catch (e) { toast.error(e?.response?.data?.detail || `Could not ${action} user`); }
+  };
+  const deleteUser = async (userId, email) => {
+    if (!window.confirm(`Delete ${email}?\n\nThis soft-deletes the account (keeps transaction history, blocks login). The action cannot be undone from the UI.`)) return;
+    try {
+      await api.post(`/operator/users/${userId}/delete`);
+      toast.success(`${email} deleted`);
+      loadAll();
+    } catch (e) { toast.error(e?.response?.data?.detail || 'Could not delete user'); }
+  };
 
   const filteredUsers = useMemo(() => {
     const q = userSearch.trim().toLowerCase();
@@ -144,6 +161,7 @@ export default function Operator() {
                       <TableRow className="border-tbc-900/60 hover:bg-transparent">
                         <TableHead>Email</TableHead>
                         <TableHead>Name</TableHead>
+                        <TableHead>Status</TableHead>
                         <TableHead>Role</TableHead>
                         <TableHead>Plan</TableHead>
                         <TableHead>Credits</TableHead>
@@ -157,6 +175,15 @@ export default function Operator() {
                         <TableRow key={u.id} className="border-tbc-900/60 hover:bg-ink-900/60">
                           <TableCell className="font-medium text-tbc-100">{u.email}</TableCell>
                           <TableCell className="text-tbc-200/80">{u.name || '—'}</TableCell>
+                          <TableCell>
+                            {u.deleted_at ? (
+                              <span className="rounded-full bg-rose-500/15 px-2 py-0.5 text-[10px] uppercase tracking-wider text-rose-300">Deleted</span>
+                            ) : u.status === 'paused' ? (
+                              <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] uppercase tracking-wider text-amber-300">Paused</span>
+                            ) : (
+                              <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] uppercase tracking-wider text-emerald-300">Active</span>
+                            )}
+                          </TableCell>
                           <TableCell>
                             <span className={`rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wider ${u.role === 'operator' ? 'bg-tbc-500/20 text-tbc-300' : 'bg-ink-900 text-tbc-200/70'}`}>{u.role}</span>
                           </TableCell>
@@ -192,6 +219,32 @@ export default function Operator() {
                                   onClick={() => reset2FA(u.id, u.email)}
                                 >
                                   Reset 2FA
+                                </Button>
+                              )}
+                              {u.role !== 'operator' && !u.deleted_at && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  data-testid={`op-pause-${u.id}`}
+                                  title={u.status === 'paused' ? 'Resume — allow login' : 'Pause — block login'}
+                                  className={u.status === 'paused'
+                                    ? 'border-emerald-900/60 bg-ink-900 text-emerald-300 hover:bg-emerald-500/10'
+                                    : 'border-amber-900/60 bg-ink-900 text-amber-300 hover:bg-amber-500/10'}
+                                  onClick={() => togglePause(u.id, u.email, u.status)}
+                                >
+                                  {u.status === 'paused' ? 'Resume' : 'Pause'}
+                                </Button>
+                              )}
+                              {u.role !== 'operator' && !u.deleted_at && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  data-testid={`op-delete-${u.id}`}
+                                  title="Soft-delete — blocks login, keeps audit trail"
+                                  className="border-rose-900/60 bg-ink-900 text-rose-300 hover:bg-rose-500/20"
+                                  onClick={() => deleteUser(u.id, u.email)}
+                                >
+                                  Delete
                                 </Button>
                               )}
                             </div>

@@ -76,7 +76,7 @@ export default function MyReferral() {
           </div>
           <div className="mt-4">
             <div className="mb-1 text-xs uppercase tracking-wider text-tbc-200/60">Share on social</div>
-            <ShareButtons url={activeUrl} text={`Build apps faster with TBC AI Control \u2014 join via my link to support me with ${info.commission_pct}% commission:`} compact />
+            <ShareButtons url={activeUrl} text={`Build apps faster with TBC AI Tools \u2014 join via my link to support me with ${info.commission_pct}% commission:`} compact />
           </div>
         </div>
 

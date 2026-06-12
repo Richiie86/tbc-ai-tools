@@ -13,7 +13,7 @@ export default function Logo({ size = 36, className = '', rounded = 'rounded-lg'
     >
       <img
         src="/brand/logo.jpg"
-        alt="TBC AI Control"
+        alt="TBC AI Tools"
         loading="eager"
         decoding="async"
         className="h-full w-full object-cover"

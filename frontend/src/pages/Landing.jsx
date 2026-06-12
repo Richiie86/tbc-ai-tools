@@ -52,7 +52,7 @@ export default function Landing() {
             </span>
           </h1>
           <p className="mt-6 max-w-2xl text-lg leading-relaxed text-slate-300 md:text-xl">
-            TBC AI Control is a complete copy of an elite AI builder — design, code, debug, and ship
+            TBC AI Tools is a complete copy of an elite AI builder — design, code, debug, and ship
             production-grade applications through a single conversation. Now available to the TradeBridge Club.
           </p>
           <div className="mt-9 flex flex-wrap items-center gap-3">
@@ -135,7 +135,7 @@ export default function Landing() {
           </div>
           <div className="mt-14 grid gap-8 md:grid-cols-3">
             {[
-              { n: '01', title: 'Describe', desc: 'Tell TBC AI Control what you want to build. Be vague — it will ask the right questions.', icon: MessagesSquare },
+              { n: '01', title: 'Describe', desc: 'Tell TBC AI Tools what you want to build. Be vague — it will ask the right questions.', icon: MessagesSquare },
               { n: '02', title: 'Refine', desc: 'Iterate on architecture, schemas, and UI. Switch models mid-conversation as needed.', icon: GitBranch },
               { n: '03', title: 'Deploy', desc: 'Export production code, push to GitHub, or ship to your VPS. You own everything.', icon: TrendingUp },
             ].map((s) => (
@@ -265,10 +265,10 @@ export default function Landing() {
           {/* Share row */}
           <div className="mx-auto mt-12 max-w-2xl">
             <div className="mb-2 inline-flex items-center gap-1.5 rounded-full border border-tbc-900/60 bg-ink-900 px-3 py-1 text-xs text-tbc-300">
-              <Share2 className="h-3.5 w-3.5" /> Share TBC AI Control
+              <Share2 className="h-3.5 w-3.5" /> Share TBC AI Tools
             </div>
             <div className="flex justify-center">
-              <ShareButtons url="https://www.tbctools.org" text="I'm using TBC AI Control to build apps faster. Try it:" />
+              <ShareButtons url="https://www.tbctools.org" text="I'm using TBC AI Tools to build apps faster. Try it:" />
             </div>
           </div>
         </div>

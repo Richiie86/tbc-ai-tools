@@ -20,10 +20,10 @@ export default function Navbar({ minimal = false }) {
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-5">
         <Link to="/" className="flex items-center gap-2.5">
           <div className="relative grid h-9 w-9 place-items-center overflow-hidden rounded-lg bg-ink-950 ring-1 ring-tbc-500/30 shadow-lg shadow-tbc-500/20">
-            <img src="/brand/logo.jpg" alt="TBC AI Control" className="h-full w-full object-cover" draggable={false} />
+            <img src="/brand/logo.jpg" alt="TBC AI Tools" className="h-full w-full object-cover" draggable={false} />
           </div>
           <div className="leading-tight">
-            <div className="text-[15px] font-bold tracking-tight text-white">TBC AI Control</div>
+            <div className="text-[15px] font-bold tracking-tight text-white">TBC AI Tools</div>
             <div className="text-[10px] uppercase tracking-[0.18em] text-tbc-400/80">TradeBridge Club</div>
           </div>
         </Link>

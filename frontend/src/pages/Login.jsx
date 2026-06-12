@@ -52,7 +52,7 @@ export default function Login() {
             </div>
             <div>
               <h1 className="text-2xl font-bold text-white">Welcome back</h1>
-              <p className="text-xs text-slate-400">Sign in to TBC AI Control</p>
+              <p className="text-xs text-slate-400">Sign in to TBC AI Tools</p>
             </div>
           </div>
 
@@ -88,7 +88,7 @@ export default function Login() {
           </div>
 
           <div className="mt-7 border-t border-slate-800 pt-5 text-center text-sm text-slate-400">
-            New to TBC AI Control? <Link to="/register" className="font-semibold text-tbc-400 hover:text-tbc-300">Create an account</Link>
+            New to TBC AI Tools? <Link to="/register" className="font-semibold text-tbc-400 hover:text-tbc-300">Create an account</Link>
           </div>
         </div>
       </div>

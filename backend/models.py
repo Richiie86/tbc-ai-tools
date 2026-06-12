@@ -1,4 +1,4 @@
-"""Pydantic models for TBC AI Control."""
+"""Pydantic models for TBC AI Tools."""
 from pydantic import BaseModel, Field, EmailStr
 from typing import Optional, List, Literal
 from datetime import datetime, timezone

@@ -40,7 +40,7 @@ export default function Dashboard({ variant = 'tbc1' }) {
 
   const isTbc2 = variant === 'tbc2';
   const basePath = isTbc2 ? '/tbc2' : '/dashboard';
-  const brandTitle = isTbc2 ? 'TBC2 AI Control' : 'TBC AI Control';
+  const brandTitle = isTbc2 ? 'TBC2 AI Control' : 'TBC AI Tools';
   const brandTag = isTbc2 ? 'Trader Edition' : 'Builder Edition';
 
   const [sessions, setSessions] = useState([]);
@@ -208,7 +208,7 @@ export default function Dashboard({ variant = 'tbc1' }) {
             <div className="grid h-8 w-8 place-items-center rounded-md bg-gradient-to-br from-tbc-300 to-tbc-500">
               <Cpu className="h-4 w-4 text-slate-950" strokeWidth={2.4} />
             </div>
-            <span className="text-sm font-bold text-white">TBC AI Control</span>
+            <span className="text-sm font-bold text-white">TBC AI Tools</span>
           </Link>
           <button onClick={() => setSidebarOpen(false)} className="rounded-md p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white">
             <ChevronLeft className="h-4 w-4" />
@@ -348,7 +348,7 @@ export default function Dashboard({ variant = 'tbc1' }) {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={onKey}
-                placeholder="Ask TBC AI Control anything… (Shift+Enter for newline)"
+                placeholder="Ask TBC AI Tools anything… (Shift+Enter for newline)"
                 className="min-h-[44px] max-h-40 resize-none border-0 bg-transparent text-[15px] text-slate-100 focus-visible:ring-0 focus-visible:ring-offset-0"
               />
               <Button onClick={send} disabled={streaming || !input.trim()} className="h-10 shrink-0 bg-tbc-500 px-4 text-slate-950 hover:bg-tbc-400 font-semibold">
@@ -356,7 +356,7 @@ export default function Dashboard({ variant = 'tbc1' }) {
               </Button>
             </div>
             <div className="mt-2 text-center text-[11px] text-slate-500">
-              TBC AI Control may produce inaccurate information. Verify critical output.
+              TBC AI Tools may produce inaccurate information. Verify critical output.
             </div>
           </div>
         </div>
