@@ -26,8 +26,12 @@ export function AuthProvider({ children }) {
     try {
       const { data } = await api.get('/auth/me');
       setUser(data);
-    } catch {
-      // No valid cookie / 401 → simply not authenticated. Stay quiet.
+    } catch (e) {
+      // No valid cookie / 401 → simply not authenticated. Stay quiet on UI
+      // but log at warn-level so unexpected 5xx still shows in the console.
+      if (e?.response?.status && e.response.status !== 401) {
+        console.warn('AuthContext.refresh: /auth/me failed', e.response.status, e?.response?.data);
+      }
       setUser(null);
       setToken(null);
     } finally {
@@ -46,7 +50,11 @@ export function AuthProvider({ children }) {
   };
 
   const logout = async () => {
-    try { await api.post('/auth/logout'); } catch { /* idempotent; ignore network errors */ }
+    try { await api.post('/auth/logout'); } catch (e) {
+      // Idempotent: server may have already invalidated the session. Log only
+      // so a true 5xx isn't completely silent in dev tools.
+      console.warn('AuthContext.logout: server-side logout failed (ignored)', e?.message);
+    }
     setToken(null);
     setUser(null);
   };

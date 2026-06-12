@@ -12,6 +12,27 @@ gold theme. Domain: **tbctools.org**.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
 ## Implemented
+- ✅ **Credits visibility + P2 cleanup** (Feb 2026):
+  - New `CreditsBadge` component (`/app/frontend/src/components/CreditsBadge.jsx`)
+    surfaces remaining credits with a colour-coded tone (default tbc-gold,
+    amber when ≤25, rose when ≤0) and links to `/pricing` for one-tap top-up.
+    Operators see an infinity glyph since their usage is uncapped.
+  - Wired into three places so credits are always one glance away:
+    (1) global Navbar pill (visible on every authenticated page),
+    (2) Dashboard chat header next to the model picker,
+    (3) Dashboard sidebar plan-row pill (compact).
+    The Navbar dropdown also now shows credits alongside the plan tag and the
+    "Upgrade" item label adapts ("Buy credits" when out, "Upgrade · top up"
+    otherwise).
+  - Empty catch blocks in `frontend/src/lib/api.js` (streamChat JSON-parse +
+    SSE-frame parse) and `frontend/src/context/AuthContext.jsx` (`refresh` +
+    `logout`) now log via `console.warn` so silent failures show up in dev
+    tools while still being non-fatal at runtime.
+  - The Code Review #2 `is`-vs-literal antipattern is already absent from
+    `trial_emails.py` / `referrals_ext.py` / `payments_ext.py` / `audit_ext.py`
+    after the prior refactor passes — only `is None` remains, which is the
+    canonical Python idiom and not an antipattern.
+
 - ✅ **P1 refactor — pure decomposition** (Feb 2026): no behaviour change, all 15/15
   regression tests pass.
   - **Backend** `autowithdraw_ext.py` `run_auto_withdraw_once` split into

@@ -8,6 +8,7 @@ import {
   AlertDialogTrigger,
 } from '../../components/ui/alert-dialog';
 import ReferBanner from '../../components/ReferBanner';
+import CreditsBadge from '../../components/CreditsBadge';
 import api from '../../lib/api';
 import {
   Cpu, Plus, Trash2, MessageSquare, LogOut, Sparkles,
@@ -108,11 +109,13 @@ export function DashboardSidebar({
 
       <div className="border-t border-slate-800 p-3">
         <ReferBanner />
-        <div className="mb-2 flex items-center gap-2 rounded-md bg-slate-900 px-2.5 py-2 text-xs text-slate-300">
-          <Sparkles className="h-3.5 w-3.5 text-tbc-400" />
-          <span className="flex-1 truncate">
-            {user?.plan?.toUpperCase()} • {user?.role === 'operator' ? '∞' : user?.credits} credits
+        <div className="mb-2 flex items-center justify-between gap-2 rounded-md bg-slate-900 px-2.5 py-2 text-xs">
+          <span className="inline-flex items-center gap-1 rounded-full bg-tbc-500/15 px-2 py-0.5 text-[10px] uppercase tracking-wider text-tbc-300">
+            <Sparkles className="h-3 w-3" /> {user?.plan}
           </span>
+          {/* Plain (non-link) badge — sidebar already has an Upgrade link just
+              below, so we don't want two competing CTAs here. */}
+          <CreditsBadge user={user} linkTo={null} compact testid="sidebar-credits-badge" />
         </div>
         {user?.role === 'operator' && (
           <Link to="/operator" className="mb-1 flex items-center gap-2 rounded-md px-2.5 py-2 text-xs font-medium text-tbc-300 hover:bg-slate-800">

@@ -13,6 +13,7 @@ import { DashboardSidebar } from './dashboard/DashboardSidebar';
 import { TrialBanner } from './dashboard/TrialBanner';
 import { EmptyState, MessageBubble } from './dashboard/ChatMessages';
 import { ChatComposer } from './dashboard/ChatComposer';
+import CreditsBadge from '../components/CreditsBadge';
 
 function sidebarTimeLabel(iso) {
   try {
@@ -239,6 +240,9 @@ export default function Dashboard({ variant = 'tbc1' }) {
             <div className="text-sm font-semibold text-white">{brandTitle}</div>
           </div>
           <div className="flex items-center gap-3">
+            {/* Credits badge sits right next to the model picker so users
+                always see how much budget they have left while chatting. */}
+            <CreditsBadge user={user} testid="dashboard-credits-badge" />
             <Select value={model} onValueChange={setModel}>
               <SelectTrigger className="h-9 w-[230px] border-slate-700 bg-slate-900 text-slate-100">
                 <div className="flex items-center gap-2 text-sm">

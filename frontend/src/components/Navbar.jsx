@@ -2,8 +2,9 @@ import React from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { Button } from './ui/button';
 import { useAuth } from '../context/AuthContext';
-import { LayoutDashboard, LogOut, ShieldCheck, Sparkles, Bot } from 'lucide-react';
+import { LayoutDashboard, LogOut, ShieldCheck, Sparkles, Bot, Coins } from 'lucide-react';
 import Logo from './Logo';
+import CreditsBadge from './CreditsBadge';
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent,
   DropdownMenuItem, DropdownMenuSeparator, DropdownMenuLabel,
@@ -53,7 +54,11 @@ export default function Navbar({ minimal = false }) {
 
         <div className="flex items-center gap-2">
           {user ? (
-            <DropdownMenu>
+            <>
+              {/* Always-visible credit chip so users never lose sight of their
+                  budget. Tapping it jumps to the Pricing page for a top-up. */}
+              <CreditsBadge user={user} testid="nav-credits-badge" />
+              <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button className="flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-1.5 text-sm font-medium text-slate-200 hover:bg-slate-800 transition-colors">
                   <div className="grid h-6 w-6 place-items-center rounded-full bg-tbc-500/20 text-tbc-300 text-[11px] font-bold">
@@ -66,9 +71,28 @@ export default function Navbar({ minimal = false }) {
                 <DropdownMenuLabel className="flex flex-col">
                   <span className="text-xs text-slate-400">Signed in as</span>
                   <span className="truncate text-sm">{user.email}</span>
-                  <span className="mt-1 inline-flex w-fit items-center gap-1 rounded-full bg-tbc-500/15 px-2 py-0.5 text-[10px] uppercase tracking-wide text-tbc-300">
-                    <Sparkles className="h-3 w-3" /> {user.plan} plan
-                  </span>
+                  <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                    <span className="inline-flex w-fit items-center gap-1 rounded-full bg-tbc-500/15 px-2 py-0.5 text-[10px] uppercase tracking-wide text-tbc-300">
+                      <Sparkles className="h-3 w-3" /> {user.plan} plan
+                    </span>
+                    <span
+                      data-testid="nav-dropdown-credits"
+                      className={`inline-flex w-fit items-center gap-1 rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wide ${
+                        user.role === 'operator'
+                          ? 'bg-emerald-500/15 text-emerald-300'
+                          : (user.credits ?? 0) <= 0
+                            ? 'bg-rose-500/20 text-rose-200'
+                            : (user.credits ?? 0) <= 25
+                              ? 'bg-amber-500/15 text-amber-200'
+                              : 'bg-slate-700/40 text-slate-200'
+                      }`}
+                    >
+                      <Coins className="h-3 w-3" />
+                      {user.role === 'operator'
+                        ? 'unlimited'
+                        : `${(user.credits ?? 0).toLocaleString()} credits`}
+                    </span>
+                  </div>
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator className="bg-slate-800" />
                 <DropdownMenuItem onClick={() => navigate('/dashboard')} className="focus:bg-slate-800 cursor-pointer">
@@ -83,7 +107,8 @@ export default function Navbar({ minimal = false }) {
                   </DropdownMenuItem>
                 )}
                 <DropdownMenuItem onClick={() => navigate('/pricing')} className="focus:bg-slate-800 cursor-pointer">
-                  <Sparkles className="mr-2 h-4 w-4" /> Upgrade
+                  <Sparkles className="mr-2 h-4 w-4" />
+                  {user.role === 'operator' ? 'Manage plans' : (user.credits ?? 0) <= 0 ? 'Buy credits' : 'Upgrade · top up credits'}
                 </DropdownMenuItem>
                 <DropdownMenuSeparator className="bg-slate-800" />
                 <DropdownMenuItem onClick={() => { logout(); navigate('/'); }} className="focus:bg-slate-800 cursor-pointer">
@@ -91,6 +116,7 @@ export default function Navbar({ minimal = false }) {
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
+            </>
           ) : (
             <>
               <Link to="/login">

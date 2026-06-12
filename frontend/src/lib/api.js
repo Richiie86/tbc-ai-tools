@@ -34,7 +34,12 @@ export async function* streamChat({ session_id, message, model, variant, attachm
   });
   if (!res.ok) {
     let detail = 'Request failed';
-    try { const j = await res.json(); detail = j.detail || detail; } catch { /* non-JSON error body — keep default detail */ }
+    try { const j = await res.json(); detail = j.detail || detail; } catch (e) {
+      // Non-JSON error body (HTML 502, plain-text gateway message, etc).
+      // We keep the default `detail` and surface the parse miss to the console
+      // so it shows up during local debugging without breaking the throw path.
+      console.warn('streamChat: non-JSON error body', e);
+    }
     throw new Error(detail);
   }
   const reader = res.body.getReader();
@@ -53,7 +58,12 @@ export async function* streamChat({ session_id, message, model, variant, attachm
       try {
         const ev = JSON.parse(payload);
         yield ev;
-      } catch { /* skip malformed SSE frame */ }
+      } catch (e) {
+        // SSE frames are best-effort — a partial-flush frame can land here
+        // mid-token. Log so we can spot a malformed upstream feed, but don't
+        // tear down the stream.
+        console.warn('streamChat: skipped malformed SSE frame', e);
+      }
     }
   }
 }
