@@ -1,0 +1,39 @@
+{
+  "summary": "Iter22 (3 production hotfixes + public /status page) — ALL CRITICAL BEHAVIOURS VERIFIED. Backend pytest 9/10 (the one failure is Cache-Control being rewritten by the Cloudflare edge — FastAPI itself returns the correct header). Frontend Playwright: status page renders with banner/components/models-table/incidents/refresh/auto-refresh all working; Bug 1 inline-action handler runs without ReferenceError and surfaces toasts (Deploy → 'do_not_ship' blocker, Review → 'Code review: do_not_ship'); Bug 2 audit tab renders 50 rows including object-typed targets (USER_BULK_VANISH) with NO error boundary; Bug 3 extension noise (chrome-extension:// filename, wallet-grammar message, extension stack on rejection) is filtered and does NOT POST to /api/runtime-errors, while a real-app error correctly does.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/status", "issue": "Cache-Control 'public, max-age=30' set by FastAPI is overridden to 'no-store, no-cache, must-revalidate' by the Cloudflare/Kubernetes edge layer when accessed via the public preview URL. Verified internally via curl http://localhost:8001/api/status — header is correct at app layer. Action: add an edge/ingress override or set the header via the K8s ingress annotations for /api/status if 30s edge caching is desired in production."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/dashboard (logged-in)", "issues": ["Operator Quick Guide tour modal auto-opens on every dashboard visit and intercepts pointer events for the chat textarea — blocks first-time UX & automated tests. Consider gating it on a per-user 'tour_completed' flag or a 'Don't show again' toggle so it stops resurrecting after Skip."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter22_status_page.py",
+    "/app/test_reports/pytest/iter22_status.xml"
+  ],
+  "action_items": [
+    "OPTIONAL infra: re-apply Cache-Control: public, max-age=30 at the K8s ingress for GET /api/status — Cloudflare currently strips it. App code is already correct.",
+    "OPTIONAL UX: stop re-showing the Operator Quick Guide tour after Skip (persist 'tour_completed' on backend or user prefs)."
+  ],
+  "critical_code_review_comments": [
+    "status_ext.py: clean, async, 137 lines, no _id leaks (projection used), no PII in incident payload (message truncated to 280 chars, no stack). Good.",
+    "Status.jsx: setInterval(load, 30_000) is correctly torn down in useEffect cleanup — no leak. data-testid coverage is solid (status-page, status-refresh, status-overall-*, status-component-*, status-models-table, status-incident-*).",
+    "errorCapture.jsx isExtensionNoise: regex covers chrome/moz/safari/webkit-masked-url schemes + the specific wallet-grammar tell. Both window.error and unhandledrejection paths use it. Could be hardened further by also matching common stack patterns like 'at MetaMask' / 'at Phantom' but current heuristic is adequate.",
+    "Dashboard.jsx handleInlineAction is now a useCallback ~line 139 and wired via onAction={handleInlineAction} on the QuickActionsBar/header buttons — no ReferenceError observed across Deploy/Review/Health clicks.",
+    "AuditTab.jsx target column safely handles object via JSON.stringify(r.target) — verified live with existing USER_BULK_VANISH rows that have object targets."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "90% (9/10, the 1 failure is infra-layer not code)", "frontend": "100% on the 4 scenarios in scope"},
+  "test_credentials": "Operator rac.investments.swe@gmail.com / 123Admin@98 (2FA cleared on boot; redirects to /setup-2fa after login but app remains usable).",
+  "seed_data_creation": "None — used existing ai_model_tests (8 probed models, mix of PASS/FAIL) and runtime_errors (3 critical incidents in last 7d).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "All 4 in-scope items pass functionally. /api/status backend test file at /app/backend/tests/test_iter22_status_page.py is reusable as regression. If iterating on edge caching, run `curl -sI -X GET http://localhost:8001/api/status` to confirm FastAPI side, and `curl -sI -X GET <PUBLIC>/api/status` to confirm Cloudflare. The Operator Quick Guide tour now re-opens on every /dashboard visit; tests must dismiss via Skip OR localStorage flag before driving the chat input.",
+  "rca of the issue": "Bug 1 RCA: handleInlineAction was referenced by JSX onAction prop but never declared in the new Dashboard.jsx after an interrupted commit — now restored as a useCallback that POSTs /deploy, /review, or /health-check and surfaces a sonner toast (or a 'Pick a deploy project first' hint when no project selected). Bug 2 RCA: AuditTab rendered {r.target} raw; for operator.purge_test_data rows the audit logger writes an object ({ok_count, skipped_count, extra}) which React refused to render (error #31). Fix: typeof r.target === 'object' ? JSON.stringify(r.target) : String(r.target). Bug 3 RCA: window.error fired for every script error including those originating from chrome-extension:// scripts injected by crypto wallets — the report() call POSTed to /api/runtime-errors flooding the operator inbox. Fix: isExtensionNoise() heuristic on filename/stack/message rejects them before report() runs, in BOTH window.error and unhandledrejection listeners."
+}

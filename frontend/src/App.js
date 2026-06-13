@@ -21,6 +21,7 @@ import Dashboard from './pages/Dashboard';
 import BillingSuccess from './pages/BillingSuccess';
 import Operator from './pages/Operator';
 import ProjectSettings from './pages/ProjectSettings';
+import Status from './pages/Status';
 import MarketingBanner from './components/MarketingBanner';
 import PersonalUseBanner from './components/PersonalUseBanner';
 import './App.css';
@@ -34,6 +35,7 @@ function App() {
           <PersonalUseBanner />
           <Routes>
             <Route path="/" element={<Landing />} />
+            <Route path="/status" element={<Status />} />
             <Route path="/about" element={<About />} />
             <Route path="/contact" element={<Contact />} />
             <Route path="/pricing" element={<Pricing />} />

@@ -1878,6 +1878,8 @@ app.include_router(sandbox_ai_router)
 app.include_router(sandbox_ai_proj_router)
 app.include_router(cors_origins_router)
 app.include_router(webhook_router)
+from status_ext import router as status_router
+app.include_router(status_router)
 # app.include_router(marketplace_router)  # Marketplace deferred — skipped per user.
 # CORS — proven FastAPI built-in CORSMiddleware first (handles cookie
 # credentials correctly, battle-tested). The `DynamicCORSMiddleware`
