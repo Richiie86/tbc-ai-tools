@@ -11,6 +11,18 @@ gold theme. Domain: **tbctools.org**.
 - **End user (member)** — Chats with the AI builder, manages plan, copies referral link.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
+## Implemented — Feb 2026 (latest session, batch 8)
+- ✅ **Production hotfixes (3)** — preview-only fixes; user must redeploy:
+  - `Dashboard.jsx` — `handleInlineAction` restored as a `useCallback` after an interrupted commit removed it (fixes `handleInlineAction is not defined` ×24 on /dashboard).
+  - `AuditTab.jsx` — `r.target` rendered raw crashed React #31 when audit logger wrote an object (e.g. `operator.purge_test_data` writes `{sessions, messages}` as `target`). Now stringified.
+  - `errorCapture.jsx` — `isExtensionNoise()` heuristic filters `chrome-extension://`, `moz-extension://`, `safari-web-extension://`, `webkit-masked-url://` and known wallet-grammar tells from BOTH `window.error` and `unhandledrejection`. Stops crypto-wallet extension errors (e.g. "wallet must has at least one account" ×57) from flooding `/api/runtime-errors`.
+
+- ✅ **Public status page (P1)** — `/status` (no auth):
+  - Backend: `status_ext.py` → `GET /api/status` returns `{overall, components:{database,ai_models}, models[], critical_errors_24h, incidents[]}`. ~3 Mongo reads + 1 ping; `Cache-Control: public, max-age=30` (Cloudflare edge currently strips — infra ticket only).
+  - Overall logic: `outage` if DB down or ≥5 critical errors in 24h; `degraded` if any model FAIL or any critical errors; else `operational`.
+  - Frontend: `Status.jsx` — banner + components grid + per-model PASS/FAIL pills with latency + recent-incidents list (last 7 days, 10-max). Auto-refresh every 30s. Linked from contact/footer.
+  - Tested iter22: 9/10 BE + 100% FE in scope.
+
 ## Implemented — Feb 2026 (latest session, batch 7 + final)
 - ✅ **Slack/Discord webhook bridge** (`webhook_ext.py` + `WebhookSettingsCard.jsx`):
   - One operator-configured `https://` URL works for both Slack incoming-webhooks and Discord `/api/webhooks/...` (payload sends both `text` and `content` keys).
