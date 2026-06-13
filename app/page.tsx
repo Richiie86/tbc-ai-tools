@@ -1,6 +1,4 @@
-import { DeployForm } from "@/components/deploy-form"
-import { DeployUsage } from "@/components/deploy-usage"
-import { CostTracker } from "@/components/cost-tracker"
+import { DashboardTabs } from "@/components/dashboard-tabs"
 import { listProjects } from "@/app/actions/projects"
 
 export const dynamic = "force-dynamic"
@@ -20,9 +18,7 @@ export default async function Home() {
             press.
           </p>
         </div>
-        <DeployUsage />
-        <CostTracker />
-        <DeployForm initialProjects={projects} />
+        <DashboardTabs initialProjects={projects} />
       </main>
     </div>
   )
