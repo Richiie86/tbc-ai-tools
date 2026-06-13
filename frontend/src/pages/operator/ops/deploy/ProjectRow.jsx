@@ -3,11 +3,12 @@ import { useNavigate } from 'react-router-dom';
 import api from '../../../../lib/api';
 import { Button } from '../../../../components/ui/button';
 import { Input } from '../../../../components/ui/input';
+import { Switch } from '../../../../components/ui/switch';
 import { toast } from 'sonner';
 import {
   Rocket, Globe, Loader2, Copy, Check, GitBranch, ExternalLink, RotateCw, Save,
   Sparkles, Activity, AlertCircle, CheckCircle2, GitFork, Pencil, ShieldCheck, Bot,
-  Cog, BadgeCheck, Zap,
+  Cog, BadgeCheck, Zap, ArrowUpCircle,
 } from 'lucide-react';
 
 import { CodeReviewDialog } from './CodeReviewDialog';
@@ -213,6 +214,40 @@ export function ProjectRow({ project, onDeployed }) {
       setTimeout(() => setCopied(false), 1500);
     } catch {
       toast.error('Clipboard blocked — copy manually');
+    }
+  };
+
+  // --- promote-to-prod (separate from runDeploy to avoid the gate path) ---
+  const promote = async () => {
+    if (!project.last_deployment_id) {
+      toast.error('No preview deployment to promote — run a Preview first.');
+      return;
+    }
+    if (!window.confirm(`Promote the last preview of ${project.projectName} to production?`)) return;
+    setBusy('promote');
+    try {
+      const { data } = await api.post(`/operator/deploy/${project.id}/promote`, {});
+      toast.success(`Promoted to production · ${data?.state || 'queued'}`);
+      onDeployed();
+    } catch (e) {
+      const detail = e?.response?.data?.detail;
+      toast.error(typeof detail === 'string' ? detail : 'Promote failed');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  // --- auto-promote toggle (PATCH /api/operator/deploy/{id}) -----------
+  const toggleAutoPromote = async (next) => {
+    setBusy('auto-promote');
+    try {
+      await api.patch(`/operator/deploy/${project.id}`, { auto_promote: next });
+      toast.success(next ? 'Auto-promote ON · successful previews ship on their own' : 'Auto-promote OFF');
+      onDeployed();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Could not toggle auto-promote');
+    } finally {
+      setBusy(null);
     }
   };
 
@@ -460,6 +495,34 @@ export function ProjectRow({ project, onDeployed }) {
             {busy === 'health' ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : <Activity className="mr-1.5 h-3 w-3" />}
             Health
           </Button>
+          <Button
+            size="sm"
+            data-testid={`promote-${project.id}`}
+            onClick={promote}
+            disabled={busy !== null || !project.last_deployment_id}
+            variant="outline"
+            title={
+              !project.last_deployment_id
+                ? 'No preview deployment yet — run Preview first'
+                : 'Promote the last preview to production'
+            }
+            className="border-amber-500/40 bg-ink-900 text-amber-300 hover:bg-amber-500/10"
+          >
+            {busy === 'promote' ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : <ArrowUpCircle className="mr-1.5 h-3 w-3" />}
+            Promote to Prod
+          </Button>
+          <label
+            className="inline-flex items-center gap-2 rounded-md border border-tbc-900/60 bg-ink-900 px-2.5 py-1.5 text-[11px] text-tbc-200/80"
+            title="When ON, a successful preview deploy is automatically promoted to production."
+          >
+            <Switch
+              data-testid={`auto-promote-${project.id}`}
+              checked={!!project.auto_promote}
+              onCheckedChange={toggleAutoPromote}
+              disabled={busy !== null}
+            />
+            <span>Auto-promote</span>
+          </label>
         </div>
       </div>
 

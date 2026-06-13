@@ -9,6 +9,7 @@ import {
 import { toast } from 'sonner';
 import { Loader2, KeyRound, Save, Lock, Eye, EyeOff, Plug, Mail, Sparkles, UserPlus, Rocket } from 'lucide-react';
 import SecretsCard from './SecretsCard';
+import BirthdayRewardsCard from './BirthdayRewardsCard';
 
 export default function SettingsTab() {
   const [settings, setSettings] = useState(null);
@@ -312,6 +313,10 @@ export default function SettingsTab() {
             auto-clears input, and shows "rotated N days ago" with amber/red
             warnings as the token ages toward expiry. */}
         <SecretsCard settings={settings} onChanged={load} />
+
+        {/* Birthday rewards programme — enable/disable, tune credits +
+            discount, and force a manual pass. */}
+        <BirthdayRewardsCard />
 
         <div className="flex items-center gap-3">
           <span className="w-32 text-xs text-tbc-200/60">Team ID</span>

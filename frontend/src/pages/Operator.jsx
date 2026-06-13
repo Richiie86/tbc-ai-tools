@@ -25,6 +25,7 @@ import SandboxTab   from './operator/SandboxTab';
 import { StatCard }      from './operator/StatCard';
 import { StatsToolbar }  from './operator/StatsToolbar';
 import { UsersTab }      from './operator/UsersTab';
+import TestUserBanner    from './operator/TestUserBanner';
 
 import { OperatorGuideTour, OperatorGuideButton } from './OperatorGuideTour';
 import CodesBrowser from './operator/CodesBrowser';
@@ -99,6 +100,12 @@ export default function Operator() {
             </div>
 
             <StatsToolbar stats={stats} onRefresh={loadAll} />
+
+            {/* Surfaces the seeded preview-user credentials so the
+                operator can drop into the app as a regular customer. */}
+            <div className="mt-5">
+              <TestUserBanner />
+            </div>
 
             <Tabs value={activeTab} onValueChange={setActiveTab} className="mt-10">
               <TabsList className="bg-ink-900 border border-tbc-900/60 flex flex-wrap h-auto">

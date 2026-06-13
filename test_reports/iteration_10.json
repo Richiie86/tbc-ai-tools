@@ -1,0 +1,26 @@
+{
+  "summary": "Frontend retest of the 4 HIGH-priority gaps reported in iteration_9. All 4 fixes verified live on /operator. (1) TestUserBanner now mounts directly under the StatsToolbar — data-testid='test-user-banner' visible, surfaces seeded preview-user 'preview-user@tbctools.dev' with masked password, copy-to-clipboard buttons and 'Open as test user' CTA. (2) ProjectRow.jsx now renders both Promote-to-Prod button (data-testid='promote-{id}', 136 instances — 135 correctly disabled with title 'No preview deployment yet — run Preview first', 1 enabled because last_deployment_id is present; clicking it fires the window.confirm prompt then POST /api/operator/deploy/{id}/promote) AND an Auto-Promote shadcn Switch (data-testid='auto-promote-{id}', role='switch', 136 instances) wired to PATCH /api/operator/deploy/{id}. (3) BirthdayRewardsCard renders below SecretsCard inside Settings/Security tab — all 6 sub-testids present (birthday-enabled-toggle / birthday-credits-input / birthday-discount-input / birthday-message-input / birthday-save-btn / birthday-run-now-btn). End-to-end persistence test passed: changed credits 200→275 and discount 10→15, clicked Save, hard-reloaded, navigated back to Security tab — values were 275 and 15 (PASS). Run-now triggered toast: 'Birthday pass complete · 0 rewarded · 0 already done' confirming POST /api/operator/birthday-rewards/run-now is wired. (4) Regression: 16 operator tabs still render, StatsToolbar (Show JSON + Self-fix) still works, Stats grid still navigates to the tab matching each StatCard.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/test_reports/iteration_10.json"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "ProjectRow.jsx is now 574 lines — approaching the 700-line soft limit. Consider extracting the per-row trigger() dispatcher and the runDeploy/promote/toggleAutoPromote handlers into a custom hook (useProjectActions) so the JSX file shrinks below 400 lines and the handlers become unit-testable in isolation.",
+    "Operator.jsx — TestUserBanner is mounted inside the `loading` guard (only after stats/users/contacts resolve). If those endpoints fail, the banner never shows even though /operator/test-user is independent. Consider moving the banner outside the loading branch so QA still has access during partial outages.",
+    "BirthdayRewardsCard returns null until GET /operator/birthday-rewards resolves — there is no skeleton/spinner. On slow connections the card silently disappears for ~500ms which can be confusing. Add a Loader2 placeholder consistent with the other cards.",
+    "ProjectRow promote() uses window.confirm — works but is jarring next to the shadcn ShipGateDialog used for production deploys. Consider replacing with an AlertDialog for visual consistency.",
+    "(Pre-existing) Post-login redirect to /setup-2fa while RESET_OPERATOR_PASSWORD=true forces the operator to type /operator manually every session. A 'Skip 2FA setup → Open Operator Console' link on /setup-2fa would remove this papercut."
+  ],
+  "updated_files": [],
+  "success_rate": { "backend": "n/a (frontend-only retest, backend reported at 85/85 prior)", "frontend": "100% — all 4 review items from iteration_9 now pass + regression items still pass." },
+  "test_credentials": "Operator rac.investments.swe@gmail.com / 123Admin@98 (post-login lands on /setup-2fa, manual nav to /operator works; httpOnly tbc_session cookie authenticates /api). Seeded preview-user email surfaced by TestUserBanner: preview-user@tbctools.dev.",
+  "seed_data_creation": "Modified birthday-rewards config to credits=275, discount_pct=15 during the persistence test. Did not revert — operator can change back via Settings → Security if desired.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "All four iteration_9 gaps are now closed and verified on /operator. If a future iteration needs to re-exercise: (a) promote-{tbctools-self} is the only enabled Promote button because tbctools-self had last_deployment_id populated; (b) the 135 disabled Promote buttons correctly carry the title 'No preview deployment yet — run Preview first'; (c) the Birthday Rewards persistence flow goes PUT /api/operator/birthday-rewards → reload → GET returns same numbers; (d) Run-now returns {enabled, rewarded, skipped_already_done} and toasts the counts. Skip the Quick-Guide tour with 'Skip tour' before clicking tabs. Use page.get_by_role('tab', name='…') not [role=tab][value=…] — shadcn TabsTrigger does not expose `value` as an HTML attribute.",
+  "rca of the issue": "n/a — this was a successful verification of fixes shipped between iteration_9 and iteration_10."
+}
