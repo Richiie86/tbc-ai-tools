@@ -151,6 +151,10 @@ export function ProjectRow({ project, onDeployed }) {
         });
         return;
       }
+      // Any non-gate failure (503 missing Vercel token, 502 from Vercel, etc)
+      // must clear gateBlock so the modal doesn't linger after a bypass
+      // attempt that failed for an unrelated reason.
+      setGateBlock(null);
       toast.error(typeof detail === 'string' ? detail : `Deploy failed${status ? ` (HTTP ${status})` : ''}`);
     }
   };

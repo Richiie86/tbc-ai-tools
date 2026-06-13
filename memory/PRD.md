@@ -14,6 +14,56 @@ gold theme. Domain: **tbctools.org**.
 ## Implemented
 - ✅ **Deploy card layout v2 + Code Review + Code Download** (Feb 2026):
   - **Standardized button row** on every deploy project card:
+    `Deploy · Preview · Redeploy · Copy URL · Clone · Download · Code Review · Health`.
+  - **Copy URL / Clone (POST /clone) / Inline domain editor (PATCH /domain)**.
+  - **Run code review** — `POST /api/operator/deploy/{id}/code-review` snapshots
+    repo via GitHub API → `gpt-4o` via emergentintegrations → structured
+    JSON verdict, summary, findings, missing-files; persisted on the project
+    as `last_code_review` and rendered in `CodeReviewDialog`.
+  - **Per-project code download** — proxies GitHub's zipball as a streaming
+    response.
+  - **Self-source download** — `GET /api/operator/deploy/self/download-app`
+    zips `/app` (skipping node_modules/.git/build/.env-contents), adds a
+    DOWNLOAD_README.txt, ~580 KB at the moment of writing.
+
+- ✅ **Ship-gate + Chat-scroll preservation + Deploy refactor** (Feb 2026):
+  - **Ship-gate (production deploys)**: `_trigger_deploy` now refuses
+    production targets with `HTTP 412 {detail:{error:'review_blocked',
+    review, fix_chat_session_id, message}}` whenever the project's most
+    recent `last_code_review.verdict == 'do_not_ship'`. Preview deploys are
+    unaffected so the operator can sanity-check fixes before re-running the
+    review.
+  - **Auto-seeded "fix chat"**: when the gate fires we synthesously create a
+    fresh `ChatSession` owned by the operator + a single user message that
+    embeds the failing review summary, every finding (severity-tagged), and
+    asks the AI to propose concrete patches. Returned id is surfaced to the
+    UI so one click jumps straight to the conversation.
+  - **Operator override**: `DeployRequest.bypass_review: bool = False`. When
+    the operator clicks "Ship anyway" the front-end re-issues the deploy with
+    `bypass_review=true`. AI-surface callers can also override but default
+    stays safe so autonomous agents have to make an explicit decision.
+  - **ShipGateDialog.jsx** — new modal lists up to 6 findings + total counts
+    + two action buttons ("Open fix chat" / "Ship anyway") with full testid
+    surface (`ship-gate-{id}`, `ship-gate-bypass-{id}`,
+    `ship-gate-open-chat-{id}`, `ship-gate-finding-{id}-N`). Auto-closes on
+    ANY deploy outcome (success or non-gate error) so it never lingers.
+  - **Chat scroll fix**: Dashboard.jsx no longer force-pins to the bottom
+    on every streamed token. New `stickToBottom` state flips off as soon as
+    the user scrolls > 80px above the bottom; the `onScrollContainer`
+    handler re-arms it when they scroll back down. A floating
+    `data-testid="jump-to-latest"` button appears when not pinned (and there
+    are messages) — clicking it scrolls to the latest and resumes following.
+  - **OpsDeploySection refactor**: 850 → 350 lines. Extracted
+    `CodeReviewDialog.jsx`, `CloneProjectDialog.jsx`, `ProjectRow.jsx`,
+    `ShipGateDialog.jsx` into `/app/frontend/src/pages/operator/ops/deploy/`.
+    `window.prompt` replaced by a shadcn Dialog for cloning
+    (`clone-dialog-{id}` + `clone-dialog-name-{id}` + `clone-dialog-confirm-{id}`).
+  - **Regression**: backend now at **50 passed + 1 skipped** with the new
+    `tests/test_p3_ship_gate.py` (6 tests: production 412 / shape / chat
+    seeded / bypass / preview / AI surface).
+
+
+  - **Standardized button row** on every deploy project card:
     `Deploy · Preview · Redeploy · Copy URL · Clone · Download · Code Review · Health`
     (testids: `deploy-{id}`, `copy-url-{id}`, `clone-{id}`, `download-{id}`,
     `code-review-{id}`, `health-{id}`, etc).
