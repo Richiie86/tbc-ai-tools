@@ -50,6 +50,7 @@ from deploy_projects_ext import setup_routers as setup_deploy_routers
 from notifications_ext import setup as setup_notifications
 from github_webhook_ext import router as github_webhook_router
 from birthday_ext import router as birthday_router, birthday_scheduler_loop
+from analytics_ext import router as analytics_router
 from self_edit_ext import router as self_edit_router
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -1383,6 +1384,7 @@ app.include_router(setup_notifications(db))
 app.include_router(github_webhook_router)
 app.include_router(birthday_router)
 app.include_router(self_edit_router)
+app.include_router(analytics_router)
 # app.include_router(marketplace_router)  # Marketplace deferred — skipped per user.
 app.add_middleware(
     CORSMiddleware,

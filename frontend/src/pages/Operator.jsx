@@ -7,6 +7,7 @@ import {
   Users, CreditCard, MessageSquare, DollarSign, Loader2, ShieldCheck, Mail,
   Code2, Sparkles, Wallet, KeyRound, Settings as SettingsIcon, Coins,
   FolderKanban, Activity, ScrollText, Megaphone, MessageCircle, FlaskConical,
+  TrendingUp,
 } from 'lucide-react';
 
 import PlansTab     from './operator/PlansTab';
@@ -22,6 +23,7 @@ import AuditTab     from './operator/AuditTab';
 import MarketingTab from './operator/MarketingTab';
 import MessagingTab from './operator/MessagingTab';
 import SandboxTab   from './operator/SandboxTab';
+import AnalyticsTab from './operator/AnalyticsTab';
 import { StatCard }      from './operator/StatCard';
 import { StatsToolbar }  from './operator/StatsToolbar';
 import { UsersTab }      from './operator/UsersTab';
@@ -110,6 +112,7 @@ export default function Operator() {
             <Tabs value={activeTab} onValueChange={setActiveTab} className="mt-10">
               <TabsList className="bg-ink-900 border border-tbc-900/60 flex flex-wrap h-auto">
                 <TabTrigger value="users"     icon={Users}>Users ({users.length})</TabTrigger>
+                <TabTrigger value="analytics" icon={TrendingUp}>Analytics</TabTrigger>
                 <TabTrigger value="projects"  icon={FolderKanban}>Projects</TabTrigger>
                 <TabTrigger value="plans"     icon={Sparkles}>Plans</TabTrigger>
                 <TabTrigger value="payments"  icon={CreditCard}>Payments</TabTrigger>
@@ -130,6 +133,8 @@ export default function Operator() {
               <TabsContent value="users" className="mt-5">
                 <UsersTab users={users} onChanged={loadAll} />
               </TabsContent>
+
+              <TabsContent value="analytics" className="mt-5"><AnalyticsTab /></TabsContent>
 
               <TabsContent value="plans"     className="mt-5"><PlansTab /></TabsContent>
               <TabsContent value="projects"  className="mt-5"><ProjectsTab /></TabsContent>

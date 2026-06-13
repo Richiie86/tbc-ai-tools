@@ -12,6 +12,20 @@ gold theme. Domain: **tbctools.org**.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
 ## Implemented
+- ✅ **Revenue analytics dashboard** (Feb 2026):
+  - New backend endpoint `GET /api/operator/analytics/30d` aggregates
+    paid `payment_transactions`, new `users`, `referral_earnings`, and
+    birthday `user_notifications` into 4 daily series + 30-day totals.
+    Zero new collections — built off existing data.
+  - New `Analytics` tab in the Operator Console (between Users and
+    Projects) with four sparkline metric cards (Revenue / Signups /
+    Referrals / Birthday credits), each with a 7d-vs-7d delta pct, and a
+    "Growth snapshot" band of derived KPIs (avg signups/day, avg revenue/day,
+    referral attribution %, birthday rewards/day). Inline SVG sparklines —
+    no chart library added so the bundle stays lean.
+  - 3 new backend tests in `test_p6_5_analytics.py` (auth-required, shape,
+    seeded-data delta). Backend suite now **88/88**.
+
 - ✅ **Component refactor + UI gaps closed + GitHub webhook live-validated** (Feb 2026):
   - **Refactor**: Operator.jsx 444→158 lines; Dashboard.jsx 380→343 lines.
     New modules: `operator/StatCard.jsx`, `operator/StatsToolbar.jsx`,
