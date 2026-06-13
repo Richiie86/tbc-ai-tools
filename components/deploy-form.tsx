@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useRouter } from "next/navigation"
-import { GitBranch, History, Trash2, Pencil, Plus } from "lucide-react"
+import { GitBranch, History, Trash2, Pencil, Plus, ExternalLink } from "lucide-react"
 import { DeployButton } from "@/components/deploy-button"
 import { upsertProject, deleteProject, recordDeployment } from "@/app/actions/projects"
 import type { Project } from "@/lib/db/schema"
@@ -125,6 +125,16 @@ export function DeployForm({ initialProjects }: { initialProjects: Project[] }) 
                 <code className="rounded bg-muted px-1 py-0.5 text-[0.7rem]">tbctools/my-app</code>
                 {". Must be connected to your Vercel account."}
               </p>
+              <a
+                href="https://github.com/settings/repositories"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-xs font-medium text-primary underline-offset-4 hover:underline"
+              >
+                <GitBranch className="size-3" aria-hidden="true" />
+                {"Find your repos on GitHub"}
+                <ExternalLink className="size-3" aria-hidden="true" />
+              </a>
             </div>
           </div>
 
