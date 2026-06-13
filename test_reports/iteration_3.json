@@ -1,0 +1,52 @@
+{
+  "summary": "Full e2e regression + new-feature verification for the deploy-projects additions (clone, inline domain edit, per-project download, self-source download, AI code review). Backend: 44 passed + 1 prior skip (28 prior regression in test_p0_review.py + test_p1_refactor.py still green; 16 new tests in test_p2_deploy_extras.py all green). Frontend: operator login → /operator → Ops tab → Vercel deploys section renders 11 project rows, every row has all 8 expected data-testids (deploy/preview/redeploy/copy-url/clone/download/code-review/health). Verified end-to-end: Copy URL (no crash), 'Download this app' (downloads 580 KB tbctools-self-*.zip with sanitized .env, server.py + deploy_projects_ext.py + DOWNLOAD_README.txt inside), per-project Download (octocat/Hello-World-master.zip), Clone via window.prompt (creates new row 'E2E Cloned Project' with blank domain & focused inline editor), inline domain PATCH (saves successfully, row re-renders with new domain link). Code Review button does not crash the page but UX is incomplete — see issue below.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "OpsDeploySection — ProjectRow Code Review button",
+        "issue": "When the backend code-review request fails (we observed gateway 502 — upstream LLM/GitHub took >timeout), no toast is shown and the review-dialog does not open, so the operator sees nothing happen. The button correctly does NOT crash the page, but the silent failure leaves the user without feedback. Recommend surfacing a toast on the .catch() of the code-review call (and ideally a spinner on the button while in-flight).",
+        "selector": "[data-testid=\"code-review-{id}\"]",
+        "priority": "MEDIUM"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_p0_review.py",
+    "/app/backend/tests/test_p1_refactor.py",
+    "/app/backend/tests/test_p2_deploy_extras.py",
+    "/app/test_reports/pytest/iter3_full.xml",
+    "/app/test_reports/pytest/iter3_p2.xml",
+    "/app/test_reports/pytest/iter3_regression.xml"
+  ],
+  "action_items": [
+    "(Optional UX) Wire a toast.error(...) on the code-review request's catch handler so an operator gets visible feedback when GitHub rate-limits or the LLM call fails (currently only a console-level 502 is visible). Also add an in-flight spinner state on the Code Review button.",
+    "(Optional UX) The 'P2 Test Project (copy)' rows show 'my-app.tbctools.org' in the domain input as PLACEHOLDER text (empty domain) — visually it looks like a real domain value; consider greying the placeholder more obviously or showing an explicit 'No domain set' chip so cloned rows are easier to spot at a glance."
+  ],
+  "critical_code_review_comments": [
+    "deploy_projects_ext._build_self_zip walks /app synchronously inside asyncio.to_thread — fine today (~580 KB output) but if the codebase grows past ~50 MB this will block the thread pool. Worth streaming with a zipfile.ZipFile written to a tempfile and StreamingResponse over file.read(64*1024).",
+    "_run_code_review imports emergentintegrations and `os` inside the function body — `os` is already imported at module scope (line 30). The inner `import os` is dead code and can be removed.",
+    "_fetch_repo_snapshot caps total_chars to 40k and per-file 6k; for large repos this means only ~10 files reach the LLM. Worth surfacing `files_sampled` count on the UI dialog so the operator knows how much of the repo was actually reviewed (already returned in payload, just not rendered).",
+    "Per-project /download endpoint streams from GitHub but doesn't catch httpx.ReadTimeout / NetworkError inside `_stream_github_zip` — a slow GitHub will cause the StreamingResponse to abort mid-flight with a generic 500 in the browser. Wrap the iter in a try/except and log; the response can't be amended once started but at least the server log will explain.",
+    "Frontend OpsDeploySection.jsx is 800+ lines — consider extracting CodeReviewDialog and ProjectRow into their own files now that they each have non-trivial state machines (review fetch, domain editor, copy-url icon swap).",
+    "OpsDeploySection's clone uses window.prompt() — works but is jarring vs the rest of the design system (everywhere else uses shadcn Dialog). Consider replacing with a small modal so the new-name input matches the rest of the operator console."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_p2_deploy_extras.py"
+  ],
+  "success_rate": {
+    "backend": "100% (44/44 passed, 1 prior skip preserved)",
+    "frontend": "95% — all required testids present, all download/copy/clone/domain flows verified; only gap is silent code-review error UX"
+  },
+  "test_credentials": "Operator rac.investments.swe@gmail.com / 123Admin@98. RESET_OPERATOR_PASSWORD=true clears 2FA on boot; first login lands on /setup-2fa, navigate directly to /operator.",
+  "seed_data_creation": "Test created one project (octocat/Hello-World), three clones, and one E2E clone via the UI. They persist in deploy_projects collection; safe to leave or prune (all share octocat/Hello-World repo).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Regression suite is now in three files: test_p0_review.py (cookie/2FA/codes-file), test_p1_refactor.py (ops/health, withdraw/cron, test-connection, transactions/export, billing-portal, credit-packs, deploy CRUD + AI surface deploy validation), test_p2_deploy_extras.py (clone, PATCH domain, per-project download, self-source download with .env sanitization + new-feature presence, code-review reachable). Run all: `cd /app/backend && python -m pytest -q tests/`. Code-review endpoint can return 502 (HTML from gateway) when LLM is slow — tests handle this; if upstream gets fast we should also assert structured JSON. Frontend self-download zip is 580 KB, contains tbctools-self/backend/deploy_projects_ext.py and tbctools-self/DOWNLOAD_README.txt; .env files inside contain only the placeholder comment, no live secrets.",
+  "rca of the issue": "Code Review silent-failure RCA: ProjectRow's onCodeReview handler likely awaits the POST without a .catch that toasts the error. Backend returns 502 via gateway (HTML body) when the LLM call exceeds Cloudflare's 100s edge timeout; client sees a generic fetch error. Fix: wrap the call in try/finally and on catch call toast.error(err?.response?.data?.detail || 'Code review failed').  Reproduction: log in as operator → Ops → click 'Code Review' on any project → observe nothing happens and console shows 'Failed to load resource: 502'."
+}
