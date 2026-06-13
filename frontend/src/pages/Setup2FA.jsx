@@ -98,8 +98,9 @@ export default function Setup2FA() {
                 <button
                   type="button"
                   data-testid="skip-2fa-setup"
+                  disabled={!user}
                   onClick={() => navigate(user?.role === 'operator' ? '/operator' : '/dashboard')}
-                  className="mt-3 inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-tbc-300"
+                  className="mt-3 inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-tbc-300 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <SkipForward className="h-3 w-3" />
                   Skip for now — open {user?.role === 'operator' ? 'Operator Console' : 'Dashboard'}

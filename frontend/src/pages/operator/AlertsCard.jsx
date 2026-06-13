@@ -272,7 +272,7 @@ export default function AlertsCard() {
         </Button>
         {cfg?.last_fired_day && (
           <span data-testid="alerts-last-fired" className="ml-auto text-[11px] text-tbc-200/60">
-            Last fired: <span className="font-mono text-tbc-200">{cfg.last_fired_day}</span>
+            Last fired: <span className="font-mono text-tbc-200">{String(cfg.last_fired_day).trim()}</span>
           </span>
         )}
       </div>
