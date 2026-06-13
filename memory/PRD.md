@@ -12,6 +12,19 @@ gold theme. Domain: **tbctools.org**.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
 ## Implemented
+- ✅ **Inline Vercel domain editor click bug fix** (Feb 2026):
+  - Iter_12 testing revealed pencil click on `[data-testid='domain-edit-{id}']` did NOT
+    open the inline domain input — an adjacent sibling DOM element was absorbing the
+    click. Iter_13 re-verified the fix at 16/16 (100%).
+  - Fix in `frontend/src/pages/operator/ops/deploy/ProjectRow.jsx`:
+    `relative z-10` on the inline-domain wrapper, pencil hit-area bumped to
+    `p-1.5 + h-3 w-3` (was `p-0.5 + h-2.5 w-2.5`), and `type='button'` on the
+    pencil to eliminate any form-submit semantics.
+  - Full re-test passes: open editor → type → save → toast → close → restore.
+    Deploy / Preview / Redeploy / Copy URL / Clone / Code Review / Autopilot /
+    Health / Promote AlertDialog all wired correctly. Test report at
+    `/app/test_reports/iteration_13.json`.
+
 - ✅ **Unkillable 10% founder royalty + secrets hardening + workspace switcher** (Feb 2026):
   - **Founder royalty baked into code** (`backend/founder_royalty.py`):
     `FOUNDER_EMAIL`, `FOUNDER_LICENSE_KEY`, and
