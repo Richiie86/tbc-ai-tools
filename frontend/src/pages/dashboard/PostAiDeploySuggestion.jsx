@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { toast } from 'sonner';
-import { Rocket, Loader2, X, Activity, ShieldCheck, Eye, ExternalLink } from 'lucide-react';
+import { Rocket, Loader2, X, Activity, ShieldCheck, Eye, ExternalLink, BadgeCheck } from 'lucide-react';
 import api from '../../lib/api';
 
 const STORAGE_KEY = 'tbc.inChat.selectedProjectId';
@@ -58,6 +58,7 @@ export function PostAiDeploySuggestion({ user, visible, onDismiss }) {
     return (
       <PreviewReadyPill
         url={previewUrl}
+        projectId={projectId}
         onDismiss={() => {
           writePreview('');
           setPreviewUrl('');
@@ -161,8 +162,15 @@ export function PostAiDeploySuggestion({ user, visible, onDismiss }) {
  * "Your Preview is ready" pill — Emergent-style. Sits above the message
  * field, shows a tiny live-preview thumbnail (sandboxed iframe), and
  * clicking opens the full URL in a new tab.
+ *
+ * Optional `projectId` enables a one-click "Promote to prod" gate that
+ * calls Vercel's promote API — letting the operator ship the exact build
+ * they just eyeballed, without leaving the chat.
  */
-export function PreviewReadyPill({ url, onDismiss }) {
+export function PreviewReadyPill({ url, projectId, onDismiss }) {
+  const [promoting, setPromoting] = useState(false);
+  const [promoted, setPromoted] = useState(false);
+
   const open = () => {
     try { window.open(url, '_blank', 'noopener,noreferrer'); }
     catch { window.location.href = url; }
@@ -172,16 +180,40 @@ export function PreviewReadyPill({ url, onDismiss }) {
     try { return new URL(url).host; } catch { return url; }
   })();
 
+  const promote = async (e) => {
+    e.stopPropagation();
+    if (!projectId) return;
+    if (!window.confirm('Promote this preview to production?\nIt will become live at the project domain.')) return;
+    setPromoting(true);
+    try {
+      const { data } = await api.post(`/operator/deploy/${projectId}/promote`, {});
+      const prodUrl = data?.production_url || data?.url || url;
+      toast.success('Promoted to production');
+      setPromoted(true);
+      // Bump the iframe to the production URL so the thumbnail reflects
+      // the live site, not the now-old preview.
+      try { window.open(prodUrl, '_blank', 'noopener,noreferrer'); } catch { /* ignore */ }
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Promote failed');
+    } finally {
+      setPromoting(false);
+    }
+  };
+
   return (
-    <button
-      type="button"
-      onClick={open}
+    <div
       data-testid="preview-ready-pill"
-      className="group relative mx-auto my-3 flex max-w-fit cursor-pointer items-center gap-3 rounded-full border border-tbc-500/30 bg-ink-900/95 py-1.5 pl-1.5 pr-4 text-left shadow-[0_8px_28px_rgba(0,0,0,0.45)] backdrop-blur transition hover:border-tbc-400/60 hover:shadow-[0_8px_28px_rgba(212,160,40,0.25)]"
+      className="group relative mx-auto my-3 flex max-w-fit items-center gap-3 rounded-full border border-tbc-500/30 bg-ink-900/95 py-1.5 pl-1.5 pr-2 text-left shadow-[0_8px_28px_rgba(0,0,0,0.45)] backdrop-blur transition hover:border-tbc-400/60 hover:shadow-[0_8px_28px_rgba(212,160,40,0.25)]"
     >
-      {/* Tiny sandboxed live-preview thumbnail. pointer-events:none keeps
-          the click on the parent so the whole pill opens the URL. */}
-      <span className="relative grid h-9 w-9 shrink-0 overflow-hidden rounded-full bg-ink-950 ring-1 ring-tbc-500/20">
+      {/* Tiny sandboxed live-preview thumbnail. The whole thumbnail is a
+          click-target for opening the URL — the promote button below is
+          a sibling so its own click won't trigger the open. */}
+      <button
+        type="button"
+        onClick={open}
+        data-testid="preview-ready-open"
+        className="relative grid h-9 w-9 shrink-0 cursor-pointer overflow-hidden rounded-full bg-ink-950 ring-1 ring-tbc-500/20"
+      >
         <iframe
           src={url}
           title="preview thumbnail"
@@ -194,27 +226,57 @@ export function PreviewReadyPill({ url, onDismiss }) {
         <span className="absolute inset-0 grid place-items-center bg-ink-950/40">
           <Eye className="h-3.5 w-3.5 text-tbc-200" />
         </span>
-      </span>
-      <span className="flex flex-col leading-tight">
-        <span className="text-xs font-bold text-tbc-50">Your Preview is ready</span>
+      </button>
+
+      <button
+        type="button"
+        onClick={open}
+        data-testid="preview-ready-text"
+        className="flex flex-col leading-tight pr-2 text-left cursor-pointer"
+      >
+        <span className="text-xs font-bold text-tbc-50">
+          {promoted ? 'Promoted to production' : 'Your Preview is ready'}
+        </span>
         <span className="flex items-center gap-1 text-[10px] text-tbc-200/60">
           <span className="truncate">{host}</span>
           <ExternalLink className="h-2.5 w-2.5" />
         </span>
-      </span>
-      <span
-        role="button"
-        tabIndex={0}
+      </button>
+
+      {/* Promote-to-prod gate — only shows when we know the project id. */}
+      {projectId && !promoted && (
+        <button
+          type="button"
+          onClick={promote}
+          disabled={promoting}
+          data-testid="preview-promote-btn"
+          title="Promote this preview to production"
+          className="ml-1 inline-flex items-center gap-1.5 rounded-full bg-tbc-500 px-3 py-1 text-[11px] font-bold text-ink-950 transition hover:bg-tbc-400 disabled:opacity-50"
+        >
+          {promoting
+            ? <Loader2 className="h-3 w-3 animate-spin" />
+            : <BadgeCheck className="h-3 w-3" />}
+          {promoting ? 'Promoting…' : 'Promote to prod'}
+        </button>
+      )}
+      {promoted && (
+        <span
+          data-testid="preview-promoted-badge"
+          className="ml-1 inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2.5 py-1 text-[11px] font-bold text-emerald-300"
+        >
+          <BadgeCheck className="h-3 w-3" /> Live
+        </span>
+      )}
+
+      <button
+        type="button"
         onClick={(e) => { e.stopPropagation(); onDismiss?.(); }}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); onDismiss?.(); }
-        }}
         data-testid="preview-ready-dismiss"
         aria-label="Dismiss preview pill"
         className="ml-1 grid h-5 w-5 shrink-0 place-items-center rounded-full text-tbc-200/50 transition-colors hover:bg-ink-950 hover:text-tbc-100"
       >
         <X className="h-3 w-3" />
-      </span>
-    </button>
+      </button>
+    </div>
   );
 }

@@ -28,18 +28,25 @@ def test_operator_delete_writes_audit_row_with_operator_ui_via():
     pid = f'TEST_del_{uuid.uuid4().hex[:8]}'
     import asyncio, sys
     sys.path.insert(0, '/app/backend')
-    from server import db as _db  # type: ignore
+    from motor.motor_asyncio import AsyncIOMotorClient  # noqa: E402
     from datetime import datetime, timezone
 
     async def _insert():
-        await _db.deploy_projects.insert_one({
-            'id': pid,
-            'projectName': f'TEST_del_{pid}',
-            'repo': 'octocat/Hello-World',
-            'domain': None,
-            'created_at': datetime.now(timezone.utc),
-            'updated_at': datetime.now(timezone.utc),
-        })
+        # Fresh Motor client bound to *this* event loop. Avoids the
+        # "Future attached to a different loop" failure when this test
+        # runs after other async tests in the same pytest session.
+        client = AsyncIOMotorClient(os.environ['MONGO_URL'])
+        try:
+            await client[os.environ['DB_NAME']].deploy_projects.insert_one({
+                'id': pid,
+                'projectName': f'TEST_del_{pid}',
+                'repo': 'octocat/Hello-World',
+                'domain': None,
+                'created_at': datetime.now(timezone.utc),
+                'updated_at': datetime.now(timezone.utc),
+            })
+        finally:
+            client.close()
     asyncio.run(_insert())
 
     # Now DELETE

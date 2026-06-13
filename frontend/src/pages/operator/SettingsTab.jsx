@@ -8,6 +8,7 @@ import {
 } from '../../components/ui/select';
 import { toast } from 'sonner';
 import { Loader2, KeyRound, Save, Lock, Eye, EyeOff, Plug, Mail, Sparkles, UserPlus, Rocket } from 'lucide-react';
+import SecretsCard from './SecretsCard';
 
 export default function SettingsTab() {
   const [settings, setSettings] = useState(null);
@@ -302,39 +303,15 @@ export default function SettingsTab() {
 
       <Section icon={Rocket} title="Vercel deploy & AI integration">
         <p className="text-xs text-tbc-200/60">
-          Pasting these here is identical to pasting them in the Ops tab —
-          settings live in one place. They power the Deploy / Redeploy /
+          Settings live in one place. They power the Deploy / Redeploy /
           Preview buttons, the per-project Health Check, and the Bearer-token
           authenticated <code className="rounded bg-ink-950 px-1 text-tbc-300">/api/projects</code> surface.
         </p>
 
-        <KeyRow
-          label="Vercel Personal Access Token"
-          fieldKey="vercel_token"
-          isSet={settings.vercel_token_set}
-          masked={settings.vercel_token_masked}
-          value={form.vercel_token}
-          reveal={reveal.vercel_token}
-          onReveal={() => toggleReveal('vercel_token')}
-          onChange={(v) => setForm({ ...form, vercel_token: v })}
-          onSave={() => save({ vercel_token: form.vercel_token })}
-          onClear={() => clearKey('vercel_token')}
-          placeholder="Paste your Vercel PAT (vercel.com/account/tokens)"
-        />
-
-        <KeyRow
-          label="GitHub Personal Access Token"
-          fieldKey="github_token"
-          isSet={settings.github_token_set}
-          masked={settings.github_token_masked}
-          value={form.github_token}
-          reveal={reveal.github_token}
-          onReveal={() => toggleReveal('github_token')}
-          onChange={(v) => setForm({ ...form, github_token: v })}
-          onSave={() => save({ github_token: form.github_token })}
-          onClear={() => clearKey('github_token')}
-          placeholder="Paste your GitHub PAT — needs Contents: Write for auto-fix"
-        />
+        {/* Rotation-friendly Vercel + GitHub key field. Test before save,
+            auto-clears input, and shows "rotated N days ago" with amber/red
+            warnings as the token ages toward expiry. */}
+        <SecretsCard settings={settings} onChanged={load} />
 
         <div className="flex items-center gap-3">
           <span className="w-32 text-xs text-tbc-200/60">Team ID</span>

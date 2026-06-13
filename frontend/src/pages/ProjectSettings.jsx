@@ -8,7 +8,7 @@ import { Card } from '../components/ui/card';
 import { toast } from 'sonner';
 import {
   ArrowLeft, Mail, KeyRound, Save, Loader2, Plus, Trash2,
-  Rocket, Activity, ShieldCheck, RotateCw,
+  Rocket, Activity, ShieldCheck, RotateCw, BadgeCheck,
 } from 'lucide-react';
 import { PreviewReadyPill } from './dashboard/PostAiDeploySuggestion';
 
@@ -120,22 +120,25 @@ export default function ProjectSettings() {
   };
 
   const runAction = async (kind) => {
+    if (kind === 'promote' && !window.confirm('Promote the latest preview to production?')) return;
     setBusy(kind);
     try {
       const map = {
         deploy: `/operator/deploy/${projectId}/deploy`,
         redeploy: `/operator/deploy/${projectId}/redeploy`,
+        promote: `/operator/deploy/${projectId}/promote`,
         health: `/operator/deploy/${projectId}/healthcheck`,
         review: `/operator/deploy/${projectId}/code-review`,
       };
       const { data: res } = await api.post(map[kind], {});
-      if ((kind === 'deploy' || kind === 'redeploy')) {
-        const u = res?.url || res?.deployment_url || res?.preview_url;
+      if ((kind === 'deploy' || kind === 'redeploy' || kind === 'promote')) {
+        const u = res?.production_url || res?.url || res?.deployment_url || res?.preview_url;
         if (u) setPreviewUrl(u.startsWith('http') ? u : `https://${u}`);
       }
       const label = {
         deploy: `Deploy queued — ${res?.url || res?.id || 'OK'}`,
         redeploy: `Redeploy queued — ${res?.url || res?.id || 'OK'}`,
+        promote: `Promoted to production — ${res?.production_url || res?.url || 'OK'}`,
         health: `Health: ${res?.status || (res?.ok ? 'OK' : 'unknown')}`,
         review: `Review: ${res?.verdict || res?.summary || 'done'}`,
       }[kind];
@@ -178,6 +181,7 @@ export default function ProjectSettings() {
           <div className="flex flex-wrap items-center gap-2" data-testid="project-settings-actions">
             <ActionBtn label="Deploy"     icon={Rocket}       tone="primary" busy={busy==='deploy'}   disabled={!!busy} onClick={() => runAction('deploy')}    testid="proj-set-deploy" />
             <ActionBtn label="Redeploy"   icon={RotateCw}     tone="ghost"   busy={busy==='redeploy'} disabled={!!busy} onClick={() => runAction('redeploy')}  testid="proj-set-redeploy" />
+            <ActionBtn label="Promote"    icon={BadgeCheck}   tone="emerald" busy={busy==='promote'}  disabled={!!busy} onClick={() => runAction('promote')}   testid="proj-set-promote" />
             <ActionBtn label="Health"     icon={Activity}     tone="ghost"   busy={busy==='health'}   disabled={!!busy} onClick={() => runAction('health')}    testid="proj-set-health" />
             <ActionBtn label="Code Review" icon={ShieldCheck} tone="ghost"   busy={busy==='review'}   disabled={!!busy} onClick={() => runAction('review')}    testid="proj-set-review" />
           </div>
@@ -185,7 +189,7 @@ export default function ProjectSettings() {
 
         {previewUrl && (
           <div className="mb-4 flex justify-center">
-            <PreviewReadyPill url={previewUrl} onDismiss={() => setPreviewUrl('')} />
+            <PreviewReadyPill url={previewUrl} projectId={projectId} onDismiss={() => setPreviewUrl('')} />
           </div>
         )}
 
@@ -333,8 +337,9 @@ function Field({ label, children }) {
 
 function ActionBtn({ label, icon: Icon, tone, busy, disabled, onClick, testid }) {
   const base = 'inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-40';
-  const styles = tone === 'primary'
-    ? 'bg-tbc-500 text-ink-950 hover:bg-tbc-400'
+  const styles =
+    tone === 'primary' ? 'bg-tbc-500 text-ink-950 hover:bg-tbc-400'
+    : tone === 'emerald' ? 'bg-emerald-500 text-ink-950 hover:bg-emerald-400'
     : 'border border-tbc-900/60 bg-ink-900 text-tbc-100 hover:bg-ink-950';
   return (
     <button

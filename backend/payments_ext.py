@@ -623,6 +623,10 @@ async def op_get_settings(_: dict = Depends(get_current_operator)):
         # auto-fix (committing patches back).
         'github_token_set': bool(doc.get('github_token')),
         'github_token_masked': _mask_key(doc.get('github_token')),
+        # Rotation timestamps so the Secrets UI can show "rotated N days ago"
+        # and proactively nag the operator before tokens expire.
+        'vercel_token_rotated_at': doc.get('vercel_token_rotated_at'),
+        'github_token_rotated_at': doc.get('github_token_rotated_at'),
     }
 
 
@@ -644,12 +648,18 @@ async def op_update_settings(payload: dict, _: dict = Depends(get_current_operat
         'github_token',
     }
     updates = {}
+    now = datetime.now(timezone.utc).isoformat()
+    rotation_tracked = {'vercel_token', 'github_token'}
     for k, v in payload.items():
         if k not in allowed:
             continue
         if isinstance(v, str) and v.strip() == '':
             continue
         updates[k] = v
+        # Track rotation so the Secrets UI can warn the operator when a
+        # token has been in use for a long time.
+        if k in rotation_tracked:
+            updates[f'{k}_rotated_at'] = now
     if updates:
         await db.settings.update_one({'_id': 'payment_settings'}, {'$set': updates}, upsert=True)
     return {'success': True, 'updated_keys': list(updates.keys())}
@@ -660,8 +670,73 @@ async def op_clear_secret(key: str = Query(...), _: dict = Depends(get_current_o
     db = await get_db()
     if key not in {'stripe_secret_key', 'nowpayments_api_key', 'nowpayments_ipn_secret', 'paypal_client_id', 'paypal_client_secret', 'emergent_llm_key', 'resend_api_key', 'vercel_token', 'ai_api_key', 'github_token'}:
         raise HTTPException(400, 'Cannot clear this key')
-    await db.settings.update_one({'_id': 'payment_settings'}, {'$set': {key: None}})
+    unset_extra = {}
+    if key in {'vercel_token', 'github_token'}:
+        unset_extra[f'{key}_rotated_at'] = None
+    await db.settings.update_one(
+        {'_id': 'payment_settings'},
+        {'$set': {key: None, **unset_extra}},
+    )
     return {'success': True}
+
+
+@router.post('/operator/keys/test')
+async def op_test_key(
+    payload: dict = Body(...),
+    _: dict = Depends(get_current_operator),
+):
+    """Live-validate a Vercel or GitHub PAT *before* saving it.
+
+    Lets the Secrets UI fail fast if the operator pastes an expired or
+    wrong-scope token. Body shape: {"kind": "vercel"|"github", "value": "<token>"}
+    The token is *never* logged.
+    """
+    kind = (payload.get('kind') or '').strip().lower()
+    value = (payload.get('value') or '').strip()
+    if kind not in {'vercel', 'github'}:
+        raise HTTPException(400, 'Unsupported key kind')
+    if not value:
+        raise HTTPException(400, 'Empty token')
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            if kind == 'vercel':
+                r = await client.get(
+                    'https://api.vercel.com/v2/user',
+                    headers={'Authorization': f'Bearer {value}'},
+                )
+                if r.status_code == 200:
+                    u = (r.json().get('user') or r.json())
+                    return {
+                        'ok': True,
+                        'identity': u.get('username') or u.get('email') or 'OK',
+                        'message': 'Vercel token valid',
+                    }
+                return {
+                    'ok': False,
+                    'message': f'Vercel rejected the token ({r.status_code}). Check expiry & scopes.',
+                }
+            # github
+            r = await client.get(
+                'https://api.github.com/user',
+                headers={
+                    'Authorization': f'Bearer {value}',
+                    'Accept': 'application/vnd.github+json',
+                },
+            )
+            if r.status_code == 200:
+                u = r.json()
+                return {
+                    'ok': True,
+                    'identity': u.get('login') or 'OK',
+                    'message': 'GitHub token valid',
+                }
+            return {
+                'ok': False,
+                'message': f'GitHub rejected the token ({r.status_code}). Check expiry & scopes (needs Contents: Write).',
+            }
+        except httpx.HTTPError as e:
+            return {'ok': False, 'message': f'Network error: {e}'}
 
 
 # ===================================================================

@@ -36,7 +36,7 @@ from pathlib import Path
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -267,6 +267,47 @@ async def _vercel_get_deployment(settings: dict, deployment_id: str) -> dict:
             err = {'message': r.text[:300]}
         raise HTTPException(502, f"Vercel get-deployment: {err.get('message') or err.get('code')}")
     return r.json()
+
+
+async def _vercel_promote_to_production(settings: dict, project_vercel_id: str, deployment_id: str) -> dict:
+    """Promote an already-built preview deployment to production via Vercel's
+    project-level promote endpoint.
+
+    Endpoint: `POST /v10/projects/{projectId}/promote/{deploymentId}`
+    This reuses the existing build artifact (zero rebuild) — way faster
+    than re-deploying from git and the standard pattern for "ship the
+    preview I just eyeballed".
+
+    Returns the raw Vercel response (usually a deployment object with
+    target='production' once accepted).
+    """
+    token = (settings or {}).get('vercel_token')
+    if not token:
+        raise HTTPException(503, 'Vercel token not configured.')
+    if not project_vercel_id:
+        raise HTTPException(400, 'Project has no vercel_project_id yet — deploy at least once before promoting.')
+    if not deployment_id:
+        raise HTTPException(400, 'No preview deployment to promote — run Deploy first.')
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        r = await client.post(
+            f'{VERCEL_API}/v10/projects/{project_vercel_id}/promote/{deployment_id}',
+            params=_vercel_team_qs(settings),
+            headers={'Authorization': f'Bearer {token}'},
+        )
+    if r.status_code >= 400:
+        try:
+            err = r.json().get('error', {})
+        except Exception:
+            err = {'message': r.text[:300]}
+        raise HTTPException(
+            502,
+            f"Vercel promote: {err.get('message') or err.get('code') or 'failed'}",
+        )
+    # Vercel sometimes returns 200 with empty body — wrap defensively.
+    try:
+        return r.json() if r.content else {}
+    except Exception:
+        return {}
 
 
 # ---------- Outbound webhook ------------------------------------------
@@ -815,6 +856,12 @@ async def op_deploy_project(
     )
 
 
+class PromoteRequest(BaseModel):
+    """Optional override — usually we promote `last_deployment_id` but the
+    operator may want to ship a specific older preview."""
+    deployment_id: Optional[str] = None
+
+
 @ops_router.post('/{project_id}/redeploy')
 async def op_redeploy_project(
     project_id: str,
@@ -822,6 +869,39 @@ async def op_redeploy_project(
 ):
     settings = await get_settings_doc()
     return await _trigger_redeploy(project_id, settings)
+
+
+@ops_router.post('/{project_id}/promote')
+async def op_promote_project(
+    project_id: str,
+    request: Request,
+    payload: PromoteRequest = Body(default=None),
+    op: dict = Depends(get_current_operator),
+):
+    """Operator-driven one-click "ship the preview I just looked at" button.
+    Promotes the project's last preview deployment to production via
+    Vercel's promote API and audit-logs the action with the actor email."""
+    settings = await get_settings_doc()
+    result = await _trigger_promote(
+        project_id, settings, payload.deployment_id if payload else None,
+    )
+    try:
+        from audit_ext import record_audit
+        await record_audit(
+            op,
+            'deploy_project.promote',
+            target=project_id,
+            details={
+                'deployment_id': result.get('promoted_deployment_id'),
+                'url': result.get('url'),
+                'production_url': result.get('production_url'),
+            },
+            request=request,
+        )
+    except Exception:
+        # Audit failures must never block the operator action.
+        pass
+    return result
 
 
 # ----- AI-agent deploy actions (Bearer-token auth) ---------------------
@@ -858,6 +938,78 @@ async def ai_redeploy_project(
     """Replay the project's last deployment. Useful for "ship the same code
     again after a config change" without recomputing the source bundle."""
     return await _trigger_redeploy(project_id, settings)
+
+
+async def _trigger_promote(project_id: str, settings: dict, deployment_id: Optional[str] = None) -> dict:
+    """Shared promote-to-prod path used by both the AI API and the operator
+    endpoints. Promotes the project's last preview (or the supplied
+    `deployment_id`) to production via Vercel's promote API, writes an
+    audit-flavoured note onto the project doc, and fires the standard
+    outbound webhook so external watchers stay in sync.
+    """
+    project = await db.deploy_projects.find_one({'id': project_id})
+    if not project:
+        raise HTTPException(404, 'Project not found')
+    target_id = deployment_id or project.get('last_deployment_id')
+    if not target_id:
+        raise HTTPException(
+            400,
+            'No preview deployment recorded yet. Run Deploy first, then promote.',
+        )
+    result = await _vercel_promote_to_production(
+        settings, project.get('vercel_project_id'), target_id,
+    )
+    now = datetime.now(timezone.utc)
+    promoted_url = (
+        result.get('url')
+        or result.get('alias', [None])[0] if isinstance(result.get('alias'), list)
+        else result.get('url')
+    ) or project.get('last_deployment_url')
+    await db.deploy_projects.update_one(
+        {'id': project_id},
+        {'$set': {
+            'last_promoted_at': now,
+            'last_promoted_deployment_id': target_id,
+            'last_deployment_state': 'PROMOTED',
+            'updated_at': now,
+        }},
+    )
+    await _fire_webhook(
+        'deploy.promoted',
+        {
+            'project_id': project_id,
+            'deployment_id': target_id,
+            'promoted_url': promoted_url,
+            'project_name': project.get('projectName'),
+            'domain': project.get('domain'),
+        },
+        settings=settings,
+    )
+    return {
+        'ok': True,
+        'project_id': project_id,
+        'promoted_deployment_id': target_id,
+        'url': promoted_url,
+        'production_url': f"https://{project['domain']}" if project.get('domain') else promoted_url,
+        'promoted_at': now.isoformat(),
+    }
+
+
+class PromoteRequest_AI_Compat(BaseModel):
+    """[deprecated duplicate — kept as no-op placeholder]"""
+    deployment_id: Optional[str] = None
+
+
+@projects_router.post('/{project_id}/promote')
+async def ai_promote_project(
+    project_id: str,
+    req: PromoteRequest = Body(default=None),
+    settings: dict = Depends(_require_ai_api_key),
+):
+    """Promote the last (or specified) preview deployment to production.
+    Reuses the built artifact — no rebuild, no git fetch. Standard
+    "ship what I just eyeballed" flow."""
+    return await _trigger_promote(project_id, settings, (req.deployment_id if req else None))
 
 
 async def _ensure_self_project() -> Optional[dict]:
