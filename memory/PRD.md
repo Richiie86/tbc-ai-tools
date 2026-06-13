@@ -566,8 +566,19 @@ See `/app/memory/test_credentials.md`.
 
 ### Tests
 - New: `/app/backend/tests/test_p6_session_features.py` (14 tests),
-  `/app/backend/tests/test_p6_1_referral_credits.py` (2 tests).
-- Full suite: **76 passed, 1 skipped** (no regressions).
+  `/app/backend/tests/test_p6_1_referral_credits.py` (2 tests),
+  `/app/backend/tests/test_p6_2_operator_delete_audit.py` (2 tests).
+- Full suite: **78 passed, 1 skipped** (no regressions).
+
+### Live-token verification (2026-02)
+- Vercel PAT and GitHub PAT both validated against the live APIs and
+  stored in `payment_settings` (`vercel_token_set=True`,
+  `github_token_set=True`, masked-only echo).
+- E2E: created project `tbc-ai-tools-qklog` against the real GitHub repo
+  `Richiie86/tbc-ai-tools`, health-checked `tbctools.org` → HTTP 200
+  549 ms, ran AI code review → verdict returned correctly.
+- The final `POST /deploy` was *not* fired automatically — operator must
+  click it (or curl it) when ready to push a new production build.
 
 ### Backlog
 - Audit log filter for deploy_project deletions (P2).
