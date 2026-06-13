@@ -91,6 +91,12 @@ async def _series_count(coll, start: datetime, extra_match: dict | None = None,
 @router.get('/30d')
 async def thirty_day_analytics(_: dict = Depends(get_current_operator)):
     """Return all four series + totals for the trailing 30-day window."""
+    return await compute_30d_analytics()
+
+
+async def compute_30d_analytics() -> dict:
+    """Internal helper — same payload as the endpoint but callable from
+    background tasks (alerts scheduler) without faking a FastAPI request."""
     today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
     start = today - timedelta(days=_WINDOW_DAYS - 1)
     days = _day_keys(start, _WINDOW_DAYS)

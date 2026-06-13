@@ -51,6 +51,7 @@ from notifications_ext import setup as setup_notifications
 from github_webhook_ext import router as github_webhook_router
 from birthday_ext import router as birthday_router, birthday_scheduler_loop
 from analytics_ext import router as analytics_router
+from alerts_ext import router as alerts_router
 from self_edit_ext import router as self_edit_router
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -291,6 +292,18 @@ async def startup():
                 logger.exception('Birthday rewards job failed')
 
         scheduler.add_job(_birthday_job, 'interval', hours=6, next_run_time=datetime.now(timezone.utc) + timedelta(minutes=3))
+
+        # Growth-alert evaluator — every 6h, fires at most once per UTC day.
+        async def _alerts_job():
+            try:
+                from alerts_ext import _run_alerts_pass
+                res = await _run_alerts_pass(force=False)
+                if res.get('fired'):
+                    logger.info('Growth-alerts fired: %s', res)
+            except Exception:
+                logger.exception('Alerts job failed')
+
+        scheduler.add_job(_alerts_job, 'interval', hours=6, next_run_time=datetime.now(timezone.utc) + timedelta(minutes=4))
         scheduler.start()
         app.state.scheduler = scheduler
         logger.info('Trial-email scheduler started (hourly).')
@@ -1385,6 +1398,7 @@ app.include_router(github_webhook_router)
 app.include_router(birthday_router)
 app.include_router(self_edit_router)
 app.include_router(analytics_router)
+app.include_router(alerts_router)
 # app.include_router(marketplace_router)  # Marketplace deferred — skipped per user.
 app.add_middleware(
     CORSMiddleware,

@@ -12,6 +12,34 @@ gold theme. Domain: **tbctools.org**.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
 ## Implemented
+- ✅ **Growth-alert thresholds + 4 polish tasks** (Feb 2026):
+  - **Alert thresholds** (new `alerts_ext.py`): operator sets a signup-drop
+    % and revenue-stall-days, plus delivery channels (email via Resend,
+    Slack webhook, Discord webhook). Background `_alerts_job` runs every
+    6 h, evaluates once per UTC day (idempotent via `last_fired_day`), and
+    fans out via every configured channel. Webhook URLs are masked on read,
+    submitting the masked value preserves the saved secret (round-trip
+    safe). `POST /alerts/test` fires a hello-world through all channels;
+    `POST /alerts/run-now` force-evaluates (bypasses idempotency).
+    Frontend `AlertsCard.jsx` (in Analytics tab below Growth snapshot)
+    surfaces the full config + Save / Test channels / Evaluate now CTAs.
+    5 new pytests in `test_p6_6_alerts.py`. **93/93 backend tests pass.**
+  - **AlertDialog for Promote** (P2): replaced `window.confirm` in
+    `ProjectRow.promote()` with a shadcn AlertDialog so the visual
+    language matches `ShipGateDialog`. New testids
+    `promote-confirm-{id}` / `promote-cancel-{id}` /
+    `promote-confirm-btn-{id}`.
+  - **TestUserBanner out of loading guard** (P2): now mounted directly
+    under the page title, independent of `/operator/stats` resolving.
+  - **`useProjectActions` hook** (P2): extracted every callback +
+    dialog state out of ProjectRow.jsx into
+    `/operator/ops/deploy/useProjectActions.js`. ProjectRow.jsx
+    574 → 408 lines, hook 234 lines, callbacks unit-testable in isolation.
+  - **Skip 2FA setup link** (P3): button on `/setup-2fa` navigates straight
+    to `/operator` (or `/dashboard` for non-operators) — purely client-side,
+    NO API call, does NOT reset the operator's password/2FA. The existing
+    session token stays valid.
+
 - ✅ **Revenue analytics dashboard** (Feb 2026):
   - New backend endpoint `GET /api/operator/analytics/30d` aggregates
     paid `payment_transactions`, new `users`, `referral_earnings`, and

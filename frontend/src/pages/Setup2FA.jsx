@@ -5,7 +5,7 @@ import api from '../lib/api';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { toast } from 'sonner';
-import { Loader2, ShieldCheck, Copy, Check } from 'lucide-react';
+import { Loader2, ShieldCheck, Copy, Check, SkipForward } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 export default function Setup2FA() {
@@ -89,6 +89,21 @@ export default function Setup2FA() {
                     Enable 2FA
                   </Button>
                 </form>
+
+                {/* Escape hatch — purely client-side navigation, NO API
+                    call. The operator's existing session token stays valid;
+                    we simply hop straight to the console instead of forcing
+                    enrolment on every boot (useful while
+                    RESET_OPERATOR_PASSWORD=true clears TOTP at startup). */}
+                <button
+                  type="button"
+                  data-testid="skip-2fa-setup"
+                  onClick={() => navigate(user?.role === 'operator' ? '/operator' : '/dashboard')}
+                  className="mt-3 inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-tbc-300"
+                >
+                  <SkipForward className="h-3 w-3" />
+                  Skip for now — open {user?.role === 'operator' ? 'Operator Console' : 'Dashboard'}
+                </button>
               </div>
             </div>
           ) : null}

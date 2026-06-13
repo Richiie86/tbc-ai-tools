@@ -84,6 +84,13 @@ export default function Operator() {
           <OperatorGuideButton onOpen={() => setGuideKey((k) => k + 1)} />
         </div>
 
+        {/* Test-user banner lives OUTSIDE the loading guard so QA can
+            still grab preview-user creds when /operator/stats is degraded.
+            Its own internal call to /operator/test-user is independent. */}
+        <div className="mt-8">
+          <TestUserBanner />
+        </div>
+
         {loading ? (
           <div className="mt-16 grid place-items-center">
             <Loader2 className="h-7 w-7 animate-spin text-tbc-400" />
@@ -102,12 +109,6 @@ export default function Operator() {
             </div>
 
             <StatsToolbar stats={stats} onRefresh={loadAll} />
-
-            {/* Surfaces the seeded preview-user credentials so the
-                operator can drop into the app as a regular customer. */}
-            <div className="mt-5">
-              <TestUserBanner />
-            </div>
 
             <Tabs value={activeTab} onValueChange={setActiveTab} className="mt-10">
               <TabsList className="bg-ink-900 border border-tbc-900/60 flex flex-wrap h-auto">

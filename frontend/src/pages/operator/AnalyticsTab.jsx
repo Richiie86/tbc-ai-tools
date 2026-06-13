@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import api from '../../lib/api';
 import { Button } from '../../components/ui/button';
+import AlertsCard from './AlertsCard';
 
 /**
  * Inline SVG sparkline + headline number. Zero deps, looks crisp at
@@ -223,6 +224,8 @@ export default function AnalyticsTab() {
           </div>
         </div>
       </div>
+
+      <AlertsCard />
     </div>
   );
 }
