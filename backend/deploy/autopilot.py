@@ -65,6 +65,65 @@ def _sse(event: str, data: dict) -> str:
     return f'event: {event}\ndata: {payload}\n\n'
 
 
+async def _resolve_max_iters(project_id: str, requested: int) -> int:
+    """Decide how many auto-fix iterations to allow. Honours the
+    operator-toggled `auto_heal` flag when the caller didn't ask for any,
+    and hard-caps at 5 regardless of input. Returns a non-negative int.
+
+    Extracted from `_autopilot_stream` for readability — and so it can
+    be unit-tested without spinning up the full SSE generator.
+    """
+    MAX_ALLOWED = 5
+    iters = int(requested or 0)
+    if iters == 0:
+        try:
+            proj_doc = await db.deploy_projects.find_one(
+                {'id': project_id}, {'auto_heal': 1},
+            )
+            if proj_doc and proj_doc.get('auto_heal'):
+                iters = 3  # operator-opted-in default
+        except Exception:
+            pass  # never block autopilot on a flag lookup
+    return max(0, min(iters, MAX_ALLOWED))
+
+
+async def _react_to_deployment(
+    project_id: str,
+    project: dict,
+    settings: dict,
+    terminal_state: Optional[str],
+    deployment_url: Optional[str],
+    iterations_run: int,
+):
+    """Final SSE frames after the deploy/watch phase. Yields a
+    `health_check` (only on READY) plus a `loop_complete`. Extracted from
+    `_autopilot_stream` so the main generator's last 25 lines fit on
+    one screen.
+    """
+    if terminal_state == 'READY':
+        await db.deploy_projects.update_one(
+            {'id': project_id},
+            {'$set': {'last_deployment_state': 'READY'}},
+        )
+        fresh = await db.deploy_projects.find_one({'id': project_id}) or project
+        health = await _project_health(fresh, settings)
+        yield _sse('health_check', health)
+        yield _sse('loop_complete', {
+            'ok': health.get('ok'),
+            'state': terminal_state,
+            'url': deployment_url,
+            'iterations_run': iterations_run,
+        })
+    else:
+        yield _sse('loop_complete', {
+            'ok': False,
+            'state': terminal_state or 'WATCH_TIMEOUT',
+            'url': deployment_url,
+            'message': 'Deploy did not reach READY within the watch window.',
+            'iterations_run': iterations_run,
+        })
+
+
 async def _autopilot_stream(
     project_id: str,
     settings: dict,
@@ -84,19 +143,7 @@ async def _autopilot_stream(
     """
     from deploy.auto_fix import commit_patches, request_patches
 
-    MAX_ALLOWED = 5  # absolute hard cap; ignore caller values above this.
-    requested_iters = int(req.auto_fix_max_iterations or 0)
-    # When the caller didn't ask for auto-fix but the project has the
-    # operator-toggled `auto_heal` flag on, default to 3 iterations. This is
-    # the "self-healing" switch wired in the Operator → Projects UI.
-    if requested_iters == 0:
-        try:
-            proj_doc = await db.deploy_projects.find_one({'id': project_id}, {'auto_heal': 1})
-            if proj_doc and proj_doc.get('auto_heal'):
-                requested_iters = 3
-        except Exception:
-            pass  # never block autopilot on a flag lookup
-    max_iters = max(0, min(requested_iters, MAX_ALLOWED))
+    max_iters = await _resolve_max_iters(project_id, req.auto_fix_max_iterations)
 
     try:
         project = await db.deploy_projects.find_one({'id': project_id})
@@ -248,28 +295,10 @@ async def _autopilot_stream(
         })
 
         # ---- Step 5: react (healthcheck) — only on READY -----------------
-        if terminal_state == 'READY':
-            await db.deploy_projects.update_one(
-                {'id': project_id},
-                {'$set': {'last_deployment_state': 'READY'}},
-            )
-            fresh = await db.deploy_projects.find_one({'id': project_id}) or project
-            health = await _project_health(fresh, settings)
-            yield _sse('health_check', health)
-            yield _sse('loop_complete', {
-                'ok': health.get('ok'),
-                'state': terminal_state,
-                'url': deployment_url,
-                'iterations_run': iteration,
-            })
-        else:
-            yield _sse('loop_complete', {
-                'ok': False,
-                'state': terminal_state or 'WATCH_TIMEOUT',
-                'url': deployment_url,
-                'message': 'Deploy did not reach READY within the watch window.',
-                'iterations_run': iteration,
-            })
+        async for ev in _react_to_deployment(
+            project_id, project, settings, terminal_state, deployment_url, iteration,
+        ):
+            yield ev
 
     except Exception as e:  # absolute last-resort safety net
         logger.exception('autopilot crashed for project %s', project_id)

@@ -62,9 +62,19 @@ export default function ErrorsTab() {
 
   const dismiss = async (err) => {
     try {
-      await api.post(`/operator/runtime-errors/${err.id}/dismiss`);
+      const { data } = await api.post(`/operator/runtime-errors/${err.id}/dismiss`);
       setErrors((cur) => cur.filter((e) => e.id !== err.id));
-      toast.success('Dismissed');
+      if (data?.proposed_learning_id) {
+        // High-confidence RCA → auto-loop into AI Learnings as a pending
+        // proposal. Surface a clickable toast so the operator can
+        // approve it in one hop.
+        toast.success('Dismissed · AI Learning proposed from the RCA', {
+          description: 'Click "AI Learnings" tab to review and approve.',
+          duration: 7000,
+        });
+      } else {
+        toast.success('Dismissed');
+      }
     } catch (e) {
       toast.error(e?.response?.data?.detail || 'Dismiss failed');
     }
@@ -243,7 +253,10 @@ function ErrorRow({ err, expanded, onToggle, running, onRunRCA, onDismiss, onDel
           {err.rca && (
             <div data-testid={`error-rca-${err.id}`} className="rounded border border-tbc-500/40 bg-tbc-500/[0.04] p-2.5">
               <div className="flex items-center justify-between text-[10px] uppercase tracking-wider text-tbc-300">
-                <span>RCA · confidence: {err.rca.confidence || '—'}</span>
+                <span>
+                  RCA · confidence: {err.rca.confidence || '—'}
+                  {err.rca.model && <span className="ml-2 text-tbc-200/40 normal-case tracking-normal">via {err.rca.model}</span>}
+                </span>
                 {err.rca.parse_fallback && (
                   <span className="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[9px] text-amber-300">
                     ⚠️ raw output — LLM didn't return valid JSON

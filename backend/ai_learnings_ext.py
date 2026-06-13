@@ -53,6 +53,11 @@ def _serialize(d: dict) -> dict:
         'created_at': d['created_at'].isoformat() if d.get('created_at') else None,
         'updated_at': d['updated_at'].isoformat() if d.get('updated_at') else None,
         'created_by': d.get('created_by_email'),
+        # Auto-loop provenance — surfaced as a badge in the UI so the
+        # operator knows this proposal came from a real runtime error.
+        'source': d.get('source'),
+        'source_error_id': d.get('source_error_id'),
+        'auto_proposed': bool(d.get('auto_proposed', False)),
     }
 
 

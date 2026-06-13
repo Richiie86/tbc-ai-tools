@@ -362,6 +362,14 @@ function LearningRow({ item, isPending, edits, setEdits, savingId, onApprove, on
           )}
           <div className="mt-1 text-[10px] text-tbc-200/40">
             {item.created_by || 'system'} · {item.created_at?.slice(0, 10) || '–'}
+            {item.source === 'runtime_error' && (
+              <span
+                className="ml-1.5 rounded-full bg-red-500/15 px-1.5 py-0.5 text-[9px] text-red-300"
+                title="Auto-proposed from a real runtime error after high-confidence RCA"
+              >
+                from error
+              </span>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">

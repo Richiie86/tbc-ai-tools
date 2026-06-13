@@ -176,6 +176,26 @@ async def run_rca(error_id: str, _op: dict = Depends(get_current_operator)):
     if not api_key:
         raise HTTPException(503, 'EMERGENT_LLM_KEY not configured')
 
+    # Operator-configurable RCA model — falls back to claude-sonnet (the
+    # iter17-validated default) when no setting is present. Set via
+    # `settings.rca_model` in MongoDB or via the Operator → Security tab.
+    settings = await db.settings.find_one({'_id': 'payment_settings'}) or {}
+    rca_model_id = (settings.get('rca_model') or '').strip()
+    # Map provider for emergentintegrations.
+    _rca_provider_map = {
+        'claude-opus-4-7': 'anthropic',
+        'claude-sonnet-4-6': 'anthropic',
+        'claude-haiku-4-5-20251001': 'anthropic',
+        'gpt-5.4': 'openai',
+        'gpt-5.4-mini': 'openai',
+        'gpt-4.1': 'openai',
+        'gemini-3.1-pro-preview': 'gemini',
+        'gemini-3-flash-preview': 'gemini',
+    }
+    if rca_model_id not in _rca_provider_map:
+        rca_model_id = 'claude-sonnet-4-6'
+    rca_provider = _rca_provider_map[rca_model_id]
+
     prompt = (
         f"Error message: {doc.get('message', '')}\n\n"
         f"Stack trace (truncated):\n{(doc.get('stack') or '')[:3_000]}\n\n"
@@ -195,7 +215,7 @@ async def run_rca(error_id: str, _op: dict = Depends(get_current_operator)):
                 'You are a senior site-reliability engineer doing fast RCA. '
                 'Be terse. Only return valid JSON.'
             ),
-        ).with_model('anthropic', 'claude-sonnet-4-6')
+        ).with_model(rca_provider, rca_model_id)
         full = ''
         async for ev in chat.stream_message(UserMessage(text=prompt)):
             if isinstance(ev, TextDelta):
@@ -225,6 +245,7 @@ async def run_rca(error_id: str, _op: dict = Depends(get_current_operator)):
             'parse_fallback': True,
         }
     rca['generated_at'] = datetime.now(timezone.utc).isoformat()
+    rca['model'] = rca_model_id
     await db.runtime_errors.update_one(
         {'id': error_id}, {'$set': {'rca': rca}},
     )
@@ -233,13 +254,68 @@ async def run_rca(error_id: str, _op: dict = Depends(get_current_operator)):
 
 @op_router.post('/{error_id}/dismiss')
 async def dismiss(error_id: str, _op: dict = Depends(get_current_operator)):
-    res = await db.runtime_errors.update_one(
-        {'id': error_id},
-        {'$set': {'dismissed_at': datetime.now(timezone.utc)}},
-    )
-    if res.matched_count == 0:
+    """Mark error as resolved. When the doc has a *high-confidence RCA*,
+    we also propose an AI Learning so the AI inherits the lesson learned
+    from this real production bug. Operator still has to approve the
+    proposal in AI Learnings tab — fully reversible."""
+    doc = await db.runtime_errors.find_one({'id': error_id})
+    if not doc:
         raise HTTPException(404, 'Error not found')
-    return {'dismissed': error_id}
+    now = datetime.now(timezone.utc)
+    await db.runtime_errors.update_one(
+        {'id': error_id},
+        {'$set': {'dismissed_at': now}},
+    )
+    proposed_learning_id = await _maybe_propose_learning_from_error(doc)
+    return {
+        'dismissed': error_id,
+        'proposed_learning_id': proposed_learning_id,
+    }
+
+
+async def _maybe_propose_learning_from_error(err_doc: dict) -> Optional[str]:
+    """When an error has a high-confidence RCA, distil it into a
+    pending AI Learning. Returns the new learning's id (for the toast),
+    or None when we skip (low confidence, no suggested change, already
+    proposed for this signature, etc).
+
+    Never raises — the dismiss flow must always succeed even if the
+    learning insert fails.
+    """
+    try:
+        rca = err_doc.get('rca') or {}
+        if rca.get('confidence') != 'high':
+            return None
+        change = (rca.get('suggested_change') or '').strip()
+        if not change:
+            return None
+        sig = err_doc.get('signature', '')
+        # Idempotency — don't propose twice for the same error signature.
+        already = await db.ai_learnings.find_one({'source_error_signature': sig})
+        if already:
+            return None
+        suggested_file = rca.get('suggested_file') or ''
+        text = (
+            f'When working on {suggested_file or "the codebase"}: {change} '
+            f'(learned from real production error: "{err_doc.get("message", "")[:120]}")'
+        )
+        new_id = str(uuid.uuid4())
+        await db.ai_learnings.insert_one({
+            'id': new_id,
+            'text': text[:600],
+            'enabled': False,  # operator approval gate
+            'auto_proposed': True,
+            'source': 'runtime_error',
+            'source_error_id': err_doc.get('id'),
+            'source_error_signature': sig,
+            'created_at': datetime.now(timezone.utc),
+            'updated_at': datetime.now(timezone.utc),
+            'created_by_email': 'auto-rca',
+        })
+        return new_id
+    except Exception:
+        logger.exception('Failed to propose learning from error')
+        return None
 
 
 @op_router.delete('/{error_id}')

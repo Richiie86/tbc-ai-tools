@@ -55,19 +55,32 @@ export default function PreviewWidget() {
   const promote = async (p) => {
     if (!window.confirm(`Promote ${p.branch} to production?\n\nThis ships the preview at ${p.preview_url} to prod immediately.`)) return;
     setPromoting(p.deployment_id);
-    try {
-      await api.post(`/operator/deploy/${p.project_id}/promote`, {
-        deployment_id: p.deployment_id,
-      });
-      toast.success(`Promoted ${p.branch} to production`);
-      // Remove the row optimistically — it'll appear under "production"
-      // on Vercel and be excluded from the next /previews fetch.
-      setPreviews((cur) => cur.filter((x) => x.deployment_id !== p.deployment_id));
-    } catch (e) {
-      toast.error(e?.response?.data?.detail || 'Promote failed');
-    } finally {
-      setPromoting(null);
+    // Up to 3 attempts with exponential backoff — Vercel's promote
+    // endpoint occasionally returns 502 mid-build when the deployment
+    // is still being finalised. Retrying is safe (idempotent on
+    // their side — the same deployment_id maps to the same prod alias).
+    let lastErr;
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try {
+        await api.post(`/operator/deploy/${p.project_id}/promote`, {
+          deployment_id: p.deployment_id,
+        });
+        toast.success(`Promoted ${p.branch} to production`);
+        setPreviews((cur) => cur.filter((x) => x.deployment_id !== p.deployment_id));
+        setPromoting(null);
+        return;
+      } catch (e) {
+        lastErr = e;
+        // 4xx = permanent failure (auth, malformed payload). 5xx = retry.
+        const status = e?.response?.status;
+        if (status && status < 500) break;
+        if (attempt < 3) {
+          await new Promise((r) => setTimeout(r, 800 * attempt));
+        }
+      }
     }
+    toast.error(lastErr?.response?.data?.detail || `Promote failed after 3 attempts`);
+    setPromoting(null);
   };
 
   if (loading) return null;        // first load: silent

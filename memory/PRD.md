@@ -11,6 +11,22 @@ gold theme. Domain: **tbctools.org**.
 - **End user (member)** — Chats with the AI builder, manages plan, copies referral link.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
+## Implemented — Feb 2026 (latest session, batch 4)
+- ✅ **Runtime errors → AI Learnings auto-loop** (the killer feature):
+  - When the operator dismisses an error whose RCA has `confidence: 'high'` + a non-empty `suggested_change`, `_maybe_propose_learning_from_error()` distils it into a pending AI Learning.
+  - Idempotent per `source_error_signature` so the same bug doesn't propose twice. Learning is created with `enabled=false, auto_proposed=true, source='runtime_error'` — operator-approval gated.
+  - UI surfaces a red **"from error"** badge on these proposals + an approve button. Toast on dismiss: "AI Learning proposed from the RCA · click AI Learnings to review".
+- ✅ **Configurable RCA model** (`settings.rca_model`):
+  - Whitelist of 8 chat models (matches `TEST_MODELS` in `ai_test_bench_ext.py`). Fallback to `claude-sonnet-4-6` when no setting or invalid value.
+  - Model name now persisted on the RCA doc + rendered in UI under the confidence header (e.g. "RCA · confidence: high · via claude-sonnet-4-6").
+- ✅ **Promote button retry** (PR Preview widget):
+  - Up to 3 attempts with exponential backoff (800/1600/2400ms) on 5xx only. 4xx breaks immediately (permanent failure). Vercel's promote endpoint occasionally flakes 502 mid-finalisation; safe to retry because deployment_id → prod-alias mapping is idempotent.
+- ✅ **`_autopilot_stream()` refactor**:
+  - Extracted `_resolve_max_iters(project_id, requested)` — pure helper, unit-testable.
+  - Extracted `_react_to_deployment(project_id, project, settings, terminal_state, deployment_url, iter)` async-gen — the final ~25 lines of the loop now live in their own well-named function.
+  - Main `_autopilot_stream` shrunk by ~40 lines; cyclomatic complexity reduced. No behaviour change — still emits the same SSE event taxonomy in the same order.
+
+
 ## Implemented — Feb 2026 (latest session, batch 3)
 - ✅ **Runtime error capture + RCA pipeline** (`runtime_errors_ext.py` + `errorCapture.jsx`):
   - Global FastAPI exception handler captures every backend 500 into `runtime_errors` (skips HTTPException).
