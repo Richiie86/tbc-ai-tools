@@ -59,6 +59,12 @@ from deploy_access_ext import router as deploy_access_router
 from ai_learnings_ext import router as ai_learnings_router
 from ai_brain_ext import router as ai_brain_router
 from ai_test_bench_ext import router as ai_test_bench_router
+from deploy_previews_ext import router as deploy_previews_router
+from runtime_errors_ext import (
+    public_router as runtime_errors_public_router,
+    op_router as runtime_errors_op_router,
+    capture_backend_exception,
+)
 from sandbox_ai_ext import router as sandbox_ai_router, proj_router as sandbox_ai_proj_router
 from cors_dynamic_ext import (
     DynamicCORSMiddleware,
@@ -90,6 +96,27 @@ PLANS = {
 # ===== APP =====
 app = FastAPI(title='TBC AI Tools')
 api = APIRouter(prefix='/api')
+
+
+@app.exception_handler(Exception)
+async def _capture_unhandled_exception(request, exc):
+    """Capture every unhandled backend exception into `runtime_errors` so
+    the Operator → Errors tab can surface it. We re-raise to preserve
+    FastAPI's normal 500 response — capture is best-effort, never blocking.
+    """
+    from fastapi.responses import JSONResponse
+    from fastapi import HTTPException as _HE
+    try:
+        # Don't capture HTTPException — those are *intentional* responses
+        # (404, 401, 400…) and would flood the operator's error feed.
+        if not isinstance(exc, _HE):
+            await capture_backend_exception(exc, request)
+    except Exception:
+        pass
+    # Preserve standard FastAPI 500 envelope.
+    if isinstance(exc, _HE):
+        return JSONResponse(status_code=exc.status_code, content={'detail': exc.detail})
+    return JSONResponse(status_code=500, content={'detail': 'Internal Server Error'})
 
 
 SYSTEM_PROMPT = (
@@ -383,6 +410,26 @@ async def startup():
                 logger.exception('Alerts job failed')
 
         scheduler.add_job(_alerts_job, 'interval', hours=6, next_run_time=datetime.now(timezone.utc) + timedelta(minutes=4))
+
+        # Nightly AI Test Bench drift run — every 24h. Compares each model's
+        # pass/fail + latency to the previous day's run and emails the
+        # operator if anything degraded.
+        async def _ai_test_bench_job():
+            try:
+                from ai_test_bench_ext import _nightly_drift_alert
+                res = await _nightly_drift_alert()
+                if res.get('alerts'):
+                    logger.info('AI Test Bench drift alerts: %s', res)
+            except Exception:
+                logger.exception('AI Test Bench nightly job failed')
+
+        scheduler.add_job(
+            _ai_test_bench_job, 'interval', hours=24,
+            # First run 10 minutes after boot so we have a baseline before
+            # the first diff. Idempotency marker in MongoDB prevents
+            # double-firing if the scheduler restarts.
+            next_run_time=datetime.now(timezone.utc) + timedelta(minutes=10),
+        )
         scheduler.start()
         app.state.scheduler = scheduler
         logger.info('Trial-email scheduler started (hourly).')
@@ -1749,6 +1796,9 @@ app.include_router(deploy_access_router)
 app.include_router(ai_learnings_router)
 app.include_router(ai_brain_router)
 app.include_router(ai_test_bench_router)
+app.include_router(deploy_previews_router)
+app.include_router(runtime_errors_public_router)
+app.include_router(runtime_errors_op_router)
 app.include_router(sandbox_ai_router)
 app.include_router(sandbox_ai_proj_router)
 app.include_router(cors_origins_router)

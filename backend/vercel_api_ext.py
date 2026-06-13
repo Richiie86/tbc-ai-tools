@@ -263,3 +263,38 @@ async def vercel_promote_to_production(
         return r.json() if r.content else {}
     except Exception:
         return {}
+
+
+async def vercel_list_deployments(
+    settings: dict,
+    project_vercel_id: str,
+    limit: int = 30,
+) -> list[dict]:
+    """List recent deployments for a project, newest first.
+
+    Used by the dashboard's "Preview Ready" widget to surface every active
+    preview branch with a one-click "Promote to prod" button.
+
+    Returns the raw `deployments` array (each entry has uid, url, state,
+    target, meta.githubCommitRef, created…). The caller groups by branch
+    and dedupes.
+    """
+    token = vercel_token(settings)
+    if not token:
+        raise HTTPException(503, VERCEL_TOKEN_MISSING_DETAIL)
+    if not project_vercel_id:
+        return []
+    params = {'projectId': project_vercel_id, 'limit': str(limit), **vercel_team_qs(settings)}
+    async with httpx.AsyncClient(timeout=12.0) as client:
+        r = await client.get(
+            f'{VERCEL_API}/v6/deployments',
+            params=params,
+            headers={'Authorization': f'Bearer {token}'},
+        )
+    if r.status_code >= 400:
+        try:
+            err = r.json().get('error', {})
+        except Exception:
+            err = {'message': r.text[:300]}
+        raise HTTPException(502, f"Vercel list-deployments: {err.get('message') or err.get('code')}")
+    return r.json().get('deployments', [])

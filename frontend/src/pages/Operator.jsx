@@ -8,7 +8,7 @@ import {
   Users, CreditCard, MessageSquare, DollarSign, Loader2, ShieldCheck, Mail,
   Code2, Sparkles, Wallet, KeyRound, Settings as SettingsIcon, Coins,
   FolderKanban, Activity, ScrollText, Megaphone, MessageCircle, FlaskConical,
-  TrendingUp, Lock, Brain, Network, TestTube,
+  TrendingUp, Lock, Brain, Network, TestTube, AlertOctagon,
 } from 'lucide-react';
 
 import PlansTab     from './operator/PlansTab';
@@ -27,6 +27,8 @@ import SandboxTab   from './operator/SandboxTab';
 import AILearningsTab from './operator/AILearningsTab';
 import AIBrainTab from './operator/AIBrainTab';
 import AITestBenchTab from './operator/AITestBenchTab';
+import ErrorsTab from './operator/ErrorsTab';
+import PreviewWidget from './PreviewWidget';
 import AnalyticsTab from './operator/AnalyticsTab';
 import { StatCard }      from './operator/StatCard';
 import { StatsToolbar }  from './operator/StatsToolbar';
@@ -182,6 +184,8 @@ export default function Operator() {
 
             <StatsToolbar stats={stats} onRefresh={loadAll} />
 
+            <PreviewWidget />
+
             <Tabs value={activeTab} onValueChange={onTabChange} className="mt-10">
               <TabsList className="bg-ink-900 border border-tbc-900/60 flex flex-wrap h-auto">
                 <TabTrigger value="users"     icon={Users}>Users ({users.length})</TabTrigger>
@@ -204,6 +208,7 @@ export default function Operator() {
                 <TabTrigger value="learnings" icon={Brain}>AI Learnings</TabTrigger>
                 <TabTrigger value="brain"     icon={Network}>AI Brain</TabTrigger>
                 <TabTrigger value="ai-tests"  icon={TestTube}>AI Tests</TabTrigger>
+                <TabTrigger value="errors"    icon={AlertOctagon}>Errors</TabTrigger>
               </TabsList>
 
               <TabsContent value="users" className="mt-5">
@@ -230,6 +235,7 @@ export default function Operator() {
               <TabsContent value="learnings" className="mt-5"><AILearningsTab /></TabsContent>
               <TabsContent value="brain"     className="mt-5"><AIBrainTab /></TabsContent>
               <TabsContent value="ai-tests"  className="mt-5"><AITestBenchTab /></TabsContent>
+              <TabsContent value="errors"    className="mt-5"><ErrorsTab /></TabsContent>
             </Tabs>
           </>
         )}

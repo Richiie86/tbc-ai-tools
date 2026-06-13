@@ -9,7 +9,7 @@ import {
 } from '../../components/ui/alert-dialog';
 import { toast } from 'sonner';
 import {
-  Brain, Plus, Loader2, Trash2, Save, Sparkles, CheckCircle2, XCircle,
+  Brain, Plus, Loader2, Trash2, Save, Sparkles, CheckCircle2, XCircle, FileText,
 } from 'lucide-react';
 
 /**
@@ -28,6 +28,8 @@ export default function AILearningsTab() {
   const [savingId, setSavingId] = useState(null);
   const [edits, setEdits] = useState({}); // id -> draft text
   const [confirmDelete, setConfirmDelete] = useState(null); // item pending deletion
+  const [digest, setDigest] = useState(null); // {markdown, count, fallback} or null
+  const [digestLoading, setDigestLoading] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -122,22 +124,79 @@ export default function AILearningsTab() {
     }
   };
 
+  const generateDigest = async () => {
+    setDigestLoading(true);
+    setDigest(null);
+    try {
+      const { data } = await api.get('/operator/ai-learnings/digest', { params: { weeks: 1 } });
+      setDigest(data);
+      if (data.count === 0) {
+        toast.info('No new learnings in the last week');
+      } else {
+        toast.success(`Digest ready · ${data.count} learning${data.count === 1 ? '' : 's'} summarised`);
+      }
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Digest generation failed');
+    } finally {
+      setDigestLoading(false);
+    }
+  };
+
   const proposals = items.filter((i) => !i.enabled);
   const active = items.filter((i) => i.enabled);
 
   return (
     <div className="space-y-5" data-testid="ai-learnings-tab">
-      <div>
-        <h3 className="flex items-center gap-2 text-base font-bold text-tbc-100">
-          <Brain className="h-4 w-4 text-tbc-300" />
-          AI Learnings — shared across every model
-        </h3>
-        <p className="mt-1 text-sm text-tbc-200/60">
-          Every enabled entry is appended to the chat <code className="text-tbc-100">SYSTEM_PROMPT</code> so
-          Claude, GPT, and Gemini share the same accumulated knowledge. The auto-learner watches conversations
-          and drops new proposals here as <em>pending</em> — approve them with one click.
-        </p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h3 className="flex items-center gap-2 text-base font-bold text-tbc-100">
+            <Brain className="h-4 w-4 text-tbc-300" />
+            AI Learnings — shared across every model
+          </h3>
+          <p className="mt-1 text-sm text-tbc-200/60">
+            Every enabled entry is appended to the chat <code className="text-tbc-100">SYSTEM_PROMPT</code> so
+            Claude, GPT, and Gemini share the same accumulated knowledge. The auto-learner watches conversations
+            and drops new proposals here as <em>pending</em> — approve them with one click.
+          </p>
+        </div>
+        <Button
+          onClick={generateDigest}
+          disabled={digestLoading}
+          data-testid="ai-learnings-digest-btn"
+          variant="outline"
+          className="shrink-0 border-tbc-900/60 bg-ink-900 text-tbc-100 hover:bg-ink-950"
+        >
+          {digestLoading
+            ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Generating…</>
+            : <><FileText className="mr-1.5 h-4 w-4" />Weekly digest</>}
+        </Button>
       </div>
+
+      {digest && (
+        <div
+          className="rounded-lg border border-tbc-500/30 bg-tbc-500/[0.04] p-4"
+          data-testid="ai-learnings-digest-output"
+        >
+          <div className="mb-1 flex items-center justify-between text-[11px] uppercase tracking-wider text-tbc-300">
+            <span>Weekly digest · {digest.count} learning{digest.count === 1 ? '' : 's'}</span>
+            <button
+              onClick={() => setDigest(null)}
+              className="text-tbc-200/50 hover:text-tbc-100"
+              data-testid="ai-learnings-digest-close"
+            >
+              <XCircle className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed text-tbc-100">
+            {digest.markdown}
+          </pre>
+          {digest.fallback && (
+            <div className="mt-2 text-[10px] text-amber-300/70">
+              Deterministic fallback used — LLM was unreachable.
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Add new learning */}
       <div className="rounded-lg border border-tbc-900/60 bg-ink-900/60 p-3" data-testid="ai-learnings-new">

@@ -1,0 +1,177 @@
+import React, { useCallback, useEffect, useState } from 'react';
+import api from '../lib/api';
+import { Button } from '../components/ui/button';
+import { toast } from 'sonner';
+import {
+  GitBranch, ExternalLink, Loader2, Rocket, RefreshCw, CheckCircle2,
+  XCircle, Hammer,
+} from 'lucide-react';
+
+/**
+ * GitHub PR Preview widget — shown on the Operator dashboard above the
+ * tab bar.
+ *
+ * Closes the loop between Sandbox edits and production: every time the
+ * operator pushes a branch (manually or via the Sandbox AI "Apply &
+ * commit"), Vercel builds a preview. This widget lists every such
+ * preview with branch name, commit message, status dot, and a one-click
+ * "Promote to prod" button that reuses `POST /api/operator/deploy/{id}/promote`.
+ *
+ * Auto-refreshes every 30s — bounded enough that the Vercel rate-limit
+ * isn't a worry, fast enough that "building → ready" transitions appear
+ * within a normal attention span.
+ */
+export default function PreviewWidget() {
+  const [previews, setPreviews] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [promoting, setPromoting] = useState(null); // deployment_id being promoted
+  const [collapsed, setCollapsed] = useState(false);
+
+  const load = useCallback(async ({ silent } = {}) => {
+    if (!silent) setLoading(true);
+    try {
+      const { data } = await api.get('/operator/deploy/previews');
+      setPreviews(data.previews || []);
+    } catch (e) {
+      // 503 = no Vercel token; degrade silently — widget hides.
+      if (!silent) console.warn('Preview widget load failed', e);
+    } finally {
+      if (!silent) setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  // Background poll — 30s while the dashboard is foregrounded. Stops
+  // when the document is hidden so a backgrounded tab doesn't burn
+  // Vercel API quota.
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (!document.hidden) load({ silent: true });
+    }, 30_000);
+    return () => clearInterval(id);
+  }, [load]);
+
+  const promote = async (p) => {
+    if (!window.confirm(`Promote ${p.branch} to production?\n\nThis ships the preview at ${p.preview_url} to prod immediately.`)) return;
+    setPromoting(p.deployment_id);
+    try {
+      await api.post(`/operator/deploy/${p.project_id}/promote`, {
+        deployment_id: p.deployment_id,
+      });
+      toast.success(`Promoted ${p.branch} to production`);
+      // Remove the row optimistically — it'll appear under "production"
+      // on Vercel and be excluded from the next /previews fetch.
+      setPreviews((cur) => cur.filter((x) => x.deployment_id !== p.deployment_id));
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Promote failed');
+    } finally {
+      setPromoting(null);
+    }
+  };
+
+  if (loading) return null;        // first load: silent
+  if (previews.length === 0) return null;  // no previews: don't waste vertical space
+
+  return (
+    <div
+      data-testid="preview-widget"
+      className="mt-8 rounded-lg border border-emerald-500/30 bg-emerald-500/[0.04] p-3"
+    >
+      <button
+        type="button"
+        onClick={() => setCollapsed((c) => !c)}
+        className="flex w-full items-center justify-between gap-2 text-left"
+      >
+        <div className="flex items-center gap-2">
+          <Rocket className="h-4 w-4 text-emerald-300" />
+          <span className="text-sm font-bold text-tbc-100">
+            Preview ready · {previews.length} branch{previews.length === 1 ? '' : 'es'}
+          </span>
+          <span className="hidden sm:inline text-[10px] text-tbc-200/50">
+            — every push gets a Vercel preview; promote to prod with one click
+          </span>
+        </div>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={(e) => { e.stopPropagation(); load(); }}
+          data-testid="preview-widget-refresh"
+          className="h-6 text-tbc-200/60 hover:text-tbc-100"
+        >
+          <RefreshCw className="h-3 w-3" />
+        </Button>
+      </button>
+
+      {!collapsed && (
+        <ul className="mt-2.5 space-y-1.5">
+          {previews.map((p) => (
+            <PreviewRow
+              key={p.deployment_id}
+              p={p}
+              busy={promoting === p.deployment_id}
+              onPromote={() => promote(p)}
+            />
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function PreviewRow({ p, busy, onPromote }) {
+  const Icon =
+    p.state === 'ready'    ? CheckCircle2 :
+    p.state === 'failed'   ? XCircle :
+    Hammer;
+  const tone =
+    p.state === 'ready'    ? 'text-emerald-300' :
+    p.state === 'failed'   ? 'text-red-300' :
+    'text-amber-300';
+  return (
+    <li
+      data-testid={`preview-row-${p.deployment_id}`}
+      className="flex items-center gap-3 rounded border border-tbc-900/60 bg-ink-900/50 px-2.5 py-1.5"
+    >
+      <Icon className={`h-3.5 w-3.5 shrink-0 ${tone}`} />
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-1.5 truncate">
+          <GitBranch className="h-3 w-3 shrink-0 text-tbc-300" />
+          <span className="font-mono text-[12px] text-tbc-100 truncate">{p.branch}</span>
+          {p.commit_sha && (
+            <code className="text-[10px] text-tbc-200/40">{p.commit_sha}</code>
+          )}
+        </div>
+        {p.commit_message && (
+          <div className="truncate text-[11px] text-tbc-200/50">{p.commit_message}</div>
+        )}
+      </div>
+      <div className="flex items-center gap-1.5 shrink-0">
+        {p.preview_url && (
+          <a
+            href={p.preview_url}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 rounded border border-tbc-900/60 bg-ink-900 px-2 py-1 text-[10px] text-tbc-100 hover:bg-ink-950"
+            data-testid={`preview-open-${p.deployment_id}`}
+            title={p.preview_url}
+          >
+            Open <ExternalLink className="h-2.5 w-2.5" />
+          </a>
+        )}
+        <Button
+          size="sm"
+          onClick={onPromote}
+          disabled={busy || p.state !== 'ready'}
+          data-testid={`preview-promote-${p.deployment_id}`}
+          className="h-7 bg-emerald-500 text-ink-950 hover:bg-emerald-400 font-bold text-[11px]"
+          title={p.state !== 'ready' ? 'Preview must finish building first' : 'Ship this preview to production'}
+        >
+          {busy
+            ? <Loader2 className="h-3 w-3 animate-spin" />
+            : <><Rocket className="mr-1 h-3 w-3" />Promote</>}
+        </Button>
+      </div>
+    </li>
+  );
+}

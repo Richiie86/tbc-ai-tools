@@ -296,3 +296,106 @@ async def history(
             d['created_at'] = d['created_at'].isoformat()
         out.append(d)
     return {'history': out}
+
+
+# ---------- Nightly drift-alert cron ----------
+
+async def _nightly_drift_alert() -> dict:
+    """Run every model's probes, compare to *yesterday's* run for the same
+    model, and email the operator if any model flipped PASS → FAIL or its
+    avg-latency degraded by >50%. Designed for APScheduler — never raises.
+
+    Idempotent: stores a `nightly_runs` doc per UTC date so it won't re-fire
+    if the scheduler triggers twice in the same day.
+    """
+    import os
+    today = datetime.now(timezone.utc).date().isoformat()
+    # Idempotency guard.
+    existing = await db.nightly_runs.find_one({'_id': f'aitest-{today}'})
+    if existing:
+        return {'skipped': True, 'reason': 'already ran today'}
+
+    api_key = os.environ.get('EMERGENT_LLM_KEY') or ''
+    if not api_key:
+        return {'skipped': True, 'reason': 'no llm key'}
+
+    # Snapshot yesterday's results so we can diff after the run.
+    yesterday_cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+    prev_by_model: dict[str, dict] = {}
+    cursor = db.ai_model_tests.find(
+        {'created_at': {'$gte': yesterday_cutoff - timedelta(hours=24),
+                        '$lt':  yesterday_cutoff + timedelta(hours=6)}},
+    ).sort('created_at', -1)
+    async for d in cursor:
+        if d['model'] not in prev_by_model:
+            prev_by_model[d['model']] = d
+
+    # Run every model in parallel.
+    new_results: list[dict] = []
+    for m in TEST_MODELS:
+        try:
+            new_results.append(await _run_one_model(m['id'], api_key))
+        except Exception as e:
+            logger.warning('Nightly probe failed for %s: %s', m['id'], e)
+
+    # Diff and build alert lines.
+    alerts: list[str] = []
+    for r in new_results:
+        prev = prev_by_model.get(r['model'])
+        if not prev:
+            continue  # no baseline yet — first ever run for this model
+        was_pass = bool(prev.get('pass'))
+        now_pass = bool(r.get('pass'))
+        if was_pass and not now_pass:
+            failed = [p['name'] for p in r.get('probes', []) if not p['pass']]
+            alerts.append(f'• {r["model"]} flipped PASS → FAIL ({", ".join(failed) or "all probes"})')
+        prev_lat = int(prev.get('avg_latency_ms') or 0)
+        now_lat = int(r.get('avg_latency_ms') or 0)
+        if prev_lat and now_lat and now_lat > int(prev_lat * 1.5):
+            alerts.append(
+                f'• {r["model"]} tail latency creeping up: {prev_lat}ms → {now_lat}ms (+{int((now_lat - prev_lat) / prev_lat * 100)}%)'
+            )
+
+    # Persist idempotency marker even when no alerts so we don't re-run.
+    await db.nightly_runs.insert_one({
+        '_id': f'aitest-{today}',
+        'created_at': datetime.now(timezone.utc),
+        'models_tested': len(new_results),
+        'alerts': alerts,
+    })
+
+    if not alerts:
+        return {'sent': False, 'models_tested': len(new_results), 'alerts': 0}
+
+    # Email the operator. Failure here is non-fatal — the marker is set
+    # so we won't loop, and the operator can still check the AI Tests tab.
+    try:
+        from email_utils import send_email
+        settings = await db.settings.find_one({'_id': 'payment_settings'}) or {}
+        op_email = settings.get('operator_email') or (
+            (await db.users.find_one({'role': 'operator'}, {'email': 1})) or {}
+        ).get('email')
+        if op_email:
+            subject = f'⚠️ AI Test Bench — {len(alerts)} model alert(s)'
+            body = (
+                '<p>Your nightly AI test pass detected drift on the following models:</p>'
+                '<pre style="font-family:monospace;background:#1f1f23;color:#f5f5f5;padding:12px;border-radius:6px;">'
+                + '\n'.join(alerts)
+                + '</pre>'
+                '<p>View full results in <strong>Operator → AI Tests</strong>.</p>'
+            )
+            await send_email(op_email, subject, body)
+            return {'sent': True, 'to': op_email, 'alerts': len(alerts)}
+    except Exception as e:
+        logger.warning('Nightly drift email failed: %s', e)
+    return {'sent': False, 'alerts': len(alerts), 'reason': 'email failed'}
+
+
+@router.post('/cron/run-now')
+async def trigger_nightly_run(_op: dict = Depends(get_current_operator)):
+    """Operator-only manual trigger for the nightly drift run — useful for
+    testing the alert path without waiting 24 hours."""
+    # Bypass the idempotency guard for manual triggers.
+    today = datetime.now(timezone.utc).date().isoformat()
+    await db.nightly_runs.delete_one({'_id': f'aitest-{today}'})
+    return await _nightly_drift_alert()

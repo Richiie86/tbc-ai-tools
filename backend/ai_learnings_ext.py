@@ -101,3 +101,85 @@ async def delete_learning(learning_id: str, _op: dict = Depends(get_current_oper
     if res.deleted_count == 0:
         raise HTTPException(404, 'Learning not found')
     return {'deleted': learning_id}
+
+
+# ---------- Weekly insight digest ----------
+
+@router.get('/digest')
+async def digest(
+    weeks: int = 1,
+    _op: dict = Depends(get_current_operator),
+):
+    """Markdown digest of every learning added in the last `weeks` weeks,
+    grouped by activity. Used by the AI Learnings tab "Generate digest"
+    button so the operator gets a one-paragraph personality changelog for
+    sharing / archiving.
+
+    Uses a small LLM call (Gemini Flash via Emergent Universal Key) to
+    summarise — falls back to a deterministic bullet list if the LLM is
+    unreachable so the endpoint never fails in CI.
+    """
+    from datetime import timedelta
+    import os
+    weeks = max(1, min(int(weeks), 12))
+    cutoff = datetime.now(timezone.utc) - timedelta(weeks=weeks)
+    docs = await db.ai_learnings.find(
+        {'created_at': {'$gte': cutoff}},
+    ).sort('created_at', -1).to_list(500)
+
+    if not docs:
+        return {
+            'weeks': weeks,
+            'count': 0,
+            'markdown': f'_No learnings added in the last {weeks} week{"s" if weeks > 1 else ""}._',
+            'fallback': False,
+        }
+
+    bullets = '\n'.join(f'- {d.get("text", "").strip()}' for d in docs)
+    api_key = os.environ.get('EMERGENT_LLM_KEY') or ''
+    if not api_key:
+        # Deterministic fallback — keep the endpoint useful even without
+        # the LLM key configured (e.g. CI).
+        return {
+            'weeks': weeks,
+            'count': len(docs),
+            'markdown': f'## AI personality changelog — last {weeks} week(s)\n\n{bullets}',
+            'fallback': True,
+        }
+    try:
+        from emergentintegrations.llm.chat import (
+            LlmChat, UserMessage, TextDelta, StreamDone,
+        )
+        chat = LlmChat(
+            api_key=api_key,
+            session_id=f'digest-{uuid.uuid4()}',
+            system_message=(
+                'You are a concise editor. Summarise a list of newly-taught '
+                'AI rules into a short markdown digest the operator can share. '
+                'Keep it under 250 words. Use "## What your AI learned this week" '
+                'as the H2 title, then 2-3 thematic sub-bullets.'
+            ),
+        ).with_model('gemini', 'gemini-3-flash-preview')
+        full = ''
+        async for ev in chat.stream_message(UserMessage(text=(
+            f'These are the {len(docs)} new learnings approved in the last '
+            f'{weeks} week(s):\n\n{bullets}\n\nSummarise.'
+        ))):
+            if isinstance(ev, TextDelta):
+                full += ev.content
+            elif isinstance(ev, StreamDone):
+                break
+        return {
+            'weeks': weeks,
+            'count': len(docs),
+            'markdown': full.strip() or f'## AI personality changelog\n\n{bullets}',
+            'fallback': False,
+        }
+    except Exception as e:
+        logger.warning('Digest LLM failed (%s) — using deterministic fallback', e)
+        return {
+            'weeks': weeks,
+            'count': len(docs),
+            'markdown': f'## AI personality changelog — last {weeks} week(s)\n\n{bullets}',
+            'fallback': True,
+        }
