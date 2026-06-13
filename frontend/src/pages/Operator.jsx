@@ -7,7 +7,7 @@ import {
   Users, CreditCard, MessageSquare, DollarSign, Loader2, ShieldCheck, Mail,
   Code2, Sparkles, Wallet, KeyRound, Settings as SettingsIcon, Coins,
   FolderKanban, Activity, ScrollText, Megaphone, MessageCircle, FlaskConical,
-  TrendingUp,
+  TrendingUp, Lock,
 } from 'lucide-react';
 
 import PlansTab     from './operator/PlansTab';
@@ -100,7 +100,18 @@ export default function Operator() {
             </div>
             <div>
               <h1 className="text-3xl font-bold text-tbc-100">Operator Console</h1>
-              <p className="text-sm text-tbc-200/60">Manage members, payments, plans, treasury, licenses, and source code.</p>
+              <div className="mt-1 flex flex-wrap items-center gap-2">
+                <p className="text-sm text-tbc-200/60">Manage members, payments, plans, treasury, licenses, and source code.</p>
+                <span
+                  data-testid="founder-royalty-badge"
+                  title="10% of every paid transaction in this codebase is owed to the original operator. Baked into founder_royalty.py — cannot be disabled from the UI."
+                  onClick={() => setActiveTab('royalties')}
+                  className="inline-flex cursor-pointer items-center gap-1 rounded-full border border-tbc-500/40 bg-tbc-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-tbc-300 hover:bg-tbc-500/20"
+                >
+                  <Lock className="h-2.5 w-2.5" />
+                  Founder royalty · 10% active
+                </span>
+              </div>
             </div>
           </div>
           <OperatorGuideButton onOpen={() => setGuideKey((k) => k + 1)} />
