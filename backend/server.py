@@ -54,6 +54,7 @@ from analytics_ext import router as analytics_router
 from alerts_ext import router as alerts_router
 from secrets_ext import router as secrets_router
 from self_edit_ext import router as self_edit_router
+from deploy_access_ext import router as deploy_access_router
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger('tbc')
@@ -1532,6 +1533,7 @@ app.include_router(self_edit_router)
 app.include_router(analytics_router)
 app.include_router(alerts_router)
 app.include_router(secrets_router)
+app.include_router(deploy_access_router)
 # app.include_router(marketplace_router)  # Marketplace deferred — skipped per user.
 app.add_middleware(
     CORSMiddleware,

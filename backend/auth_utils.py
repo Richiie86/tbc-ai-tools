@@ -148,6 +148,25 @@ async def get_current_operator(user: dict = Depends(get_current_user)) -> dict:
     return user
 
 
+async def get_user_with_deploy_access(
+    user: dict = Depends(get_current_user),
+) -> dict:
+    """Allow operators OR regular users who have `can_deploy=true` on their
+    profile. Used to gate the per-user deploy CTAs in the dashboard chat
+    without granting full operator privileges.
+    """
+    if user.get('role') == 'operator':
+        return user
+    from db import db  # local import avoids circular at module load
+    stored = await db.users.find_one({'id': user['sub']}, {'can_deploy': 1})
+    if not stored or not stored.get('can_deploy'):
+        raise HTTPException(
+            status_code=403,
+            detail='Deploy access not granted. Request it from the operator first.',
+        )
+    return user
+
+
 # TOTP utilities
 
 def generate_totp_secret() -> str:
