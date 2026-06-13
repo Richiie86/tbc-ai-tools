@@ -1,0 +1,47 @@
+{
+  "summary": "Tested the iter_14 trio: Sandbox-AI propose/models/sessions, AI Learnings CRUD + chat injection, and the new Operator UI surfaces. Backend pytest suite (12/12 PASS) covers every requested case including /models 401-unauth, /propose happy path with claude-sonnet-4-6 (envelope shape + sandbox_ai_sessions persistence + /sessions round-trip), all three /propose 400 validations (0 files, single+multi-files, bogus model), PATCH ai-edit-mode 200 on real project + 404 on bogus id, AI Learnings full CRUD + round-trip, and chat-stream continuing to succeed with an active learning. AI Learnings UI tab passes end-to-end (add → toggle → approve → edit → save → delete). Sandbox AI panel could NOT be exercised end-to-end via UI because the Sandbox file tree currently shows 'Empty.' for every subfolder — see frontend_issues for full RCA. Panel code itself is correctly wired (testids present in source).",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "Operator > Sandbox > file tree",
+        "issue": "Drilling into any sandbox root (frontend/src/, frontend/public/, backend/, src/, public/, app/) lands at the correct breadcrumb (e.g. /backend) but the file column shows 'Empty.' — no files render so the operator (and SandboxAIPanel which only mounts when openFile is set) is blocked. testids 'sandbox-root-<path>' click, but no 'sandbox-file-*' / 'sandbox-leaf-*' testids ever appear in the DOM after the click. This blocks the Sandbox AI flow end-to-end via UI.",
+        "selector": "[data-testid='sandbox-tree']",
+        "priority": "HIGH"
+      }
+    ],
+    "integration_issues": [
+      {
+        "flow": "Sandbox > Ask AI to code this for me",
+        "issue": "Panel data-testid='sandbox-ai-panel' is conditionally rendered inside the right-hand editor pane which only mounts after a file is opened. Because the file tree returns no files (see ui_bug above), I could not validate model dropdown / propose / proposal render / Load-into-editor / Apply&commit button presence via UI. Backend /propose has been verified separately and returns a valid envelope for claude-sonnet-4-6 in ~3-5s, so the integration is functional at the API layer.",
+        "affected_selectors": ["[data-testid='sandbox-ai-panel']","[data-testid='sandbox-ai-toggle']","[data-testid='sandbox-ai-propose']","[data-testid='sandbox-ai-proposal']","[data-testid^='sandbox-ai-load-']","[data-testid^='sandbox-ai-commit-']"]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_sandbox_ai_learnings.py",
+    "/app/test_reports/pytest/iter14_full.xml"
+  ],
+  "action_items": [
+    "Investigate why /api/operator/self/tree (or whichever endpoint backs the Sandbox tree) returns no children when drilling into frontend/src/, backend/, etc. — every sandbox root currently shows 'Empty.' in the UI. Once a file can be opened, the SandboxAIPanel will mount and the full Ask-AI flow can be re-verified via Playwright using the existing testids (sandbox-ai-toggle / -instruction / -model / -propose / -proposal / -load-<path> / -commit-<path>).",
+    "Consider rendering SandboxAIPanel even when no file is open (with the current 'open a file first' banner) so the panel is at least discoverable to operators and to E2E tests when the tree is empty / loading."
+  ],
+  "critical_code_review_comments": [
+    "sandbox_ai_ext.py /propose correctly enforces single-file mode, validates model against SUPPORTED_MODELS, returns 503 if EMERGENT_LLM_KEY is missing, 502 on LLM/JSON failures, and persists every proposal into sandbox_ai_sessions keyed by session_id — exactly as the spec requires. _strip_json_envelope is solid (handles ```json fences + first-balanced-{} extraction). LGTM.",
+    "ai_learnings_ext.py CRUD is clean, Pydantic-validated, _serialize excludes Mongo _id, PATCH supports partial updates, DELETE returns 404 on second call (idempotent semantics intentional). LGTM.",
+    "AILearningsTab.jsx UX nit: a disabled (enabled=false) item moves into the 'Pending auto-proposals' section which DOES NOT render a Switch — re-enabling requires the Approve button. That is intentional per code, but it means an operator who toggles off an active learning has to scroll to the proposals section to flip it back on. Worth a one-line tooltip or an explanatory caption.",
+    "SandboxAIPanel.jsx only renders inside the editor column, so if the file tree fails to load files the panel is unreachable. Consider hoisting the panel above the textarea (or rendering it inline with the 'Pick a file…' empty state) so the operator can still see the AI affordance.",
+    "Delete-learning uses window.confirm — works, but not friendly to keyboard / a11y / screen readers. A shadcn AlertDialog (already used elsewhere in the app) would be more consistent."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_sandbox_ai_learnings.py"
+  ],
+  "success_rate": { "backend": "100% (12/12)", "frontend": "AI Learnings 100% — Sandbox AI BLOCKED by sandbox file tree returning Empty." },
+  "test_credentials": "Operator: rac.investments.swe@gmail.com / 123Admin@98 — currently boots without TOTP enforcement (lands on /setup-2fa but direct nav to /operator works via the tbc_session cookie).",
+  "seed_data_creation": "Created + deleted several TEST_LEARNING_* rows in ai_learnings; created several test rows in sandbox_ai_sessions via /propose against the claude-sonnet-4-6 model; flipped deploy_projects[<first>].ai_edit_mode multi → single → multi via PATCH. The test_chat_succeeds_with_marker_learning test inserts a 'TESTONLY_MARKER_XYZ — keep answers short.' learning, drives /api/chat/stream, then deletes the learning in a finally block — no residual rows.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "1) The Sandbox tree shows 'Empty.' for every directory in this preview env — until that is fixed, the SandboxAIPanel cannot be opened via UI. Once fixed, the existing testids (sandbox-ai-toggle / -instruction / -model / -propose / -proposal / -load-<path> / -commit-<path>) are sufficient. 2) Operator flow: login at /login then navigate to /operator (cookie is set even though the app redirects to /setup-2fa). Dismiss [data-testid='guide-skip'] first. Click the tab via page.get_by_role('tab', name='AI Learnings') or 'Sandbox' — the ?tab=… URL param did NOT auto-select the tab in my run. 3) AI Learnings: toggling an active learning to disabled moves it into the 'Pending auto-proposals' section (no Switch visible there) — re-enable via [data-testid='ai-learning-approve-<id>']. 4) Delete uses window.confirm — wire page.on('dialog', d=>d.accept()). 5) Backend pytest harness: pytest /app/backend/tests/test_sandbox_ai_learnings.py -v — full pass in ~5s. 6) DO NOT click [data-testid^='sandbox-ai-commit-'] — it commits to GitHub; only verify presence.",
+  "rca_of_the_issue": "Sandbox AI panel is gated on `openFile` being set in SandboxTab. The panel itself is correctly wired (data-testid='sandbox-ai-panel' exists in JSX, models endpoint returns 200 with 6 entries, /propose returns a valid envelope in backend tests). The blocker is purely the file tree: clicking [data-testid='sandbox-root-backend-'] updates the breadcrumb to /backend but the children panel renders the literal string 'Empty.' — no [data-testid^='sandbox-file-'] or similar nodes are emitted to the DOM. Likely causes: (a) the tree backend endpoint is returning an empty children array for these paths, (b) a client-side filter (e.g. only show edited files) is on by default, or (c) the GitHub API call is failing silently and the catch shows 'Empty.' instead of an error. Recommend logging the tree response in SandboxTab and surfacing an error toast when the API returns non-200."
+}

@@ -9,6 +9,7 @@ import {
   Rocket, FlaskConical, AlertTriangle, Sparkles,
 } from 'lucide-react';
 import { PreviewReadyPill } from '../dashboard/PostAiDeploySuggestion';
+import SandboxAIPanel from './SandboxAIPanel';
 
 /**
  * Operator self-edit sandbox.
@@ -302,6 +303,12 @@ export default function SandboxTab() {
                   </a>
                 )}
               </div>
+              <SandboxAIPanel
+                openFile={openFile}
+                draft={draft}
+                branch={info?.branch}
+                onApplyToEditor={(content) => setDraft(content)}
+              />
               <Textarea
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
