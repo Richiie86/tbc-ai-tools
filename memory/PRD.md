@@ -11,6 +11,20 @@ gold theme. Domain: **tbctools.org**.
 - **End user (member)** — Chats with the AI builder, manages plan, copies referral link.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
+## Implemented — Feb 2026 (latest session, batch 5)
+- ✅ **Promote with auto-tag + CHANGELOG** (`deploy_release_tag_ext.py`):
+  - When `auto_tag=true` in PromoteRequest, autopilot creates an annotated GitHub tag `prod-YYYY-MM-DD-N` (N is a per-day sequence, looked up via `git/matching-refs`) pointing at the promoted commit. Tag carries a message + UTC tagger info.
+  - When `auto_changelog=true`, prepends a CHANGELOG.md entry on the default branch (creates the file if missing). Two-step Contents API (GET sha → PUT new content).
+  - Both fully best-effort: failures are reported in the promote response (`release_tag.error`, `changelog.error`) but never roll back the Vercel promote.
+  - PR Preview widget exposes both as localStorage-persisted checkboxes (default ON). Toast on success shows the new tag name + GitHub URL.
+- ✅ **Dismiss UX preview** — new endpoint `GET /api/operator/runtime-errors/{id}/dismiss-preview` returns `{would_propose, preview_text}`. UI renders an inline emerald banner inside the expanded error row when `rca.confidence==='high' && rca.suggested_change` saying "Dismissing this error will auto-propose a Learning…".
+- ✅ **Reject without proposing** — `POST /dismiss` now accepts `{skip_propose: true}`. New "Dismiss only" button appears next to the regular "Dismiss" button when the propose banner is shown. Response includes `skipped_propose: bool` so the UI can toast "Dismissed · learning skipped".
+- ✅ **AI Learnings garbage collection** (`archive_stale_proposals`):
+  - APScheduler job runs every 24h (15 min after boot). Marks `archived=true, archived_at=now` on any `auto_proposed=true, enabled=false` learning older than 14 days.
+  - Soft-archive (not delete) so audit history is preserved. `GET /api/operator/ai-learnings` omits archived by default; pass `?include_archived=true` to inspect.
+  - Manual trigger via `POST /api/operator/ai-learnings/gc?days=N` for ad-hoc testing.
+
+
 ## Implemented — Feb 2026 (latest session, batch 4)
 - ✅ **Runtime errors → AI Learnings auto-loop** (the killer feature):
   - When the operator dismisses an error whose RCA has `confidence: 'high'` + a non-empty `suggested_change`, `_maybe_propose_learning_from_error()` distils it into a pending AI Learning.

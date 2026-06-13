@@ -60,18 +60,19 @@ export default function ErrorsTab() {
     }
   };
 
-  const dismiss = async (err) => {
+  const dismiss = async (err, { skipPropose = false } = {}) => {
     try {
-      const { data } = await api.post(`/operator/runtime-errors/${err.id}/dismiss`);
+      const { data } = await api.post(`/operator/runtime-errors/${err.id}/dismiss`, {
+        skip_propose: skipPropose,
+      });
       setErrors((cur) => cur.filter((e) => e.id !== err.id));
       if (data?.proposed_learning_id) {
-        // High-confidence RCA → auto-loop into AI Learnings as a pending
-        // proposal. Surface a clickable toast so the operator can
-        // approve it in one hop.
         toast.success('Dismissed · AI Learning proposed from the RCA', {
           description: 'Click "AI Learnings" tab to review and approve.',
           duration: 7000,
         });
+      } else if (data?.skipped_propose) {
+        toast.success('Dismissed · learning skipped');
       } else {
         toast.success('Dismissed');
       }
@@ -153,7 +154,7 @@ export default function ErrorsTab() {
               onToggle={() => setExpanded((cur) => ({ ...cur, [err.id]: !cur[err.id] }))}
               running={running === err.id}
               onRunRCA={() => runRCA(err)}
-              onDismiss={() => dismiss(err)}
+              onDismiss={(opts) => dismiss(err, opts)}
               onDelete={() => setConfirmDelete(err)}
               onOpenInSandbox={() => openInSandbox(err)}
             />
@@ -276,6 +277,15 @@ function ErrorRow({ err, expanded, onToggle, running, onRunRCA, onDismiss, onDel
                   {err.rca.suggested_change}
                 </div>
               )}
+              {err.rca.confidence === 'high' && err.rca.suggested_change && (
+                <div
+                  data-testid={`error-propose-preview-${err.id}`}
+                  className="mt-2 rounded border border-emerald-500/30 bg-emerald-500/[0.06] p-2 text-[11px] text-emerald-200"
+                >
+                  💡 Dismissing this error will <strong>auto-propose a Learning</strong> to your AI from this RCA.
+                  Skip with "Dismiss only" if it's a one-off.
+                </div>
+              )}
             </div>
           )}
 
@@ -301,10 +311,22 @@ function ErrorRow({ err, expanded, onToggle, running, onRunRCA, onDismiss, onDel
               <Code2 className="mr-1 h-3 w-3" />Open in Sandbox
             </Button>
             <div className="ml-auto flex items-center gap-1">
+              {err.rca?.confidence === 'high' && err.rca?.suggested_change && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => onDismiss({ skipPropose: true })}
+                  data-testid={`error-dismiss-skip-${err.id}`}
+                  className="h-7 text-tbc-200/60 hover:text-tbc-100"
+                  title="Dismiss WITHOUT proposing an AI Learning"
+                >
+                  Dismiss only
+                </Button>
+              )}
               <Button
                 size="sm"
                 variant="ghost"
-                onClick={onDismiss}
+                onClick={() => onDismiss()}
                 data-testid={`error-dismiss-${err.id}`}
                 className="h-7 text-tbc-200/60 hover:text-tbc-100"
               >

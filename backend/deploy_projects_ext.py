@@ -889,6 +889,13 @@ class PromoteRequest(BaseModel):
     """Optional override — usually we promote `last_deployment_id` but the
     operator may want to ship a specific older preview."""
     deployment_id: Optional[str] = None
+    # Closes the loop between Sandbox → preview → production → audit trail.
+    # When `auto_tag=true` we create an annotated GitHub tag
+    # `prod-YYYY-MM-DD-N` pointing at the promoted commit. When
+    # `auto_changelog=true` we prepend an entry to CHANGELOG.md. Both
+    # default off — opt-in per promote to avoid surprising the operator.
+    auto_tag: bool = False
+    auto_changelog: bool = False
 
 
 @ops_router.post('/{project_id}/redeploy')
@@ -914,6 +921,50 @@ async def op_promote_project(
     result = await _trigger_promote(
         project_id, settings, payload.deployment_id if payload else None,
     )
+    # ---- optional release-tag + CHANGELOG append --------------------
+    # Best-effort: failures are reported alongside the promote result but
+    # never roll back the underlying Vercel promote.
+    if payload and (payload.auto_tag or payload.auto_changelog):
+        try:
+            from deploy_release_tag_ext import (
+                create_release_tag, prepend_changelog_entry,
+            )
+            project = await db.deploy_projects.find_one({'id': project_id}) or {}
+            repo = project.get('repo')
+            # Pull the commit sha that the promoted deployment came from.
+            # `_trigger_promote` returns it in `meta.githubCommitSha` when
+            # available; otherwise we leave a placeholder.
+            commit_sha = (
+                (result.get('meta') or {}).get('githubCommitSha')
+                or result.get('commit_sha')
+                or ''
+            )
+            branch = (
+                (result.get('meta') or {}).get('githubCommitRef')
+                or project.get('gitRef')
+                or 'main'
+            )
+            tag_info = None
+            if payload.auto_tag and repo and commit_sha:
+                tag_info = await create_release_tag(
+                    settings, repo, commit_sha,
+                    message=f"Promoted {project.get('name') or project_id} via TBC autopilot",
+                )
+                result['release_tag'] = tag_info or {'error': 'tag_creation_failed'}
+            if payload.auto_changelog and repo and tag_info and tag_info.get('tag'):
+                changelog = await prepend_changelog_entry(
+                    settings, repo, branch,
+                    tag_info['tag'], commit_sha,
+                    project.get('name') or project_id,
+                    op.get('email') or 'unknown',
+                )
+                result['changelog'] = (
+                    {'sha': changelog.get('sha'), 'message': changelog.get('message')}
+                    if changelog else {'error': 'changelog_write_failed'}
+                )
+        except Exception:
+            # Never block the operator's promote on the audit-trail layer.
+            logger.exception('release-tag / changelog post-promote failed')
     try:
         from audit_ext import record_audit
         await record_audit(

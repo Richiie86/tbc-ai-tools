@@ -252,12 +252,57 @@ async def run_rca(error_id: str, _op: dict = Depends(get_current_operator)):
     return rca
 
 
+def _would_propose_learning(err_doc: dict) -> Optional[str]:
+    """Returns the proposed learning *text* without writing anything to the
+    DB — used by the UI to show 'This dismiss will propose a learning'
+    inline before the operator clicks. Returns None when the gate doesn't
+    fire (low confidence, empty suggestion, etc).
+    """
+    rca = err_doc.get('rca') or {}
+    if rca.get('confidence') != 'high':
+        return None
+    change = (rca.get('suggested_change') or '').strip()
+    if not change:
+        return None
+    suggested_file = rca.get('suggested_file') or ''
+    return (
+        f'When working on {suggested_file or "the codebase"}: {change} '
+        f'(learned from real production error: "{err_doc.get("message", "")[:120]}")'
+    )[:600]
+
+
+@op_router.get('/{error_id}/dismiss-preview')
+async def dismiss_preview(error_id: str, _op: dict = Depends(get_current_operator)):
+    """Lightweight read-only — tells the UI whether dismissing this error
+    will auto-propose a learning, and if so what the proposal would say."""
+    doc = await db.runtime_errors.find_one({'id': error_id})
+    if not doc:
+        raise HTTPException(404, 'Error not found')
+    proposed = _would_propose_learning(doc)
+    return {
+        'would_propose': proposed is not None,
+        'preview_text': proposed,
+    }
+
+
+class DismissBody(BaseModel):
+    """Optional body for dismiss — `skip_propose=true` lets the operator
+    dismiss an error WITHOUT auto-proposing a Learning from its RCA.
+    Useful for one-off errors that aren't worth teaching the AI about."""
+    skip_propose: bool = False
+
+
 @op_router.post('/{error_id}/dismiss')
-async def dismiss(error_id: str, _op: dict = Depends(get_current_operator)):
-    """Mark error as resolved. When the doc has a *high-confidence RCA*,
-    we also propose an AI Learning so the AI inherits the lesson learned
-    from this real production bug. Operator still has to approve the
-    proposal in AI Learnings tab — fully reversible."""
+async def dismiss(
+    error_id: str,
+    body: Optional[DismissBody] = None,
+    _op: dict = Depends(get_current_operator),
+):
+    """Mark error as resolved. When the doc has a *high-confidence RCA*
+    AND `skip_propose` is not set, we also propose an AI Learning so the
+    AI inherits the lesson learned from this real production bug.
+    Operator still has to approve the proposal in AI Learnings tab —
+    fully reversible."""
     doc = await db.runtime_errors.find_one({'id': error_id})
     if not doc:
         raise HTTPException(404, 'Error not found')
@@ -266,10 +311,14 @@ async def dismiss(error_id: str, _op: dict = Depends(get_current_operator)):
         {'id': error_id},
         {'$set': {'dismissed_at': now}},
     )
-    proposed_learning_id = await _maybe_propose_learning_from_error(doc)
+    skip = bool(body and body.skip_propose)
+    proposed_learning_id = (
+        None if skip else await _maybe_propose_learning_from_error(doc)
+    )
     return {
         'dismissed': error_id,
         'proposed_learning_id': proposed_learning_id,
+        'skipped_propose': skip,
     }
 
 
@@ -283,26 +332,18 @@ async def _maybe_propose_learning_from_error(err_doc: dict) -> Optional[str]:
     learning insert fails.
     """
     try:
-        rca = err_doc.get('rca') or {}
-        if rca.get('confidence') != 'high':
-            return None
-        change = (rca.get('suggested_change') or '').strip()
-        if not change:
+        text = _would_propose_learning(err_doc)
+        if not text:
             return None
         sig = err_doc.get('signature', '')
         # Idempotency — don't propose twice for the same error signature.
         already = await db.ai_learnings.find_one({'source_error_signature': sig})
         if already:
             return None
-        suggested_file = rca.get('suggested_file') or ''
-        text = (
-            f'When working on {suggested_file or "the codebase"}: {change} '
-            f'(learned from real production error: "{err_doc.get("message", "")[:120]}")'
-        )
         new_id = str(uuid.uuid4())
         await db.ai_learnings.insert_one({
             'id': new_id,
-            'text': text[:600],
+            'text': text,
             'enabled': False,  # operator approval gate
             'auto_proposed': True,
             'source': 'runtime_error',

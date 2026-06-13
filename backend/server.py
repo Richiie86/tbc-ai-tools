@@ -430,6 +430,24 @@ async def startup():
             # double-firing if the scheduler restarts.
             next_run_time=datetime.now(timezone.utc) + timedelta(minutes=10),
         )
+
+        # AI Learnings garbage collection — archive auto-proposals the
+        # operator never approved within 14 days. Keeps the AI Learnings
+        # tab from drowning in stale suggestions.
+        async def _ai_learnings_gc_job():
+            try:
+                from ai_learnings_ext import archive_stale_proposals
+                res = await archive_stale_proposals()
+                if res.get('archived_count'):
+                    logger.info('AI Learnings GC archived %d stale proposals',
+                                res['archived_count'])
+            except Exception:
+                logger.exception('AI Learnings GC job failed')
+
+        scheduler.add_job(
+            _ai_learnings_gc_job, 'interval', hours=24,
+            next_run_time=datetime.now(timezone.utc) + timedelta(minutes=15),
+        )
         scheduler.start()
         app.state.scheduler = scheduler
         logger.info('Trial-email scheduler started (hourly).')

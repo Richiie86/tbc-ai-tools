@@ -62,8 +62,12 @@ def _serialize(d: dict) -> dict:
 
 
 @router.get('')
-async def list_learnings(_op: dict = Depends(get_current_operator)):
-    docs = await db.ai_learnings.find({}).sort('created_at', -1).to_list(200)
+async def list_learnings(
+    include_archived: bool = False,
+    _op: dict = Depends(get_current_operator),
+):
+    q: dict = {} if include_archived else {'archived': {'$ne': True}}
+    docs = await db.ai_learnings.find(q).sort('created_at', -1).to_list(500)
     return [_serialize(d) for d in docs]
 
 
@@ -106,6 +110,43 @@ async def delete_learning(learning_id: str, _op: dict = Depends(get_current_oper
     if res.deleted_count == 0:
         raise HTTPException(404, 'Learning not found')
     return {'deleted': learning_id}
+
+
+# ---------- Auto-archive garbage collection ----------
+
+GC_DAYS_DEFAULT = 14
+
+
+async def archive_stale_proposals(days: int = GC_DAYS_DEFAULT) -> dict:
+    """Soft-archive auto-proposed learnings that the operator never
+    approved (still `enabled=false, auto_proposed=true`) within `days`.
+
+    Archive vs delete: we mark them `archived=true` instead of removing
+    so the audit trail (e.g. "this error was proposed as a learning and
+    the operator chose not to approve") remains queryable. The default
+    list endpoint omits archived items.
+
+    Called from the APScheduler job in server.py and also exposed at
+    POST /api/operator/ai-learnings/gc for ad-hoc operator-triggered runs.
+    """
+    from datetime import timedelta
+    cutoff = datetime.now(timezone.utc) - timedelta(days=max(1, int(days)))
+    res = await db.ai_learnings.update_many(
+        {
+            'enabled': False,
+            'auto_proposed': True,
+            'archived': {'$ne': True},
+            'created_at': {'$lt': cutoff},
+        },
+        {'$set': {'archived': True, 'archived_at': datetime.now(timezone.utc)}},
+    )
+    return {'archived_count': int(res.modified_count), 'cutoff': cutoff.isoformat()}
+
+
+@router.post('/gc')
+async def gc(days: int = GC_DAYS_DEFAULT, _op: dict = Depends(get_current_operator)):
+    """Operator-triggered manual garbage collection — useful for testing."""
+    return await archive_stale_proposals(days=days)
 
 
 # ---------- Weekly insight digest ----------

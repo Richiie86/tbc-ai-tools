@@ -26,6 +26,18 @@ export default function PreviewWidget() {
   const [loading, setLoading] = useState(true);
   const [promoting, setPromoting] = useState(null); // deployment_id being promoted
   const [collapsed, setCollapsed] = useState(false);
+  // Per-row promote options — `auto_tag` and `auto_changelog` are persisted
+  // in localStorage so the operator's preference survives page reloads.
+  const [autoTag, setAutoTag] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('promote_auto_tag') || 'true'); }
+    catch { return true; }
+  });
+  const [autoChangelog, setAutoChangelog] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('promote_auto_changelog') || 'true'); }
+    catch { return true; }
+  });
+  useEffect(() => { localStorage.setItem('promote_auto_tag', JSON.stringify(autoTag)); }, [autoTag]);
+  useEffect(() => { localStorage.setItem('promote_auto_changelog', JSON.stringify(autoChangelog)); }, [autoChangelog]);
 
   const load = useCallback(async ({ silent } = {}) => {
     if (!silent) setLoading(true);
@@ -62,10 +74,18 @@ export default function PreviewWidget() {
     let lastErr;
     for (let attempt = 1; attempt <= 3; attempt += 1) {
       try {
-        await api.post(`/operator/deploy/${p.project_id}/promote`, {
+        const { data } = await api.post(`/operator/deploy/${p.project_id}/promote`, {
           deployment_id: p.deployment_id,
+          auto_tag: autoTag,
+          auto_changelog: autoChangelog,
         });
-        toast.success(`Promoted ${p.branch} to production`);
+        const tag = data?.release_tag?.tag;
+        toast.success(
+          tag
+            ? `Promoted ${p.branch} → ${tag}`
+            : `Promoted ${p.branch} to production`,
+          { description: tag ? data.release_tag.url : undefined },
+        );
         setPreviews((cur) => cur.filter((x) => x.deployment_id !== p.deployment_id));
         setPromoting(null);
         return;
@@ -115,6 +135,31 @@ export default function PreviewWidget() {
           <RefreshCw className="h-3 w-3" />
         </Button>
       </button>
+
+      {!collapsed && (
+        <div className="mt-2 flex flex-wrap items-center gap-3 text-[10px] text-tbc-200/70">
+          <label className="flex items-center gap-1.5" title="Annotated GitHub tag `prod-YYYY-MM-DD-N` on promote">
+            <input
+              type="checkbox"
+              checked={autoTag}
+              onChange={(e) => setAutoTag(e.target.checked)}
+              data-testid="preview-toggle-auto-tag"
+              onClick={(e) => e.stopPropagation()}
+            />
+            Auto-tag release
+          </label>
+          <label className="flex items-center gap-1.5" title="Prepends an entry to CHANGELOG.md on the default branch">
+            <input
+              type="checkbox"
+              checked={autoChangelog}
+              onChange={(e) => setAutoChangelog(e.target.checked)}
+              data-testid="preview-toggle-auto-changelog"
+              onClick={(e) => e.stopPropagation()}
+            />
+            Update CHANGELOG.md
+          </label>
+        </div>
+      )}
 
       {!collapsed && (
         <ul className="mt-2.5 space-y-1.5">
