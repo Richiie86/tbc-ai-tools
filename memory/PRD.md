@@ -11,6 +11,35 @@ gold theme. Domain: **tbctools.org**.
 - **End user (member)** — Chats with the AI builder, manages plan, copies referral link.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
+## Implemented — Feb 2026 (latest session, batch 7 + final)
+- ✅ **Emergency lockdown pill** (`EmergencyLockdownPill.jsx`):
+  - Always-visible top-bar pill in the Operator console next to OperatorGuideButton.
+  - One-click PATCH flips BOTH `banner_enabled` AND `login_lockdown_enabled` to true (with `window.confirm` on engage; one-click release without confirm).
+  - Pulsing red "App is private" style when active; muted "Lock app" when open.
+  - 30s background poll (pauses when document hidden) keeps state in sync across tabs.
+- ✅ **iter19 crash fix**: added missing `import EmergencyLockdownPill from '../components/EmergencyLockdownPill';` in `Operator.jsx`. Crash root-caused to ReferenceError at first render; ErrorBoundary was masking it as "Something broke on this page".
+
+## Test runs across this session — full audit trail
+| Iter | Scope                                              | Result                |
+|------|----------------------------------------------------|-----------------------|
+| 14   | AI Learnings + Sandbox AI                          | 12/12 BE · 100% FE   |
+| 15   | AI Brain + chat fallback + self-healing toggle     | 10/10 BE · 100% FE   |
+| 16   | AI Test Bench                                      | 6/6 BE · 100% FE     |
+| 17   | Runtime errors + RCA + previews + digest + cron    | 15/15 BE · 100% FE   |
+| 18   | GC + severity classifier + auto-page               | 9/10 (throttle bug)  |
+| 19   | App settings + lockdown                            | 12/12 BE · 50% FE    |
+| 20   | iter19 frontend retest after import fix            | 19/19 FE · 100%      |
+
+Total: **83/84 assertions PASS** across 7 iterations. One bug found (throttle-row-after-email), one found-and-fixed (missing import).
+
+## Explicitly deferred — known unimplemented items
+- `Dashboard.jsx` component decomposition — mechanical refactor, no user-facing impact.
+- Skill-tree as a true react-flow graph (currently grouped lists).
+- Multi-pod Redis-backed rate-limit for `/api/runtime-errors` ingest (in-memory bucket fine for single-pod preview).
+- ESLint v9 config + `react/jsx-no-undef` enforcement — would have caught the iter19 missing-import crash at CI time. Currently the project has no eslint config; the lint-tool's internal config is advisory only.
+- Auto-patch path for high-confidence RCAs — deliberately deferred; the runtime-error → AI-Learnings auto-loop is the safer indirect path.
+
+
 ## Implemented — Feb 2026 (latest session, batch 6)
 - ✅ **Personal-use banner overlay** (`PersonalUseBanner.jsx` + `app_settings_ext.py`):
   - Full-viewport translucent red overlay (`position:fixed; inset:0; z-index:9998; pointer-events:none`). Underlying UI stays fully clickable.
