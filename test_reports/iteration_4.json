@@ -1,0 +1,54 @@
+{
+  "summary": "Iteration 4 verification — chat-scroll fix, OpsDeploySection refactor (4 new files), and the ship-gate (412 on do_not_ship + seeded fix-chat). Backend: 50 passed + 1 prior skip (44 prior regression in test_p0/p1/p2 still green; 6 new tests in test_p3_ship_gate.py all green). Frontend: refactor confirmed (OpsDeploySection.jsx=350 lines ≤400; CodeReviewDialog.jsx, CloneProjectDialog.jsx, ProjectRow.jsx, ShipGateDialog.jsx all present with full data-testid surface). Ship-gate UI verified end-to-end: deploy-ship-gate-test click → 412 → ship-gate-ship-gate-test modal opens listing both findings (ship-gate-finding-ship-gate-test-0 + -1) plus ship-gate-open-chat-ship-gate-test and ship-gate-bypass-ship-gate-test buttons. Chat scroll: data-testid='chat-scroll' container mounted on /dashboard; data-testid='jump-to-latest' wired conditionally (hidden when pinned/empty as expected).",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "ShipGateDialog · ProjectRow.runDeploy",
+        "issue": "After clicking 'Ship anyway', if the bypass request fails for any non-412 reason (e.g. 503 'Vercel token not configured' in preview env, 502 from Vercel), the ship-gate modal stays open because setGateBlock(null) is only called inside the success branch of runDeploy (line 139). On error a toast fires but the modal does NOT close, forcing the operator to click Cancel. Fix: call setGateBlock(null) before the toast.error in the catch branch (or in a finally) so the modal always closes when the gate is no longer the reason for failure. Test report flagged: 'After bypass — modal element visible: True (expect False)'.",
+        "selector": "[data-testid='ship-gate-bypass-{id}']",
+        "priority": "LOW"
+      },
+      {
+        "component": "ProjectRow preview click while ship-gate modal open",
+        "issue": "Related side-effect of the above: because the ship-gate modal remained open after the failed bypass, clicking [data-testid='preview-ship-gate-test'] couldn't be observed clearly (modal still visible). Once the modal-close fix above lands, this concern goes away. Backend correctness for preview is already verified by test_p3_ship_gate.TestPreviewSkipsGate (no 412).",
+        "selector": "[data-testid='preview-{id}']",
+        "priority": "LOW"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_p0_review.py",
+    "/app/backend/tests/test_p1_refactor.py",
+    "/app/backend/tests/test_p2_deploy_extras.py",
+    "/app/backend/tests/test_p3_ship_gate.py",
+    "/app/test_reports/pytest/iter4_full.xml",
+    "/app/test_reports/pytest/iter4_p3_ship_gate.xml"
+  ],
+  "action_items": [
+    "(LOW) ProjectRow.runDeploy: also setGateBlock(null) in the error branch (or finally) so the ship-gate modal auto-closes when a bypass attempt fails for non-gate reasons (e.g. 503/502). Currently the modal lingers until Cancel."
+  ],
+  "critical_code_review_comments": [
+    "deploy_projects_ext._trigger_deploy raises HTTPException with a dict detail — FastAPI serializes that as JSON unchanged, but Starlette emits no schema for it in the OpenAPI doc. If you publish /docs, consider a typed response model (e.g. ReviewBlocked) so the AI surface clients see the 412 shape.",
+    "_create_fix_review_chat imports models.ChatSession/ChatMessage inside the function ('lazy to avoid cycle'). That's fine, but the DEFAULT_MODEL='claude-opus-4-7' is a hard-coded duplicate of server.py — if server.py changes the default model these will silently drift. Extract a single constant in a shared module.",
+    "_create_fix_review_chat returns None if user_id is missing (AI-surface case). The 412 detail dict then carries fix_chat_session_id=None which the frontend ShipGateDialog now correctly handles (Open-fix-chat is disabled), but consider omitting the key entirely so AI consumers don't trip on a null id.",
+    "ShipGateDialog displays up to 6 findings; that limit is sane but ensure the seeded chat content always carries all findings (already verified — _create_fix_review_chat joins the entire findings list into the prompt).",
+    "ProjectRow.jsx is 478 lines — still under the 700-line guideline but, like the original OpsDeploySection, it now hosts copy-url, domain-edit, clone, code-review, ship-gate, deploy, redeploy, preview, download, and health-check state machines. Consider extracting at least the domain-editor block into its own hook (useInlineDomain) for the next refactor.",
+    "Dashboard.jsx auto-scroll: stickToBottom checked against threshold 80px is reasonable; consider lifting that constant to a named variable + add a tiny prop test for the 'jump-to-latest' visibility-toggle so we don't regress."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_p3_ship_gate.py"
+  ],
+  "success_rate": {
+    "backend": "100% (50/50 passed + 1 prior skip preserved)",
+    "frontend": "92% — refactor & all required testids verified, ship-gate modal opens & lists findings with both action buttons, chat-scroll + jump-to-latest mounted as spec'd. One LOW-priority UX bug (modal stays open after non-412 bypass error)."
+  },
+  "test_credentials": "Operator rac.investments.swe@gmail.com / 123Admin@98 (RESET_OPERATOR_PASSWORD=true clears 2FA at boot; first login lands on /setup-2fa, navigate directly to /operator). Mongo DB: test_database.",
+  "seed_data_creation": "Created (and then deleted in teardown) deploy_projects row id='ship-gate-test' with last_code_review.verdict='do_not_ship' + 2 findings. The autouse fixture in test_p3_ship_gate.py reseeds it for each test run and cleans up afterwards (also deletes any chat_sessions whose title starts with 'Fix review:' and their messages). For the manual UI test I reseeded directly via pymongo, then deleted both the project row and the 1 fix-review chat session it spawned. No residual test data remains.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend regression now spans 4 files (test_p0_review.py, test_p1_refactor.py, test_p2_deploy_extras.py, test_p3_ship_gate.py). Run all: `cd /app/backend && python -m pytest -q tests/` — expect 50 passed + 1 skip. Ship-gate seed/cleanup is autouse-scoped, so the tests don't pollute the DB after they finish. For UI verification of the ship-gate path you must reseed the project (the pytest fixture deletes it on teardown) — easiest via pymongo (see iter4 runbook above) or by calling POST /api/projects + then a direct mongo update setting last_code_review.verdict='do_not_ship'.",
+  "rca of the issue": "Ship-gate-modal-stays-open RCA: ProjectRow.runDeploy (line 132–156 in /app/frontend/src/pages/operator/ops/deploy/ProjectRow.jsx) only calls setGateBlock(null) inside the success branch. When the bypass POST returns 503 (no Vercel token), the catch branch falls through to a toast but never clears gateBlock, so the dialog stays mounted with open=true. Reproduction: 1) seed a deploy_projects row with last_code_review.verdict='do_not_ship', 2) log in as operator → /operator → Ops, 3) click Deploy on that row → modal opens (correct), 4) click 'Ship anyway' → 503 toast appears but the modal remains visible. Mitigation: add `setGateBlock(null);` in the catch (or wrap in finally) before/after the toast.error call so any non-412 outcome dismisses the modal. Severity is LOW because the operator can still close it via Cancel and the data path is correct."
+}

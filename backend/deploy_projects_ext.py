@@ -88,6 +88,10 @@ class ProjectOut(BaseModel):
 class DeployRequest(BaseModel):
     target: str = 'production'        # 'production' | 'preview'
     git_ref: Optional[str] = None     # override the project's default branch
+    # Operator-only override: skip the do_not_ship review-gate even when the
+    # last AI code review says the project shouldn't ship. Defaults to false
+    # so an autonomous AI agent can't bypass its own safety net by accident.
+    bypass_review: bool = False
 
 
 # ===================================================================
@@ -505,10 +509,73 @@ async def op_update_keys(
     }
 
 
-async def _trigger_deploy(project_id: str, settings: dict, target: str, git_ref: Optional[str]) -> dict:
+async def _create_fix_review_chat(project: dict, review: dict, user_id: Optional[str]) -> Optional[str]:
+    """Seed a chat session pre-loaded with the failing review findings so the
+    operator can ask the AI to fix them in one click. Returns the new
+    session_id (or None if we can't create one — e.g. AI surface caller).
+
+    Imported lazily to avoid a top-level cycle (server.py imports this module
+    via setup_routers).
+    """
+    if not user_id:
+        return None  # AI-surface (no associated user) — nothing to seed
+    try:
+        from models import ChatSession, ChatMessage  # direct import — no cycle
+    except Exception:
+        return None
+    DEFAULT_MODEL = 'claude-opus-4-7'  # mirror server.py; safe constant copy
+
+    findings = review.get('findings') or []
+    missing = review.get('missing_files') or []
+    findings_block = '\n\n'.join(
+        f"- [{f.get('severity', 'low').upper()}] {f.get('file', '?')}: "
+        f"**{f.get('title', '(untitled)')}**\n  {f.get('explanation', '')}\n"
+        f"  Suggested fix: {f.get('suggested_fix', 'n/a')}"
+        for f in findings
+    ) or '(no structured findings — see raw review)'
+    missing_block = ('\n\nMissing files: ' + ', '.join(missing)) if missing else ''
+    prompt = (
+        f"My deploy of **{project.get('projectName')}** "
+        f"(repo `{project.get('repo')}`, branch `{review.get('ref') or project.get('gitRef') or 'main'}`) "
+        f"was blocked by an AI code review with verdict **{review.get('verdict')}**.\n\n"
+        f"Summary: {review.get('summary', '(no summary)')}\n\n"
+        f"Findings ({len(findings)}):\n{findings_block}{missing_block}\n\n"
+        "Please propose concrete patches (file paths + diffs) that resolve every HIGH/MEDIUM "
+        "finding so I can re-run the review and ship. If a finding is invalid, say so and explain "
+        "why before we proceed."
+    )
+
+    s = ChatSession(
+        user_id=user_id,
+        title=f"Fix review: {project.get('projectName', 'project')[:48]}",
+        model=DEFAULT_MODEL,
+        variant='tbc1',
+    )
+    await db.chat_sessions.insert_one(s.dict())
+    msg = ChatMessage(session_id=s.id, user_id=user_id, role='user', content=prompt)
+    await db.chat_messages.insert_one(msg.dict())
+    logger.info('Seeded fix-review chat %s for project %s (user %s)', s.id, project.get('id'), user_id)
+    return s.id
+
+
+async def _trigger_deploy(
+    project_id: str,
+    settings: dict,
+    target: str,
+    git_ref: Optional[str],
+    *,
+    bypass_review: bool = False,
+    user_id: Optional[str] = None,
+) -> dict:
     """Shared deploy implementation. Used by both the operator (cookie auth)
     and AI-agent (Bearer auth) surfaces so the contract stays identical.
     Raises 404 if the project isn't known, 400 if `target` is invalid.
+
+    Ship-gate: when `target == "production"` and the project's most recent
+    code review verdict is `do_not_ship`, we refuse with 412 (Precondition
+    Failed) UNLESS `bypass_review` is true. The 412 body carries the failing
+    review + a freshly-seeded chat `session_id` so the UI can open a "fix
+    these findings" conversation in one click.
 
     Special case: `tbctools-self` is lazy-upserted from settings so a freshly
     configured operator can "Deploy this app" in one click without manually
@@ -521,6 +588,27 @@ async def _trigger_deploy(project_id: str, settings: dict, target: str, git_ref:
         project = await _ensure_self_project()
     if not project:
         raise HTTPException(404, 'Project not found')
+
+    # Ship-gate (production deploys only — previews always go through so the
+    # operator can sanity-check fixes before re-running the review).
+    if target == 'production' and not bypass_review:
+        last_review = project.get('last_code_review') or {}
+        if last_review.get('verdict') == 'do_not_ship':
+            fix_session_id = await _create_fix_review_chat(project, last_review, user_id)
+            raise HTTPException(
+                412,
+                {
+                    'error': 'review_blocked',
+                    'message': (
+                        f"Production deploy blocked by AI code review verdict "
+                        f"'{last_review.get('verdict')}'. Resolve the findings or "
+                        f"pass bypass_review=true to override."
+                    ),
+                    'review': last_review,
+                    'fix_chat_session_id': fix_session_id,
+                },
+            )
+
     res = await _vercel_create_deployment(settings, project, target, git_ref)
     await _record_deployment(project_id, res)
     return {
@@ -559,10 +647,14 @@ async def _trigger_redeploy(project_id: str, settings: dict) -> dict:
 async def op_deploy_project(
     project_id: str,
     req: DeployRequest,
-    _user: dict = Depends(get_current_operator),
+    user: dict = Depends(get_current_operator),
 ):
     settings = await get_settings_doc()
-    return await _trigger_deploy(project_id, settings, req.target, req.git_ref)
+    return await _trigger_deploy(
+        project_id, settings, req.target, req.git_ref,
+        bypass_review=req.bypass_review,
+        user_id=user.get('sub'),
+    )
 
 
 @ops_router.post('/{project_id}/redeploy')
@@ -588,9 +680,16 @@ async def ai_deploy_project(
     immediately ship it without anyone clicking in the operator console.
 
     Body matches the operator endpoint:
-      {"target": "production" | "preview", "git_ref": "main"}
+      {"target": "production" | "preview", "git_ref": "main", "bypass_review": false}
+
+    NB: AI-surface callers can also `bypass_review=true`, but the default is
+    false so an autonomous agent has to make an explicit decision to override
+    its own safety net (the `do_not_ship` ship-gate).
     """
-    return await _trigger_deploy(project_id, settings, req.target, req.git_ref)
+    return await _trigger_deploy(
+        project_id, settings, req.target, req.git_ref,
+        bypass_review=req.bypass_review,
+    )
 
 
 @projects_router.post('/{project_id}/redeploy')
@@ -738,7 +837,7 @@ self_ai_router = APIRouter(prefix='/api/projects', tags=['projects'])
 @self_ops_router.post('/self/deploy')
 async def op_self_deploy(
     req: DeployRequest,
-    _user: dict = Depends(get_current_operator),
+    user: dict = Depends(get_current_operator),
 ):
     """One-tap "Deploy this app" — operator button in the Ops tab.
 
@@ -754,7 +853,11 @@ async def op_self_deploy(
             'self_repo not configured. Set it in Operator → Security (e.g. "tbctools/platform").',
         )
     settings = await get_settings_doc()
-    return await _trigger_deploy(SELF_PROJECT_ID, settings, req.target, req.git_ref)
+    return await _trigger_deploy(
+        SELF_PROJECT_ID, settings, req.target, req.git_ref,
+        bypass_review=req.bypass_review,
+        user_id=user.get('sub'),
+    )
 
 
 @self_ai_router.post('/self/deploy')
@@ -767,7 +870,10 @@ async def ai_self_deploy(
     project = await _ensure_self_project()
     if not project:
         raise HTTPException(503, 'self_repo not configured.')
-    return await _trigger_deploy(SELF_PROJECT_ID, settings, req.target, req.git_ref)
+    return await _trigger_deploy(
+        SELF_PROJECT_ID, settings, req.target, req.git_ref,
+        bypass_review=req.bypass_review,
+    )
 
 
 # ---------- Clone an existing project ("make a copy") ------------------

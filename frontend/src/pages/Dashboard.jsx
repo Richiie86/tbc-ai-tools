@@ -7,7 +7,7 @@ import {
   SelectTrigger, SelectValue,
 } from '../components/ui/select';
 import { toast } from 'sonner';
-import { Cpu, Menu } from 'lucide-react';
+import { Cpu, Menu, ArrowDownToLine } from 'lucide-react';
 
 import { DashboardSidebar } from './dashboard/DashboardSidebar';
 import { TrialBanner } from './dashboard/TrialBanner';
@@ -46,6 +46,11 @@ export default function Dashboard({ variant = 'tbc1' }) {
   const [models, setModels] = useState({ providers: {} });
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [outOfCreditsOpen, setOutOfCreditsOpen] = useState(false);
+  // "Stick to bottom" = follow new tokens. Flips OFF the moment the user
+  // scrolls up so they can read older messages without the stream yanking
+  // them back; flips back ON when they scroll to the bottom themselves or
+  // click the floating "Jump to latest" button.
+  const [stickToBottom, setStickToBottom] = useState(true);
   const scrollRef = useRef(null);
   const taRef = useRef(null);
   const streamTextRef = useRef('');
@@ -92,11 +97,29 @@ export default function Dashboard({ variant = 'tbc1' }) {
     setCurrentId((prev) => (paramSession !== prev ? paramSession : prev));
   }, [paramSession]);
 
-  // Auto-scroll
+  // Conditional auto-scroll: only follow the bottom when the user is already
+  // pinned there. Once they scroll up `stickToBottom` flips off (see the
+  // onScroll handler on the scroller) and we leave their viewport alone.
   useEffect(() => {
+    if (!stickToBottom) return;
     const el = scrollRef.current;
     if (el) requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
-  }, [messages, streamText]);
+  }, [messages, streamText, stickToBottom]);
+
+  // Detect user scroll position to toggle the follow flag. Anything within
+  // ~80px of the bottom counts as "still at the end" so the stream doesn't
+  // unstick from a tiny scroll-wheel nudge.
+  const onScrollContainer = useCallback((e) => {
+    const el = e.currentTarget;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    setStickToBottom(atBottom);
+  }, []);
+
+  const jumpToLatest = useCallback(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+    setStickToBottom(true);
+  }, []);
 
   // Mirror live stream text so the final-message commit doesn't lose the tail.
   useEffect(() => { streamTextRef.current = streamText; }, [streamText]);
@@ -270,7 +293,12 @@ export default function Dashboard({ variant = 'tbc1' }) {
 
         <TrialBanner user={user} />
 
-        <div ref={scrollRef} className="flex-1 overflow-y-auto">
+        <div
+          ref={scrollRef}
+          onScroll={onScrollContainer}
+          className="relative flex-1 overflow-y-auto"
+          data-testid="chat-scroll"
+        >
           <div className="mx-auto max-w-3xl px-5 py-8">
             {messages.length === 0 && !streaming ? (
               <EmptyState
@@ -288,6 +316,20 @@ export default function Dashboard({ variant = 'tbc1' }) {
               </div>
             )}
           </div>
+          {!stickToBottom && (messages.length > 0 || streaming) && (
+            <button
+              data-testid="jump-to-latest"
+              onClick={jumpToLatest}
+              className="sticky bottom-4 ml-auto mr-6 flex items-center gap-1.5 rounded-full border border-tbc-500/40 bg-ink-950/90 px-3 py-1.5 text-xs font-semibold text-tbc-100 shadow-lg backdrop-blur transition hover:bg-tbc-500/10"
+              title="Resume following the latest message"
+            >
+              <ArrowDownToLine className="h-3.5 w-3.5 text-tbc-300" />
+              Jump to latest
+              {streaming && (
+                <span className="ml-0.5 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-tbc-400" />
+              )}
+            </button>
+          )}
         </div>
 
         <ChatComposer
