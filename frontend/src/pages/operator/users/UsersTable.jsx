@@ -46,6 +46,7 @@ function StatusPill({ user }) {
 export function UsersTable({
   users, selectedIds, onToggleSelect, onToggleSelectAll,
   onGrantCredits, onSetPlan, onReset2FA, onTogglePause, onDelete, onRestore, onVanish,
+  onToggleDeploy,
 }) {
   const allSelected = users.length > 0 && users.every((u) => selectedIds.has(u.id));
   // Vanish dialog state. Single dialog at the table level so we don't mount
@@ -98,6 +99,7 @@ export function UsersTable({
             <TableHead>Plan</TableHead>
             <TableHead>Credits</TableHead>
             <TableHead>2FA</TableHead>
+            <TableHead title="Whether this user can hit deploy CTAs in their dashboard">Deploy</TableHead>
             <TableHead>Joined</TableHead>
             <TableHead className="text-right">Actions</TableHead>
           </TableRow>
@@ -145,6 +147,35 @@ export function UsersTable({
               <TableCell>{u.totp_enabled
                 ? <span className="text-tbc-300">On</span>
                 : <span className="text-tbc-200/40">Off</span>}</TableCell>
+              <TableCell>
+                {isProtectedRole(u) ? (
+                  <span
+                    data-testid={`op-deploy-implicit-${u.id}`}
+                    title="Operators always have deploy access"
+                    className="text-tbc-300"
+                  >Always</span>
+                ) : (
+                  <button
+                    type="button"
+                    data-testid={`op-toggle-deploy-${u.id}`}
+                    onClick={() => onToggleDeploy(u.id, !u.can_deploy)}
+                    title={u.can_deploy
+                      ? 'Click to revoke deploy access for this user'
+                      : 'Click to grant deploy access for this user'}
+                    className={`inline-flex h-6 w-11 items-center rounded-full border transition-colors ${
+                      u.can_deploy
+                        ? 'border-emerald-900/60 bg-emerald-500/30'
+                        : 'border-tbc-900/60 bg-ink-950'
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${
+                        u.can_deploy ? 'translate-x-5' : 'translate-x-0.5'
+                      }`}
+                    />
+                  </button>
+                )}
+              </TableCell>
               <TableCell className="text-xs text-tbc-200/60">
                 {u.created_at ? new Date(u.created_at).toLocaleDateString() : '—'}
               </TableCell>

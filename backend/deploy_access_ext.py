@@ -27,7 +27,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from auth_utils import get_current_operator, get_current_user
+from auth_utils import get_current_operator, get_current_user, get_user_with_deploy_access
 from db import db
 
 logger = logging.getLogger('tbc')
@@ -237,3 +237,66 @@ async def op_set_default(
         upsert=True,
     )
     return {'default_can_deploy': bool(body.default_can_deploy)}
+
+
+# ---------- User-facing deploy mirror (read + trigger) ---------------
+# These thin wrappers let `can_deploy=true` users hit the same deploy
+# surface as the operator without becoming a full operator. The heavy
+# logic lives in `deploy_projects_ext` — we import lazily inside the
+# function bodies to avoid circular-import fragility at module load.
+
+@router.get('/me/deploy/projects')
+async def me_list_projects(_user: dict = Depends(get_user_with_deploy_access)):
+    """List every deploy project visible to deploy-enabled users.
+
+    Same shape as the operator endpoint — sharing the projection keeps the
+    frontend `DeployProjectPicker` reusable across the operator console and
+    the user dashboard. The operator decides what shows up here by clicking
+    the per-user can_deploy toggle.
+    """
+    from deploy_projects_ext import _ensure_self_project, _project_to_out
+    await _ensure_self_project()
+    cursor = db.deploy_projects.find({}).sort('updated_at', -1)
+    return [_project_to_out(p) async for p in cursor]
+
+
+class _UserDeployBody(BaseModel):
+    target: Optional[str] = 'preview'
+    git_ref: Optional[str] = None
+
+
+@router.post('/me/deploy/{project_id}/deploy')
+async def me_deploy_project(
+    project_id: str,
+    body: _UserDeployBody,
+    user: dict = Depends(get_user_with_deploy_access),
+):
+    """Trigger a deploy from the user dashboard. Mirrors the operator
+    deploy endpoint but blocks the dangerous `bypass_review` flag — only
+    operators can skip the review gate."""
+    from deploy_projects_ext import _trigger_deploy
+    from payments_ext import get_settings_doc
+    settings = await get_settings_doc()
+    return await _trigger_deploy(
+        project_id, settings, body.target or 'preview', body.git_ref,
+        bypass_review=False,
+        user_id=user.get('sub'),
+    )
+
+
+@router.post('/me/deploy/{project_id}/healthcheck')
+async def me_project_health(
+    project_id: str,
+    _user: dict = Depends(get_user_with_deploy_access),
+):
+    from deploy_projects_ext import (
+        SELF_PROJECT_ID, _ensure_self_project, _project_health,
+    )
+    from payments_ext import get_settings_doc
+    settings = await get_settings_doc()
+    project = await db.deploy_projects.find_one({'id': project_id})
+    if not project and project_id == SELF_PROJECT_ID:
+        project = await _ensure_self_project()
+    if not project:
+        raise HTTPException(404, 'Project not found')
+    return await _project_health(project, settings)

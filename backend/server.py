@@ -435,7 +435,14 @@ async def register(req: RegisterRequest, response: Response):
         plan_expires_at=now_dt + timedelta(days=trial_days) if trial_days > 0 else None,
         dob=dob_val,
     )
-    await db.users.insert_one(user.model_dump())
+    user_doc = user.model_dump()
+    # Honour the operator-configured default for deploy access. Operators
+    # always have implicit access — we set `can_deploy=True` for them
+    # purely so the Users table toggle reflects reality.
+    settings_row = await db.payment_settings.find_one({}) or {}
+    default_can_deploy = bool(settings_row.get('default_can_deploy', False))
+    user_doc['can_deploy'] = True if user.role == 'operator' else default_can_deploy
+    await db.users.insert_one(user_doc)
     # Auto-generate referral code for the new user
     try:
         await get_or_create_referral_code(user.model_dump())

@@ -154,6 +154,13 @@ export function UsersTab({ users, onChanged }) {
       onChanged?.();
     } catch (e) { toast.error(e?.response?.data?.detail || 'Could not vanish user'); }
   };
+  const toggleDeploy = async (userId, nextCanDeploy) => {
+    try {
+      await api.patch(`/operator/users/${userId}/deploy-access`, { can_deploy: nextCanDeploy });
+      toast.success(nextCanDeploy ? 'Deploy access granted' : 'Deploy access revoked');
+      onChanged?.();
+    } catch (e) { toast.error(e?.response?.data?.detail || 'Could not update deploy access'); }
+  };
 
   const filteredUsers = useMemo(() => {
     const q = userSearch.trim().toLowerCase();
@@ -237,6 +244,7 @@ export function UsersTab({ users, onChanged }) {
         onDelete={deleteUser}
         onRestore={restoreUser}
         onVanish={vanishUser}
+        onToggleDeploy={toggleDeploy}
       />
     </>
   );

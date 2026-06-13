@@ -22,15 +22,26 @@ export function InChatDeployControls({ user }) {
     try { return localStorage.getItem(STORAGE_KEY) || ''; } catch { return ''; }
   });
   const [busy, setBusy] = useState(null); // 'deploy' | 'review' | 'health' | null
+  // null = still loading; true/false = resolved deploy-access flag.
+  const [access, setAccess] = useState(null); // {can_deploy, pending_request}
+  const [requesting, setRequesting] = useState(false);
 
   const isOperator = user?.role === 'operator';
+
+  const loadAccess = useCallback(async () => {
+    try {
+      const { data } = await api.get('/me/deploy-access');
+      setAccess(data);
+    } catch {
+      setAccess({ can_deploy: false, pending_request: null });
+    }
+  }, []);
 
   const loadProjects = useCallback(async () => {
     if (!isOperator) return;
     try {
       const { data } = await api.get('/operator/deploy/projects');
       setProjects(data || []);
-      // Auto-select if nothing chosen yet
       if (!selectedId && data?.length) {
         const firstId = data[0].id;
         setSelectedId(firstId);
@@ -41,8 +52,56 @@ export function InChatDeployControls({ user }) {
     }
   }, [isOperator, selectedId]);
 
-  useEffect(() => { loadProjects(); }, [loadProjects]);
+  useEffect(() => { loadAccess(); loadProjects(); }, [loadAccess, loadProjects]);
 
+  // Still resolving — show nothing to avoid flicker.
+  if (access === null) return null;
+
+  // Regular user without deploy access — show a single "Request access" CTA
+  // (or a "Request pending" pill if they already asked).
+  if (!isOperator && !access.can_deploy) {
+    const pending = access.pending_request;
+    const submit = async () => {
+      setRequesting(true);
+      try {
+        const { data } = await api.post('/me/deploy-access/request', { message: '' });
+        toast.success('Request sent — the operator will review it shortly');
+        setAccess((prev) => ({ ...(prev || {}), pending_request: data }));
+      } catch (e) {
+        toast.error(e?.response?.data?.detail || 'Could not submit request');
+      } finally {
+        setRequesting(false);
+      }
+    };
+    if (pending) {
+      return (
+        <div
+          className="inline-flex items-center gap-1.5 rounded-lg border border-amber-900/60 bg-amber-500/10 px-2 py-1 text-xs text-amber-200"
+          data-testid="deploy-access-pending"
+        >
+          <span>Deploy access requested</span>
+          <a
+            href="/settings/deploy-access"
+            className="rounded px-1.5 py-0.5 text-amber-100 hover:bg-amber-500/20"
+            data-testid="deploy-access-pending-link"
+          >View</a>
+        </div>
+      );
+    }
+    return (
+      <button
+        type="button"
+        data-testid="deploy-access-request-btn"
+        onClick={submit}
+        disabled={requesting}
+        className="inline-flex items-center gap-1.5 rounded-lg border border-tbc-900/60 bg-ink-900/60 px-2.5 py-1.5 text-xs font-semibold text-tbc-100 hover:bg-ink-950 disabled:opacity-60"
+      >
+        {requesting ? 'Sending…' : 'Request deploy access'}
+      </button>
+    );
+  }
+
+  // Operators OR users with can_deploy=true continue to the full controls.
   if (!isOperator) return null;
 
   const selected = projects.find((p) => p.id === selectedId);
