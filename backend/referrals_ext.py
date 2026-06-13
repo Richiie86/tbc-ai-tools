@@ -346,6 +346,147 @@ async def op_delete_project(pid: str, user: dict = Depends(get_current_operator)
     return {'success': True}
 
 
+# Default extra titles every "Clone all" pass guarantees in the destination
+# workspace, even if the operator hasn't created them yet on this DB. The
+# user specifically asked for `crypto-forex-tax` to live alongside the
+# cloned set so they could keep working on it from `tbc1`.
+_BOOTSTRAP_TITLES: list[str] = ['crypto-forex-tax']
+
+
+def _clone_project_doc(src: dict, owner_id: str, workspace: str) -> dict:
+    """Build a fresh project doc that mirrors `src` into `workspace`.
+
+    The title gets a `-{workspace}` suffix unless it already ends in one,
+    `tags` gains the workspace tag, and a fresh id + timestamps are stamped.
+    """
+    tags = list(src.get('tags') or [])
+    if workspace not in tags:
+        tags.append(workspace)
+    base_title = (src.get('title') or 'untitled').strip()
+    suffix = f'-{workspace}'
+    new_title = base_title if base_title.endswith(suffix) else f'{base_title}{suffix}'
+    now = datetime.now(timezone.utc)
+    return Project(
+        owner_id=owner_id,
+        title=new_title,
+        description=src.get('description'),
+        status=src.get('status') or 'idea',
+        tags=tags,
+        link_url=src.get('link_url'),
+        chat_session_id=None,  # fresh session — operator continues work here
+        is_for_sale=False,     # never auto-list a clone for sale
+        price_usd=0.0,
+        asset_url=src.get('asset_url'),
+        summary=src.get('summary'),
+        cover_emoji=src.get('cover_emoji'),
+        created_at=now,
+        updated_at=now,
+    ).model_dump()
+
+
+@router.post('/operator/projects/clone-all')
+async def op_clone_all_projects(
+    payload: dict | None = None,
+    user: dict = Depends(get_current_operator),
+):
+    """Duplicate every project owned by this operator into a target
+    workspace (default `tbc1`). Each clone gets a `-{workspace}` suffix,
+    the workspace name added to its `tags`, and a fresh chat session.
+
+    Also bootstraps any `_BOOTSTRAP_TITLES` that don't exist yet — the
+    operator asked for `crypto-forex-tax` to always live alongside the
+    cloned set so they can keep building on it from tbc1.
+
+    Idempotent: projects that already have the target workspace tag are
+    skipped (their fresh copies stay; we don't keep doubling).
+    """
+    db = await get_db()
+    payload = payload or {}
+    # Validate the workspace argument explicitly so an empty string or
+    # whitespace can't sneak through `or 'tbc1'`.
+    if 'workspace' in payload:
+        ws = payload.get('workspace')
+        if not isinstance(ws, str) or not ws.strip():
+            raise HTTPException(400, 'workspace cannot be empty')
+        workspace = ws.strip().lower()
+    else:
+        workspace = 'tbc1'
+    if not re.match(r'^[a-z0-9][a-z0-9_-]{0,30}$', workspace):
+        raise HTTPException(400, 'workspace must be lowercase alphanumeric (1-31 chars)')
+    extras = list(payload.get('include_titles') or _BOOTSTRAP_TITLES)
+
+    cloned: list[dict] = []
+    skipped: list[dict] = []
+    bootstrapped: list[dict] = []
+
+    # Pre-load every title already living in the target workspace so we
+    # can skip sources whose clone exists. This guards idempotency even
+    # when the source project hasn't itself been tagged.
+    existing_clone_titles: set[str] = set()
+    async for d in db.projects.find(
+        {'owner_id': user['sub'], 'tags': workspace},
+        {'title': 1},
+    ):
+        existing_clone_titles.add(d.get('title') or '')
+
+    suffix = f'-{workspace}'
+    # Pull EVERY project this operator owns. We skip ones already tagged
+    # with the target workspace AND ones whose `{title}-{workspace}` already
+    # exists as a clone (the case where the source itself isn't tagged).
+    cursor = db.projects.find({'owner_id': user['sub']}).limit(1000)
+    async for src in cursor:
+        src_title = (src.get('title') or '').strip()
+        if workspace in (src.get('tags') or []):
+            skipped.append({'id': src.get('id'), 'title': src_title,
+                            'reason': f'already in {workspace}'})
+            continue
+        # Already cloned in a previous pass? Don't re-clone.
+        dest_title = src_title if src_title.endswith(suffix) else f'{src_title}{suffix}'
+        if dest_title in existing_clone_titles:
+            skipped.append({'id': src.get('id'), 'title': src_title,
+                            'reason': f'{dest_title} already exists in {workspace}'})
+            continue
+        doc = _clone_project_doc(src, user['sub'], workspace)
+        await db.projects.insert_one(doc)
+        existing_clone_titles.add(doc['title'])
+        cloned.append({'id': doc['id'], 'title': doc['title'], 'from': src.get('id')})
+
+    # Bootstrap titles that the operator wanted available in this
+    # workspace even if they've never been created on this DB.
+    existing_titles_q = {
+        'owner_id': user['sub'],
+        'tags': workspace,
+        'title': {'$in': [f'{t}-{workspace}' for t in extras] + extras},
+    }
+    existing_titles = {d['title'] async for d in db.projects.find(existing_titles_q, {'title': 1})}
+    for raw in extras:
+        target = raw if raw.endswith(f'-{workspace}') else f'{raw}-{workspace}'
+        if target in existing_titles:
+            continue
+        now = datetime.now(timezone.utc)
+        doc = Project(
+            owner_id=user['sub'],
+            title=target,
+            status='idea',
+            tags=[workspace, 'bootstrap'],
+            description=f'Bootstrapped into {workspace} by clone-all so the operator can continue work.',
+            created_at=now,
+            updated_at=now,
+        ).model_dump()
+        await db.projects.insert_one(doc)
+        bootstrapped.append({'id': doc['id'], 'title': doc['title']})
+
+    return {
+        'workspace': workspace,
+        'cloned': cloned,
+        'skipped': skipped,
+        'bootstrapped': bootstrapped,
+        'cloned_count': len(cloned),
+        'bootstrapped_count': len(bootstrapped),
+        'skipped_count': len(skipped),
+    }
+
+
 @router.post('/operator/projects/{pid}/launch-chat')
 async def op_launch_project_chat(pid: str, user: dict = Depends(get_current_operator)):
     """One-click 'Open in TBC chat' — creates a new chat session pre-seeded with

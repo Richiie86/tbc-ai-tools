@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import api from '../../lib/api';
 import { Button } from '../../components/ui/button';
 import { toast } from 'sonner';
-import { Plus, Loader2 } from 'lucide-react';
+import { Plus, Loader2, Copy } from 'lucide-react';
 
 import { STAGES, stageOf, EMPTY_PROJECT } from './projects/stages';
 import { ProjectStageNav } from './projects/ProjectStageNav';
@@ -18,6 +18,7 @@ export default function ProjectsTab() {
   const [form, setForm] = useState(EMPTY_PROJECT);
   const [tagsText, setTagsText] = useState('');
   const [saving, setSaving] = useState(false);
+  const [cloningAll, setCloningAll] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -110,6 +111,32 @@ export default function ProjectsTab() {
     }
   };
 
+  const cloneAllToWorkspace = async () => {
+    const workspace = 'tbc1';
+    if (!window.confirm(
+      `Clone every project into the "${workspace}" workspace?\n\n` +
+      `• Each project gets a "-${workspace}" suffix and a "${workspace}" tag.\n` +
+      `• Cloned items get a fresh chat session so you can continue work.\n` +
+      `• "crypto-forex-tax" is bootstrapped if missing.\n` +
+      `• Re-running is safe (already-cloned projects are skipped).`,
+    )) return;
+    setCloningAll(true);
+    try {
+      const { data } = await api.post('/operator/projects/clone-all', { workspace });
+      const c = data?.cloned_count || 0;
+      const b = data?.bootstrapped_count || 0;
+      const s = data?.skipped_count || 0;
+      toast.success(
+        `${c} cloned${b ? ` · ${b} bootstrapped` : ''}${s ? ` · ${s} skipped` : ''} → ${workspace}`,
+      );
+      load();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Clone-all failed');
+    } finally {
+      setCloningAll(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="grid place-items-center py-12">
@@ -138,13 +165,26 @@ export default function ProjectsTab() {
         {/* DialogTrigger lives outside the Dialog body so it can sit in the
             header row. Kept as a fragment so the Dialog itself is rendered
             once below. */}
-        <Button
-          data-testid="projects-new-btn"
-          onClick={() => openCreate(active)}
-          className="bg-tbc-500 text-ink-950 hover:bg-tbc-400 font-semibold"
-        >
-          <Plus className="mr-1.5 h-4 w-4" /> New in {activeStage.short}
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            data-testid="projects-clone-all-btn"
+            onClick={cloneAllToWorkspace}
+            disabled={cloningAll}
+            variant="outline"
+            title="Copy every project into the tbc1 workspace so you can continue work there"
+            className="border-tbc-500/40 bg-ink-900 text-tbc-100 hover:bg-tbc-500/10"
+          >
+            {cloningAll ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Copy className="mr-1.5 h-4 w-4" />}
+            Clone all to tbc1
+          </Button>
+          <Button
+            data-testid="projects-new-btn"
+            onClick={() => openCreate(active)}
+            className="bg-tbc-500 text-ink-950 hover:bg-tbc-400 font-semibold"
+          >
+            <Plus className="mr-1.5 h-4 w-4" /> New in {activeStage.short}
+          </Button>
+        </div>
       </div>
 
       <ProjectFormDialog

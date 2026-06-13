@@ -12,6 +12,42 @@ gold theme. Domain: **tbctools.org**.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
 ## Implemented
+- ✅ **Clone-all workspace + test-data hygiene + vanish/restore + safety popups** (Feb 2026):
+  - **"Clone all to tbc1" workspace** (Projects tab): one-click duplicates
+    every operator-owned project into a target workspace (default `tbc1`)
+    with a `-{workspace}` suffix and the workspace tag. Idempotent — checks
+    both the source's tags AND the destination title so a re-run can't
+    create duplicate clones. Bootstraps `crypto-forex-tax-{workspace}` if
+    missing so the operator can continue work on it from the new namespace.
+    4 pytests in `test_p6_11_clone_all_workspace.py`.
+  - **Auto-purge test chat on operator login**: every operator login
+    (and every 2FA verify) fires `_purge_test_chat_data()` which deletes
+    all chat_sessions + chat_messages belonging to `preview-user@tbctools.dev`.
+    Operator-only `POST /api/operator/purge-test-data` for manual trigger;
+    new "Purge test data" button in the StatsToolbar (rose-red, with a
+    confirm prompt). Real customer data is never touched. Stats now reflect
+    real usage instead of accumulated QA chatter. 3 pytests.
+  - **Live stats refresh** (Operator.jsx): polls `/operator/stats` every
+    25s while the tab is foregrounded, pauses on `visibilitychange`,
+    rehydrates immediately on focus return.
+  - **Vanish (permanent delete) + protection**: hard-delete endpoint
+    `POST /api/operator/users/{id}/vanish` requires `confirm_email` to
+    match the target's exact email; UI replays this via an AlertDialog
+    typed-confirmation field. Operator/admin roles cannot be vanished or
+    soft-deleted from this endpoint (`Demote the user first` guard).
+    Bulk endpoint skips protected roles automatically. Per-row "🔒 Protected"
+    badge replaces destructive buttons for protected roles. 10 pytests
+    across `test_p6_8_vanish.py` and `test_p6_9_operator_protection.py`.
+  - **Seeded preview-user warning popup**: clicking Delete or Vanish on
+    `preview-user@tbctools.dev` opens a special amber-bordered AlertDialog
+    explaining the consequences before proceeding to the regular flow.
+    Operator can Cancel and the action is aborted.
+  - **Restore (undo soft-delete)**: per-row + bulk action, idempotent,
+    audited. `resume` no longer accidentally undeletes (separate action).
+    5 pytests in `test_p6_7_restore.py`.
+  - **Vercel-style typed-confirmation on Promote-to-Prod**: AlertDialog
+    requires operator to type the project name before Confirm enables.
+
 - ✅ **Growth-alert thresholds + 4 polish tasks** (Feb 2026):
   - **Alert thresholds** (new `alerts_ext.py`): operator sets a signup-drop
     % and revenue-stall-days, plus delivery channels (email via Resend,
