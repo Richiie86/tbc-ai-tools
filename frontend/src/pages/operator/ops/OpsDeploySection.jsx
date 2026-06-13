@@ -440,11 +440,28 @@ function ProjectRow({ project, onDeployed }) {
         toast.success(`Cloned → ${data.project.projectName} · set its domain to deploy`);
       } else if (kind === 'review') {
         toast.message('Running AI code review… this can take 20-40s');
-        const { data } = await api.post(`/operator/deploy/${project.id}/code-review`);
-        setReview(data);
-        setReviewOpen(true);
-        const findings = (data.findings || []).length;
-        toast.success(`Review done · ${data.verdict || 'ok'} · ${findings} finding${findings === 1 ? '' : 's'}`);
+        try {
+          const { data } = await api.post(`/operator/deploy/${project.id}/code-review`, undefined, {
+            timeout: 120000,
+          });
+          setReview(data);
+          setReviewOpen(true);
+          const findings = (data.findings || []).length;
+          toast.success(`Review done · ${data.verdict || 'ok'} · ${findings} finding${findings === 1 ? '' : 's'}`);
+        } catch (e) {
+          // The outer `catch` would also fire, but the gateway returns HTML on
+          // 502 so `e.response.data.detail` is undefined and the generic
+          // message hides the actual cause. Surface a more specific one here.
+          const detail = e?.response?.data?.detail;
+          const status = e?.response?.status;
+          if (typeof detail === 'string') {
+            toast.error(detail);
+          } else if (status === 502 || status === 504) {
+            toast.error('Code review timed out at the gateway — LLM likely too slow. Try again or configure github_token to skip GitHub fetch failures.');
+          } else {
+            toast.error(`Code review failed${status ? ` (HTTP ${status})` : ''}`);
+          }
+        }
         return; // skip onDeployed (no deploy state changed)
       } else if (kind === 'download') {
         // Stream the zip via a programmatic <a download> click so cookies travel.

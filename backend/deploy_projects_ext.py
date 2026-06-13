@@ -1023,7 +1023,6 @@ async def _run_code_review(project: dict, settings: dict) -> dict:
     a dict — even on parse failure we surface the raw text so the operator can
     still act on it."""
     from emergentintegrations.llm.chat import LlmChat, UserMessage  # local import to avoid top-level cost
-    import os
 
     gh_token = (settings or {}).get('github_token') or os.environ.get('GITHUB_TOKEN')
     snapshot = await _fetch_repo_snapshot(project['repo'], project.get('gitRef'), gh_token)

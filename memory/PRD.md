@@ -12,6 +12,45 @@ gold theme. Domain: **tbctools.org**.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
 ## Implemented
+- ✅ **Deploy card layout v2 + Code Review + Code Download** (Feb 2026):
+  - **Standardized button row** on every deploy project card:
+    `Deploy · Preview · Redeploy · Copy URL · Clone · Download · Code Review · Health`
+    (testids: `deploy-{id}`, `copy-url-{id}`, `clone-{id}`, `download-{id}`,
+    `code-review-{id}`, `health-{id}`, etc).
+  - **Copy URL** — copies the project's preview URL (or domain URL) to the
+    clipboard via `navigator.clipboard.writeText`; swaps icon to ✓ for 1.5s.
+  - **Clone / Make a copy** — `POST /api/operator/deploy/{id}/clone` returns a
+    fresh project that mirrors the source repo + branch with a BLANK domain
+    (Vercel won't accept two projects on one host). UI prompts for a new name.
+    Mirror endpoint on the AI surface: `POST /api/projects/{id}/clone`.
+  - **Inline domain editor** — pencil icon next to every domain; new clone
+    rows auto-open the editor so the operator can paste a fresh URL without
+    leaving the tab. Backed by `PATCH /api/operator/deploy/{id}/domain`.
+  - **Run code review** — `POST /api/operator/deploy/{id}/code-review` (AI mirror
+    on `/api/projects/{id}/code-review`). Pulls a snapshot of the repo via the
+    GitHub API (capped at ~10-30 high-signal files, 40k chars), hands it to
+    `gpt-4o` via `emergentintegrations.LlmChat` with a strict JSON schema
+    prompt, parses + persists `last_code_review` on the project doc. Modal
+    UI renders verdict, summary, findings (severity-coded), suggested fixes,
+    and any missing-files callouts. Optional `github_token` in operator
+    settings unlocks private repos + higher rate limits.
+  - **Per-project code download** — `GET /api/operator/deploy/{id}/download`
+    proxies GitHub's zipball endpoint as a `StreamingResponse` so a multi-MB
+    repo never buffers in memory. UI button uses a programmatic `<a download>`
+    so the auth cookie travels with the request.
+  - **Self-source download** — `GET /api/operator/deploy/self/download-app`
+    walks `/app` and zips every code/config file (skips `node_modules`,
+    `.git`, `.next`, `__pycache__`, build dirs, .venv, etc). `.env` contents
+    are stripped and replaced with a "set your own keys" placeholder so the
+    zip carries no live secrets. Adds a `DOWNLOAD_README.txt` with run
+    instructions. Triggered from a top-right "Download this app" button in
+    the Vercel deploys section. AI-surface mirror exists for autonomous
+    grow-and-fork flows.
+  - Backend regression: 28 prior tests still green; 16 new tests in
+    `tests/test_p2_deploy_extras.py` cover clone / domain PATCH / download /
+    self-download / code-review-reachable / .env-sanitization. **44 passed,
+    1 skipped** (`pytest -q tests/`).
+
 - ✅ **Webhooks + ship-and-watch + self-deploy + per-project health** (Feb 2026):
   - **Outbound webhooks** — operator-configurable URL + HMAC-SHA256 secret in
     Security tab. Fires `deployment.triggered` / `deployment.state_changed` /
