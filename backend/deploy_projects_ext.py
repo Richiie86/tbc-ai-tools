@@ -1094,7 +1094,9 @@ async def _ensure_self_project() -> Optional[dict]:
         'repoType': 'github',
         'gitRef': git_ref,
         'created_at': now,
-        'updated_at': now,
+        # NOTE: `updated_at` is intentionally NOT here — `$set` already
+        # writes it on every call. Mongo rejects the operation if both
+        # `$set` and `$setOnInsert` touch the same field.
     }
     if (settings or {}).get('self_vercel_project_id'):
         insert_doc['vercel_project_id'] = settings['self_vercel_project_id']
@@ -1118,6 +1120,32 @@ async def _ensure_self_project() -> Optional[dict]:
         {'id': SELF_PROJECT_ID, 'repo': bad_repo},
         {'$set': {'repo': '', 'updated_at': now}},
     )
+    # ---- Auto-detect repo from clone history -------------------------
+    # If `repo` is still empty, look at any other deploy_projects row
+    # the operator has created (clones, manual rows, prior deploys).
+    # Most operators have already typed their real repo somewhere, so
+    # we can save them the trip to Settings entirely by re-using it.
+    # We pick the most-recently-updated non-self row to favour the
+    # operator's current active project.
+    self_doc = await db.deploy_projects.find_one({'id': SELF_PROJECT_ID})
+    if not (self_doc or {}).get('repo'):
+        recent = await db.deploy_projects.find_one(
+            {
+                'id': {'$ne': SELF_PROJECT_ID},
+                'repo': {'$nin': [None, '', 'rac-investments/tbc-self-copy']},
+            },
+            sort=[('updated_at', -1)],
+        )
+        if recent and recent.get('repo'):
+            await db.deploy_projects.update_one(
+                {'id': SELF_PROJECT_ID},
+                {'$set': {
+                    'repo': recent['repo'],
+                    'gitRef': recent.get('gitRef') or 'main',
+                    'updated_at': now,
+                }},
+            )
+            logger.info('Auto-detected self repo from existing project: %s', recent['repo'])
     return await db.deploy_projects.find_one({'id': SELF_PROJECT_ID})
 
 
