@@ -131,6 +131,34 @@ export default function Dashboard({ variant = 'tbc1' }) {
     setStickToBottom(true);
   }, []);
 
+  // Inline "Quick actions" handler used by assistant message bubbles.
+  // Mirrors `InChatDeployControls.run` — reuses the project the operator
+  // selected once in the chat header (persisted in localStorage). Bug fix
+  // for the production "handleInlineAction is not defined" crash: an
+  // earlier commit wired the prop without ever defining the handler.
+  const handleInlineAction = useCallback(async (kind) => {
+    let projectId = '';
+    try { projectId = localStorage.getItem('tbc.inChat.selectedProjectId') || ''; } catch { /* ignore */ }
+    if (!projectId) {
+      toast.error('Pick a deploy project first (use the dropdown in the chat header).');
+      return;
+    }
+    try {
+      if (kind === 'deploy') {
+        const { data } = await api.post(`/operator/deploy/${projectId}/deploy`, {});
+        toast.success(`Deploy queued — ${data?.url || data?.id || 'OK'}`);
+      } else if (kind === 'review') {
+        const { data } = await api.post(`/operator/deploy/${projectId}/code-review`, {});
+        toast.success(`Code review: ${data?.verdict || data?.summary || 'completed'}`);
+      } else if (kind === 'health') {
+        const { data } = await api.post(`/operator/deploy/${projectId}/healthcheck`, {});
+        toast.success(`Health: ${data?.status || (data?.ok ? 'OK' : 'unknown')}`);
+      }
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || `Quick ${kind} failed`);
+    }
+  }, []);
+
   // Mirror live stream text so the final-message commit doesn't lose the tail.
   useEffect(() => { streamTextRef.current = streamText; }, [streamText]);
 

@@ -30,15 +30,36 @@ async function report(payload) {
 
 let installed = false;
 
+/**
+ * Return true when the error clearly originates from a browser
+ * extension (crypto wallets, ad blockers, password managers, etc.) and
+ * should NOT be reported as an app bug. Common signatures:
+ *   - `event.filename` starts with `chrome-extension://`, `moz-extension://`, `safari-web-extension://`
+ *   - stack trace references those schemes
+ *   - certain well-known extension error strings (e.g. wallet "must has
+ *     at least one account") that have nothing to do with our app
+ */
+function isExtensionNoise({ filename, stack, message }) {
+  const EXT_RE = /(chrome-extension|moz-extension|safari-web-extension|webkit-masked-url):\/\//i;
+  if (filename && EXT_RE.test(filename)) return true;
+  if (stack && EXT_RE.test(stack)) return true;
+  // Known wallet-extension grammar tells (extensions are notorious for
+  // bad English in error strings — easy heuristic, low false-positive).
+  if (message && /wallet must has at least one account/i.test(message)) return true;
+  return false;
+}
+
 export function installErrorCapture() {
   if (installed) return;
   installed = true;
 
   window.addEventListener('error', (e) => {
     if (!e?.error && !e?.message) return;
+    const stack = e.error?.stack || '';
+    if (isExtensionNoise({ filename: e.filename, stack, message: e.message })) return;
     report({
       message: e.message || String(e.error),
-      stack: e.error?.stack || '',
+      stack,
       source: 'frontend',
       url: window.location.href,
       user_agent: navigator.userAgent,
@@ -53,9 +74,11 @@ export function installErrorCapture() {
   window.addEventListener('unhandledrejection', (e) => {
     const r = e?.reason;
     const message = r?.message || (typeof r === 'string' ? r : 'unhandledrejection');
+    const stack = r?.stack || '';
+    if (isExtensionNoise({ filename: '', stack, message })) return;
     report({
       message: message.slice(0, 4000),
-      stack: r?.stack || '',
+      stack,
       source: 'frontend',
       url: window.location.href,
       user_agent: navigator.userAgent,

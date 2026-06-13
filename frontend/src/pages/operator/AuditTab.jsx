@@ -247,7 +247,13 @@ export default function AuditTab() {
                       {meta.label}
                     </span>
                   </td>
-                  <td className="px-4 py-2 text-xs text-tbc-200/90">{r.target || '—'}</td>
+                  <td className="px-4 py-2 text-xs text-tbc-200/90">
+                    {r.target == null
+                      ? '—'
+                      : typeof r.target === 'object'
+                        ? JSON.stringify(r.target)
+                        : String(r.target)}
+                  </td>
                   <td className="px-4 py-2 text-[11px] text-tbc-200/60 font-mono max-w-md truncate" title={JSON.stringify(r.details || {})}>
                     {Object.keys(r.details || {}).length ? JSON.stringify(r.details) : '—'}
                   </td>
