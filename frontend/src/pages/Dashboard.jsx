@@ -197,8 +197,7 @@ export default function Dashboard({ variant = 'tbc1' }) {
     }
     setInput('');
     setStreaming(true);
-    setStreamText('');
-    setShowDeploySuggest(false);
+    setStreamText('');    setShowDeploySuggest(false);
     // Optimistic user message
     const userMsg = { id: 'tmp-' + Date.now(), role: 'user', content: text };
     setMessages((m) => [...m, userMsg]);
@@ -295,7 +294,12 @@ export default function Dashboard({ variant = 'tbc1' }) {
             ) : (
               <div className="space-y-7">
                 {messages.map((m) => (
-                  <MessageBubble key={m.id} role={m.role} content={m.content} />
+                  <MessageBubble
+                    key={m.id}
+                    role={m.role}
+                    content={m.content}
+                    onAction={handleInlineAction}
+                  />
                 ))}
                 {streaming && (
                   <MessageBubble role="assistant" content={streamText} streaming />

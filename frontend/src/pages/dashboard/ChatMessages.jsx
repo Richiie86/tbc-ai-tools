@@ -34,8 +34,11 @@ export function EmptyState({ onPick, model }) {
   );
 }
 
-/** A single chat bubble — user (right, gold) or assistant (left, dark). */
-export function MessageBubble({ role, content, streaming }) {
+/** A single chat bubble — user (right, gold) or assistant (left, dark).
+ *  Assistant bubbles render an inline "Quick actions" toolbar after the
+ *  stream completes — Deploy / Review / Health match the header buttons
+ *  so the user can act in-place without scrolling back up. */
+export function MessageBubble({ role, content, streaming, onAction }) {
   if (role === 'user') {
     return (
       <div className="flex justify-end">
@@ -55,7 +58,58 @@ export function MessageBubble({ role, content, streaming }) {
           ? <Markdown>{content}</Markdown>
           : <div className="text-sm text-slate-500">Thinking…</div>}
         {streaming && content && <span className="caret-blink" />}
+        {/* Inline action toolbar — only renders for completed assistant
+            bubbles that mention deploy/ship/review/etc. The handlers
+            invoke the same network calls as the header buttons so the
+            user can act in-context. */}
+        {!streaming && content && onAction && (
+          <QuickActionsBar content={content} onAction={onAction} />
+        )}
       </div>
+    </div>
+  );
+}
+
+/** Renders Deploy / Review / Health buttons under an assistant message
+ *  when the AI's reply hints at any of those actions. We pattern-match
+ *  on the response text (cheaper + zero-latency vs. a second LLM call)
+ *  and let the parent dispatch into the existing project actions. */
+function QuickActionsBar({ content, onAction }) {
+  const lc = (content || '').toLowerCase();
+  const wantsDeploy = /\bdeploy\b|\bship\b|\bpublish\b|\bpush.*live\b|\bredeploy\b/.test(lc);
+  const wantsReview = /\breview\b|\bcheck.*code\b|\bcode.*review\b/.test(lc);
+  const wantsHealth = /\bhealth\b|\bis.*site.*up\b|\bworking\?\b/.test(lc);
+  if (!wantsDeploy && !wantsReview && !wantsHealth) return null;
+  return (
+    <div
+      data-testid="msg-quick-actions"
+      className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-800/60 pt-3 text-xs"
+    >
+      <span className="text-tbc-200/50">Quick actions:</span>
+      {wantsDeploy && (
+        <button
+          type="button"
+          data-testid="msg-action-deploy"
+          onClick={() => onAction('deploy')}
+          className="inline-flex items-center gap-1 rounded-md bg-tbc-500 px-2.5 py-1 font-semibold text-ink-950 hover:bg-tbc-400"
+        >🚀 Deploy</button>
+      )}
+      {wantsReview && (
+        <button
+          type="button"
+          data-testid="msg-action-review"
+          onClick={() => onAction('review')}
+          className="inline-flex items-center gap-1 rounded-md border border-tbc-900/60 bg-ink-900 px-2.5 py-1 text-tbc-100 hover:bg-ink-950"
+        >🛡️ Review</button>
+      )}
+      {wantsHealth && (
+        <button
+          type="button"
+          data-testid="msg-action-health"
+          onClick={() => onAction('health')}
+          className="inline-flex items-center gap-1 rounded-md border border-tbc-900/60 bg-ink-900 px-2.5 py-1 text-tbc-100 hover:bg-ink-950"
+        >📈 Health</button>
+      )}
     </div>
   );
 }
