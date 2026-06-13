@@ -1,0 +1,53 @@
+{
+  "summary": "Frontend E2E test of Operator Console > Ops tab Vercel deploy CTA + inline domain editor + smoke tests on Clone/Autopilot/Code-Review/Health/Preview/Redeploy/Copy-URL/Promote. Login flow verified (input[type=password].press('Enter') works as documented in iter 11). Self project row 'tbctools-self' renders with pencil visible (project.domain pre-set to 'tbctools.org'). BLOCKER: clicking data-testid='domain-edit-tbctools-self' did NOT reveal data-testid='domain-input-tbctools-self' within 5s in multiple attempts even after dismissing the onboarding tour ('Skip tour'). Without the editor opening, none of the downstream domain/deploy/copy/preview/health/clone/autopilot tests could be exercised end-to-end in this iteration.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "ProjectRow / useInlineDomain",
+        "issue": "Pencil click does not open inline editor. data-testid='domain-edit-tbctools-self' count=1 (so testid is unique), clicked with force=True, but data-testid='domain-input-tbctools-self' never becomes visible within 5s. Suspected root causes (in priority order): (1) the OperatorTour modal/overlay leaves a residual Radix dialog portal that captures clicks even after Skip tour is pressed — the screenshot after 'Skip tour' still appears similar but click may be intercepted by an invisible portal; (2) the pencil button is rendered immediately AFTER the <a href={domainUrl}> link in ProjectRow.jsx lines 137-152 — playwright click on the pencil may be hitting the anchor due to its larger hit-area; (3) useInlineDomain initialises editing with useState(!project.domain) — if project.domain was '' at first render and then populated later, the editor would actually be OPEN by default and the pencil would not exist. Recommend wrapping the pencil in its own inline-block with a larger hit area (e.g. p-1 instead of p-0.5) and verifying that closing the OperatorTour fully unmounts the dialog portal.",
+        "selector": "[data-testid='domain-edit-tbctools-self']",
+        "priority": "HIGH"
+      },
+      {
+        "component": "OperatorTour",
+        "issue": "First-time OperatorTour modal opens automatically on /operator?tab=ops and the dimmed backdrop blocks any data-testid clicks until 'Skip tour' is pressed. Even after Skip, subsequent clicks on Ops-tab elements behave as if a residual overlay is present (pencil click does not trigger the editor). Consider either auto-dismissing the tour for users who already completed it or shipping a data-testid='skip-tour' on the Skip button so E2E tests can dismiss it deterministically.",
+        "selector": "button:has-text('Skip tour')",
+        "priority": "MEDIUM"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "Operator > Ops > Vercel deploys",
+        "issues": [
+          "The pencil icon (Pencil h-2.5 w-2.5 inside p-0.5) is extremely small (~12px target). Touch/click target is below the 24px-min Apple HIG and below WCAG 2.5.5 (44px). Bumping to h-3 w-3 inside p-1.5 would help both real users and Playwright."
+        ]
+      }
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Fix the pencil-click-does-not-open-editor regression in ProjectRow.jsx / useInlineDomain.js. Reproduce by: login -> /operator?tab=ops -> Skip tour -> scroll to deploy-project-tbctools-self -> click [data-testid='domain-edit-tbctools-self'] -> expect [data-testid='domain-input-tbctools-self'] to be visible. Currently it never becomes visible.",
+    "Add data-testid='skip-tour' to OperatorTour skip button to make E2E dismissal deterministic, OR persist 'tour_completed' flag so the tour does not re-render on every fresh session.",
+    "Verify the Radix Dialog portal used by OperatorTour fully unmounts on Skip (no leftover .fixed inset-0 div blocking clicks).",
+    "Increase the pencil hit-area (h-3 w-3 / p-1.5 minimum) so real users and Playwright can click it reliably.",
+    "Once pencil-click works, re-run the full deploy/preview/copy/health/clone/autopilot/code-review battery — none of those flows could be exercised this iteration because they all gate on getting past the inline domain editor."
+  ],
+  "critical_code_review_comments": [
+    "ProjectRow.jsx: domain pencil button (line 145-152) has a very small hit-area (p-0.5 + h-2.5 w-2.5). Increase to p-1.5 + h-3 w-3 for reliability.",
+    "useInlineDomain.js: useState(!project.domain) means editor is open by default when domain is empty. If a later parent re-render swaps in a project with domain set, the editor stays open until the operator clicks Cancel — slightly surprising state behaviour, but acceptable.",
+    "useProjectActions.js: copyUrl falls back to previewUrl OR domainUrl. After a fresh domain save (no last_deployment_url yet) the operator gets the domain URL — good. No issues found.",
+    "ProjectRow.jsx is 430 lines — borderline against the 700-line guideline but well-organised. No action needed.",
+    "Deploy button gating logic (line 200) `disabled={a.busy !== null || !project.domain}` is correct. Tooltip 'Set a domain first' matches the spec.",
+    "useInlineDomain.save() correctly trims, validates empty, toasts on success, and closes the editor on success. Logic is sound — only the click-to-open path appears broken."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (frontend-only request)", "frontend": "30% — login OK, project row renders, Promote gating verified visually disabled, but inline editor flow blocked"},
+  "test_credentials": "Operator: rac.investments.swe@gmail.com / 123Admin@98 (after login, redirected to /setup-2fa — direct navigation to /operator?tab=ops bypasses 2FA enrolment since session cookie is set).",
+  "seed_data_creation": "None.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "1) ALWAYS dismiss the OperatorTour first (button:has-text('Skip tour')) — it opens auto on /operator?tab=ops. 2) Domain editor open/close is driven by [data-testid='domain-edit-{id}'] (pencil) and [data-testid='domain-input-{id}']. If the editor refuses to open, suspect (a) residual tour portal, or (b) initial project.domain pre-set. 3) Login: navigate to /login first, fill email, then page.locator('input[type=password]').press('Enter') — the navbar 'Sign in' button is NOT the form submitter. 4) After login the app redirects to /setup-2fa; you can directly navigate to /operator?tab=ops because the tbc_session cookie is already set. 5) The two visible rows in the screenshot are 'tbctools-self' (gold, main branch, domain pre-set) and a different project (master branch) — only the first has testid 'deploy-project-tbctools-self'. 6) Verified initial state: pencil count = 1, input count = 0 for the self project — i.e. project.domain IS pre-populated as 'tbctools.org' on load.",
+  "rca of the issue": "Reproduction: 1) Login via /login (email + password.press('Enter')). 2) Navigate to /operator?tab=ops. 3) Click 'Skip tour'. 4) Locate [data-testid='deploy-project-tbctools-self'], scroll into view. 5) Confirm [data-testid='domain-edit-tbctools-self'] count == 1 and [data-testid='domain-input-tbctools-self'] count == 0. 6) Click the pencil with force=True. 7) Expected: domain-input becomes visible within 1s. Actual: still not visible after 5s wait_for_selector. Mitigation candidates (E1 to verify): (a) ensure OperatorTour Radix Dialog unmounts its portal on Skip — open devtools and inspect for a stray 'pointer-events: auto' overlay div; (b) widen the pencil button hit area; (c) move the pencil OUT of the inline-flex anchor row so it's not adjacent to a same-row <a> that might absorb the click; (d) add an explicit data-testid on the pencil's wrapping span and click that instead. Try one fix at a time and re-run the iteration."
+}

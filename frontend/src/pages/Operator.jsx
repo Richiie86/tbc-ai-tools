@@ -3,6 +3,7 @@ import Navbar from '../components/Navbar';
 import api from '../lib/api';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { toast } from 'sonner';
+import { useSearchParams } from 'react-router-dom';
 import {
   Users, CreditCard, MessageSquare, DollarSign, Loader2, ShieldCheck, Mail,
   Code2, Sparkles, Wallet, KeyRound, Settings as SettingsIcon, Coins,
@@ -46,9 +47,29 @@ export default function Operator() {
   const [users, setUsers] = useState([]);
   const [contacts, setContacts] = useState([]);
   const [loading, setLoading] = useState(true);
-  // Controlled tab so the first-time tour can drive the view. Defaults to
-  // 'users' (the historical default) so the existing UX is unchanged.
-  const [activeTab, setActiveTab] = useState('users');
+  // Controlled tab so the first-time tour can drive the view AND so a
+  // deep-link from elsewhere (e.g. /operator?tab=ops from the
+  // "Configure Vercel token now" toast) lands the operator straight
+  // on the right tab.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialTab = searchParams.get('tab') || 'users';
+  const [activeTab, setActiveTab] = useState(initialTab);
+  // Sync `?tab=` → state when the URL changes externally (e.g.
+  // operator hits back/forward).
+  useEffect(() => {
+    const next = searchParams.get('tab');
+    if (next && next !== activeTab) setActiveTab(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+  // And state → URL so the operator can deep-link the current tab.
+  const onTabChange = useCallback((next) => {
+    setActiveTab(next);
+    setSearchParams((prev) => {
+      const p = new URLSearchParams(prev);
+      p.set('tab', next);
+      return p;
+    }, { replace: true });
+  }, [setSearchParams]);
   // Re-launch handle for the guide. Bumping the counter forces the tour to
   // open even if `tbc_operator_tour_seen_v1` is already set in localStorage.
   const [guideKey, setGuideKey] = useState(0);

@@ -192,13 +192,35 @@ def _vercel_team_qs(settings: dict) -> dict:
     return {'teamId': tid} if tid else {}
 
 
+def _vercel_token(settings: dict) -> str:
+    """Resolve the Vercel PAT from (in order):
+      1. The operator-managed `settings.vercel_token` row in Mongo.
+      2. `VERCEL_TOKEN` env var (handy in CI / containerised deploys
+         where the operator hasn't pasted via the UI yet).
+    Returns '' if neither is set — callers raise the user-facing 503."""
+    token = ((settings or {}).get('vercel_token') or '').strip()
+    if token:
+        return token
+    return (os.environ.get('VERCEL_TOKEN') or '').strip()
+
+
+# Single source of truth for the "Vercel token missing" error so every
+# entry-point (deploy / redeploy / promote / health) speaks the same
+# language and the frontend can pattern-match on a stable string.
+_VERCEL_TOKEN_MISSING_DETAIL = (
+    'Vercel token not configured. Open the Operator Console → Ops tab '
+    '→ Vercel keys card and paste your Personal Access Token. You can '
+    'also set the VERCEL_TOKEN env var.'
+)
+
+
 async def _vercel_create_deployment(
     settings: dict, project: dict, target: str, git_ref: Optional[str],
 ) -> dict:
     """Trigger `POST /v13/deployments`. Returns the raw Vercel response."""
-    token = (settings or {}).get('vercel_token')
+    token = _vercel_token(settings)
     if not token:
-        raise HTTPException(503, 'Vercel token not configured. Operator must paste it in the Security tab.')
+        raise HTTPException(503, _VERCEL_TOKEN_MISSING_DETAIL)
 
     ref = git_ref or project.get('gitRef') or 'main'
     repo = project['repo']
@@ -257,10 +279,62 @@ async def _vercel_create_deployment(
     return r.json()
 
 
-async def _vercel_redeploy(settings: dict, deployment_id: str) -> dict:
-    token = (settings or {}).get('vercel_token')
+async def _vercel_attach_domain(
+    settings: dict, vercel_project_id: str, domain: str,
+) -> dict:
+    """Bind `domain` to the given Vercel project via
+    `POST /v10/projects/{id}/domains`. Idempotent — re-adding a domain
+    that's already attached returns `{already_attached: True}` instead
+    of a hard error so the operator can hit "Save & deploy" repeatedly
+    without seeing scary toasts.
+    """
+    token = _vercel_token(settings)
     if not token:
-        raise HTTPException(503, 'Vercel token not configured.')
+        raise HTTPException(503, _VERCEL_TOKEN_MISSING_DETAIL)
+    if not vercel_project_id:
+        raise HTTPException(
+            400,
+            'Project has no vercel_project_id yet — run Deploy once to create '
+            'the Vercel project, then save the domain to attach it.',
+        )
+    # Strip protocol/path so callers can paste a full URL.
+    name = domain.strip()
+    for prefix in ('https://', 'http://'):
+        if name.lower().startswith(prefix):
+            name = name[len(prefix):]
+    name = name.split('/', 1)[0].rstrip('.')
+    if not name:
+        raise HTTPException(400, 'Empty domain after normalization')
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        r = await client.post(
+            f'{VERCEL_API}/v10/projects/{vercel_project_id}/domains',
+            params=_vercel_team_qs(settings),
+            headers={'Authorization': f'Bearer {token}'},
+            json={'name': name},
+        )
+    if r.status_code >= 400:
+        try:
+            err = r.json().get('error', {})
+        except Exception:
+            err = {'message': r.text[:300]}
+        code = err.get('code') or ''
+        msg = err.get('message') or 'failed'
+        # Vercel returns `domain_already_in_use` when the domain is bound
+        # to the SAME project (and a different code when it's on another).
+        # We treat "same project" as success.
+        if code in {'domain_already_exists', 'domain_already_in_use'} and \
+                'this project' in msg.lower():
+            return {'already_attached': True, 'name': name, 'message': msg}
+        raise HTTPException(502, f'Vercel attach domain: {msg}')
+    body = r.json()
+    return {'attached': True, 'name': name, 'verified': body.get('verified', False), 'raw': body}
+
+
+async def _vercel_redeploy(settings: dict, deployment_id: str) -> dict:
+    token = _vercel_token(settings)
+    if not token:
+        raise HTTPException(503, _VERCEL_TOKEN_MISSING_DETAIL)
     async with httpx.AsyncClient(timeout=20.0) as client:
         r = await client.post(
             f'{VERCEL_API}/v13/deployments/{deployment_id}/redeploy',
@@ -280,9 +354,9 @@ async def _vercel_redeploy(settings: dict, deployment_id: str) -> dict:
 async def _vercel_get_deployment(settings: dict, deployment_id: str) -> dict:
     """Fetch a deployment by id — used by the watcher and the per-project
     Health Check button. Raises 502 on Vercel-side error, 503 if no token."""
-    token = (settings or {}).get('vercel_token')
+    token = _vercel_token(settings)
     if not token:
-        raise HTTPException(503, 'Vercel token not configured.')
+        raise HTTPException(503, _VERCEL_TOKEN_MISSING_DETAIL)
     async with httpx.AsyncClient(timeout=10.0) as client:
         r = await client.get(
             f'{VERCEL_API}/v13/deployments/{deployment_id}',
@@ -310,9 +384,9 @@ async def _vercel_promote_to_production(settings: dict, project_vercel_id: str, 
     Returns the raw Vercel response (usually a deployment object with
     target='production' once accepted).
     """
-    token = (settings or {}).get('vercel_token')
+    token = _vercel_token(settings)
     if not token:
-        raise HTTPException(503, 'Vercel token not configured.')
+        raise HTTPException(503, _VERCEL_TOKEN_MISSING_DETAIL)
     if not project_vercel_id:
         raise HTTPException(400, 'Project has no vercel_project_id yet — deploy at least once before promoting.')
     if not deployment_id:
@@ -669,7 +743,9 @@ async def op_get_key_status(_user: dict = Depends(get_current_operator)):
     """Returns presence flags only — never echoes the token values."""
     settings = await get_settings_doc()
     return {
-        'has_vercel_token': bool((settings or {}).get('vercel_token')),
+        # Token presence reports whether EITHER the operator-set value
+        # or the VERCEL_TOKEN env-var fallback would resolve.
+        'has_vercel_token': bool(_vercel_token(settings)),
         'has_vercel_team_id': bool((settings or {}).get('vercel_team_id')),
         'has_ai_api_key': bool((settings or {}).get('ai_api_key')),
         'has_github_token': bool((settings or {}).get('github_token')),

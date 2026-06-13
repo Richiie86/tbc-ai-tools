@@ -68,7 +68,23 @@ export function useProjectActions(project, onDeployed) {
         return;
       }
       setGateBlock(null);
-      toast.error(typeof detail === 'string' ? detail : `Deploy failed${status ? ` (HTTP ${status})` : ''}`);
+      // 503 "Vercel token not configured" → offer a one-click jump to
+      // the Ops tab where the operator pastes the PAT, instead of just
+      // toasting the bare error and leaving them to navigate.
+      const errMsg = typeof detail === 'string'
+        ? detail
+        : `Deploy failed${status ? ` (HTTP ${status})` : ''}`;
+      if (status === 503 && errMsg.toLowerCase().includes('vercel token not configured')) {
+        toast.error(errMsg, {
+          duration: 12000,
+          action: {
+            label: 'Configure now',
+            onClick: () => navigate('/operator?tab=ops'),
+          },
+        });
+      } else {
+        toast.error(errMsg);
+      }
     }
   };
 

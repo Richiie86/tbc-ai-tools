@@ -72,7 +72,22 @@ export function InChatDeployControls({ user }) {
         toast.success(`Health check: ${status}`);
       }
     } catch (e) {
-      toast.error(e?.response?.data?.detail || `${kind} failed`);
+      const detail = e?.response?.data?.detail || `${kind} failed`;
+      // When the deploy fails because the Vercel token isn't set,
+      // surface a sticky toast with a "Configure now" action that jumps
+      // straight to the Operator Console → Ops tab so the operator can
+      // paste the PAT without leaving the chat / hunting for the page.
+      if (typeof detail === 'string' && detail.toLowerCase().includes('vercel token not configured')) {
+        toast.error(detail, {
+          duration: 12000,
+          action: {
+            label: 'Configure now',
+            onClick: () => { window.location.href = '/operator?tab=ops'; },
+          },
+        });
+      } else {
+        toast.error(detail);
+      }
     } finally {
       setBusy(null);
     }
