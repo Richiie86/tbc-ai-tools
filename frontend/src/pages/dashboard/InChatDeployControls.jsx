@@ -210,8 +210,17 @@ export function InChatDeployControls({ user }) {
           </DropdownMenuLabel>
           <DropdownMenuSeparator className="bg-tbc-900/60" />
           {projects.length === 0 && (
-            <div className="px-2 py-2 text-xs text-tbc-200/60">
-              Create a project in Operator → Projects first.
+            <div className="space-y-2 px-2 py-2">
+              <div className="text-xs text-tbc-200/60">
+                No deploy project yet — set your GitHub repo to enable the Deploy button.
+              </div>
+              <a
+                href="/operator?tab=settings#self-source"
+                data-testid="deploy-empty-configure-link"
+                className="inline-flex w-full items-center justify-center rounded-md bg-tbc-500 px-2.5 py-1.5 text-xs font-semibold text-ink-950 hover:bg-tbc-400"
+              >
+                Configure repo now →
+              </a>
             </div>
           )}
           {projects.map((p) => (

@@ -12,6 +12,22 @@ gold theme. Domain: **tbctools.org**.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
 ## Implemented
+- ✅ **Auto-fill operator repo + kill `.com` references** (Feb 2026):
+  - New `OPERATOR_DEFAULT_REPO` env var (set to `Richiie86/tbc-ai-tools`
+    in `/app/backend/.env`). `_ensure_self_project()` now uses a 3-tier
+    fallback: `payment_settings.self_repo` → env var → empty.
+  - Post-upsert auto-fill: if `tbctools-self.repo` is still empty after
+    insert, fills it from (a) most-recent clone-history project, then
+    (b) `OPERATOR_DEFAULT_REPO` env var. Verified — fresh DB with zero
+    clone history still auto-fills to `Richiie86/tbc-ai-tools`.
+  - Dashboard's empty-state dropdown now shows a "**Configure repo now →**"
+    button that deep-links to `/operator?tab=settings#self-source`
+    instead of the dead-end "Create a project first" message.
+  - Killed every `tbctools.com` reference — `models.py`,
+    `referrals_ext.py`, and the `.com` toggle in `MyReferral.jsx` all
+    now resolve to `tbctools.org`. Backend `cors_dynamic_ext.py`
+    always-allowed regex explicitly includes `www.tbctools.org`.
+
 - ✅ **"Repo not found" toast — root-caused & fixed** (Feb 2026):
   - The previous fallback `'rac-investments/tbc-self-copy'` was a
     placeholder I made up; it doesn't exist on GitHub. When the operator

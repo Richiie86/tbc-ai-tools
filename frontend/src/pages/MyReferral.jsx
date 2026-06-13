@@ -63,10 +63,9 @@ export default function MyReferral() {
         <div className="mt-8 rounded-2xl border border-tbc-900/60 bg-ink-900/60 p-6">
           <div className="mb-3 flex items-center gap-2">
             <span className="text-xs uppercase tracking-wider text-tbc-200/60">Your referral link</span>
-            <div className="ml-auto flex gap-1">
-              <button onClick={() => setDomain('org')} className={`rounded-md px-2.5 py-1 text-xs ${domain === 'org' ? 'bg-tbc-500 text-ink-950 font-semibold' : 'border border-tbc-900/60 text-tbc-200 hover:bg-ink-950'}`}>tbctools.org</button>
-              <button onClick={() => setDomain('com')} className={`rounded-md px-2.5 py-1 text-xs ${domain === 'com' ? 'bg-tbc-500 text-ink-950 font-semibold' : 'border border-tbc-900/60 text-tbc-200 hover:bg-ink-950'}`}>tbctools.com</button>
-            </div>
+            {/* Domain toggle removed — the operator only owns tbctools.org.
+                The state hook (`domain`) is preserved so any deep-links
+                that still pass `?domain=com` resolve gracefully. */}
           </div>
           <div className="flex items-center gap-2">
             <Input readOnly value={activeUrl} className="bg-ink-950 border-tbc-900/60 text-tbc-100 font-mono text-xs" />

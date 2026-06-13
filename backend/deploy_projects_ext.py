@@ -1082,7 +1082,16 @@ async def _ensure_self_project() -> Optional[dict]:
     `rac-investments/tbc-self-copy`).
     """
     settings = await get_settings_doc()
-    repo = (settings or {}).get('self_repo', '')
+    # Fallback chain for the repo:
+    #   1. `payment_settings.self_repo` (operator-set via Settings UI)
+    #   2. `OPERATOR_DEFAULT_REPO` env var (per-deployment default)
+    #   3. '' (empty → first Deploy click surfaces a "Configure now" 412)
+    # The env-var hook lets a fresh production deploy auto-fill the
+    # operator's real GitHub repo without them ever opening Settings.
+    repo = (
+        (settings or {}).get('self_repo')
+        or os.environ.get('OPERATOR_DEFAULT_REPO', '')
+    ).strip()
     git_ref = (settings or {}).get('self_git_ref') or 'main'
     domain = (settings or {}).get('self_domain') or 'tbctools.org'
     now = datetime.now(timezone.utc)
@@ -1136,16 +1145,23 @@ async def _ensure_self_project() -> Optional[dict]:
             },
             sort=[('updated_at', -1)],
         )
-        if recent and recent.get('repo'):
+        detected = (recent or {}).get('repo')
+        # Second fallback: env-var default. Lets a fresh production deploy
+        # auto-fill the operator's repo even when their DB has no clone
+        # history yet (the common case right after a brand-new deploy).
+        if not detected:
+            detected = os.environ.get('OPERATOR_DEFAULT_REPO', '').strip()
+        if detected:
             await db.deploy_projects.update_one(
                 {'id': SELF_PROJECT_ID},
                 {'$set': {
-                    'repo': recent['repo'],
-                    'gitRef': recent.get('gitRef') or 'main',
+                    'repo': detected,
+                    'gitRef': (recent or {}).get('gitRef') or 'main',
                     'updated_at': now,
                 }},
             )
-            logger.info('Auto-detected self repo from existing project: %s', recent['repo'])
+            logger.info('Auto-filled self repo: %s (source=%s)',
+                        detected, 'clone-history' if recent else 'env-var')
     return await db.deploy_projects.find_one({'id': SELF_PROJECT_ID})
 
 

@@ -424,5 +424,9 @@ class MarketplacePurchase(BaseModel):
 class BrandSettings(BaseModel):
     share_base_url: str = 'https://www.tbctools.org'
     referral_base_url_org: str = 'https://www.tbctools.org/referral'
-    referral_base_url_com: str = 'https://www.tbctools.com/referral'
+    # `.com` variant kept as a property but defaults to the `.org` URL so
+    # any legacy callers still resolve to the live domain. The operator
+    # only owns tbctools.org — `.com` was a placeholder from an earlier
+    # build.
+    referral_base_url_com: str = 'https://www.tbctools.org/referral'
     referral_pct: float = 10.0

@@ -140,7 +140,10 @@ async def my_referral(user: dict = Depends(get_current_user)):
     # Build share URLs based on brand settings
     brand = await get_brand_settings()
     org_url = f"{brand.get('referral_base_url_org', 'https://www.tbctools.org/referral').rstrip('/')}/{code}"
-    com_url = f"{brand.get('referral_base_url_com', 'https://www.tbctools.com/referral').rstrip('/')}/{code}"
+    # `.com` URL now mirrors `.org` since the operator only owns the `.org` domain.
+    # Kept in the response shape for backward-compat with older clients that
+    # still read the `com_url` field — they'll just route to the same target.
+    com_url = f"{brand.get('referral_base_url_com', 'https://www.tbctools.org/referral').rstrip('/')}/{code}"
 
     # Stats
     click_count = await db.referral_clicks.count_documents({'code': code})

@@ -56,7 +56,7 @@ _state = {
 # operator has never touched the settings. tbctools.org is the
 # production custom domain; the others cover preview/Emergent hosts.
 _ALWAYS_ALLOWED_REGEX = re.compile(
-    r'^https://([a-z0-9-]+\.)?(preview\.emergentagent\.com|emergent\.host|tbctools\.org)(:\d+)?$',
+    r'^https://([a-z0-9-]+\.)?(preview\.emergentagent\.com|emergent\.host|tbctools\.org|www\.tbctools\.org)(:\d+)?$',
     re.IGNORECASE,
 )
 
