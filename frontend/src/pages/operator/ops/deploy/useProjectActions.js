@@ -33,14 +33,15 @@ export function useProjectActions(project, onDeployed) {
   // "Open fix chat" / "Bypass and ship anyway" without re-fetching.
   const [gateBlock, setGateBlock] = useState(null);
 
-  const previewUrl = project.last_deployment_url
-    ? (project.last_deployment_url.startsWith('http')
-        ? project.last_deployment_url
-        : `https://${project.last_deployment_url}`)
-    : null;
-  const domainUrl = project.domain
-    ? (project.domain.startsWith('http') ? project.domain : `https://${project.domain}`)
-    : null;
+  // Normalise a raw host or full URL into a clickable `https://…` URL.
+  // Replaces the previous nested ternary so the intent reads top-down.
+  const ensureHttps = (raw) => {
+    if (!raw) return null;
+    return raw.startsWith('http') ? raw : `https://${raw}`;
+  };
+
+  const previewUrl = ensureHttps(project.last_deployment_url);
+  const domainUrl = ensureHttps(project.domain);
   const copyableUrl = previewUrl || domainUrl;
 
   // Production deploys go through this helper so we can re-call with

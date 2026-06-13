@@ -37,8 +37,7 @@ BASE_URL = (
     or open('/app/frontend/.env').read().split('REACT_APP_BACKEND_URL=')[1].split('\n')[0].strip()
 ).rstrip('/')
 
-OP_EMAIL = 'rac.investments.swe@gmail.com'
-OP_PASSWORD = '123Admin@98'
+from tests._creds import OP_EMAIL, OP_PASSWORD  # centralised — see /app/backend/tests/_creds.py
 
 
 def _login():

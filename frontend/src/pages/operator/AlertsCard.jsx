@@ -41,7 +41,11 @@ export default function AlertsCard() {
         slack_webhook: data.slack_webhook || '',
         discord_webhook: data.discord_webhook || '',
       });
-    } catch { /* non-fatal */ }
+    } catch (e) {
+      // Non-fatal — form falls back to its zero-defaults. Logged so
+      // production telemetry can spot a regression on the threshold API.
+      console.warn('AlertsCard: load failed', e);
+    }
   }, []);
 
   useEffect(() => { load(); }, [load]);

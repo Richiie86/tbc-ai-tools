@@ -8,8 +8,7 @@ import requests
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL') or open('/app/frontend/.env').read().split('REACT_APP_BACKEND_URL=')[1].split('\n')[0].strip()
 BASE_URL = BASE_URL.rstrip('/')
 
-OP_EMAIL = 'rac.investments.swe@gmail.com'
-OP_PASSWORD = '123Admin@98'
+from tests._creds import OP_EMAIL, OP_PASSWORD  # centralised — see /app/backend/tests/_creds.py
 
 
 def _login_operator():
@@ -26,7 +25,8 @@ def test_operator_delete_writes_audit_row_with_operator_ui_via():
 
     # Insert a deploy project directly into Mongo using the same helpers the app uses
     pid = f'TEST_del_{uuid.uuid4().hex[:8]}'
-    import asyncio, sys
+    import asyncio
+    import sys
     sys.path.insert(0, '/app/backend')
     from motor.motor_asyncio import AsyncIOMotorClient  # noqa: E402
     from datetime import datetime, timezone

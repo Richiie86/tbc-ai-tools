@@ -46,7 +46,8 @@ def test_record_referral_earning_credits_referrer():
     twice with the same tx to also verify idempotency, then assert that the
     referrer's credits incremented by exactly `referral_pct%` of credits
     purchased and a notification was created."""
-    import asyncio, sys
+    import asyncio
+    import sys
     sys.path.insert(0, '/app/backend')
     from motor.motor_asyncio import AsyncIOMotorClient
     from referrals_ext import record_referral_earning

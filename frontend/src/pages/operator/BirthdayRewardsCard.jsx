@@ -30,7 +30,11 @@ export default function BirthdayRewardsCard() {
         discount_pct: Number(data.discount_pct) || 0,
         message: data.message || '',
       });
-    } catch { /* non-fatal */ }
+    } catch (e) {
+      // Non-fatal — operator can still toggle/save defaults below.
+      // Logged so production debugging tools can spot a regression.
+      console.warn('BirthdayRewardsCard: load failed', e);
+    }
   }, []);
 
   useEffect(() => { load(); }, [load]);

@@ -21,7 +21,10 @@ export default function TestUserBanner() {
     try {
       const { data } = await api.get('/operator/test-user');
       setInfo(data);
-    } catch { /* non-fatal */ }
+    } catch (e) {
+      // Non-fatal — banner just stays hidden when /test-user is down.
+      console.warn('TestUserBanner: load failed', e);
+    }
   }, []);
 
   useEffect(() => { load(); }, [load]);

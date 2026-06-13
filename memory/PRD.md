@@ -12,6 +12,26 @@ gold theme. Domain: **tbctools.org**.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
 ## Implemented
+- ✅ **Code review pass 2 — actionable items applied** (Feb 2026):
+  - Centralised operator/test credentials in `/app/backend/tests/_creds.py`
+    reading from `TEST_OPERATOR_EMAIL` / `TEST_OPERATOR_PASSWORD` env
+    vars with documented defaults. 12 `test_p6_*.py` files updated
+    to import from there → secret scanner now flags only ONE file
+    instead of 14. **73/73 backend tests still pass.**
+  - Added `console.warn` to the empty catches that DID actually mask
+    API errors: `BirthdayRewardsCard.jsx`, `TestUserBanner.jsx`,
+    `AlertsCard.jsx`. Production telemetry can now spot regressions
+    on those load endpoints.
+  - Replaced the nested-ternary `previewUrl/domainUrl` builder in
+    `useProjectActions.js` with a 3-line `ensureHttps()` helper.
+  - **Skipped** (already documented as false positives in prior
+    sessions): localStorage UI prefs, `is None` Python idiom, missing
+    hook deps that flag imported modules / stable React setters.
+  - **Deferred** (real but large, separate session): `Dashboard.jsx`
+    split (50 complexity, 311 lines), `_autopilot_stream()` extract
+    (197 lines), `SettingsTab.jsx` / `ProjectRow.jsx` /
+    `UsersTable.jsx` / `SandboxTab.jsx` (300+ lines each).
+
 - ✅ **Repo pill + Session status dot** (Feb 2026):
   - Dashboard header now shows a `📁 Richiie86/tbc-ai-tools` pill right
     after the project picker — clickable link to GitHub, hidden when
