@@ -65,6 +65,7 @@ from app_settings_ext import (
     op_router as app_settings_op_router,
     is_login_locked_down,
 )
+from webhook_ext import router as webhook_router
 from runtime_errors_ext import (
     public_router as runtime_errors_public_router,
     op_router as runtime_errors_op_router,
