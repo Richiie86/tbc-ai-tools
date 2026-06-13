@@ -137,6 +137,15 @@ async def _maybe_page_operator(doc: dict) -> None:
             await send_email(op_email, subject, body)
         except Exception as e:
             logger.warning('auto-page send_email failed (throttle row was still inserted): %s', e)
+        # 3. Best-effort Slack/Discord webhook — same fire-and-forget posture.
+        try:
+            from webhook_ext import send_event
+            await send_event(
+                f'Critical error · {doc.get("source", "?")} · {(doc.get("message") or "")[:200]}',
+                kind='critical',
+            )
+        except Exception as e:
+            logger.warning('auto-page webhook send failed: %s', e)
     except Exception:
         logger.exception('auto-page operator failed')
 

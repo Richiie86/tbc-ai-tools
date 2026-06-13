@@ -559,6 +559,11 @@ async def register(req: RegisterRequest, response: Response, request: Request):
             })
         except Exception:
             pass
+        try:
+            from webhook_ext import send_event
+            await send_event(f'Lockdown · blocked register attempt · {email}', kind='lockdown')
+        except Exception:
+            pass
         raise HTTPException(
             503,
             'New sign-ups are temporarily disabled. Please try again later.',
@@ -665,6 +670,11 @@ async def login(req: LoginRequest, response: Response, request: Request):
                 'kind': 'login',
                 'created_at': datetime.now(timezone.utc),
             })
+        except Exception:
+            pass
+        try:
+            from webhook_ext import send_event
+            await send_event(f'Lockdown · blocked login attempt · {email}', kind='lockdown')
         except Exception:
             pass
         raise HTTPException(
@@ -1867,6 +1877,7 @@ app.include_router(runtime_errors_op_router)
 app.include_router(sandbox_ai_router)
 app.include_router(sandbox_ai_proj_router)
 app.include_router(cors_origins_router)
+app.include_router(webhook_router)
 # app.include_router(marketplace_router)  # Marketplace deferred — skipped per user.
 # CORS — proven FastAPI built-in CORSMiddleware first (handles cookie
 # credentials correctly, battle-tested). The `DynamicCORSMiddleware`

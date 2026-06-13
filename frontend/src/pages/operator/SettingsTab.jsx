@@ -7,10 +7,11 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '../../components/ui/select';
 import { toast } from 'sonner';
-import { Loader2, KeyRound, Save, Lock, Eye, EyeOff, Plug, Mail, Sparkles, UserPlus, Rocket, Megaphone } from 'lucide-react';
+import { Loader2, KeyRound, Save, Lock, Eye, EyeOff, Plug, Mail, Sparkles, UserPlus, Rocket, Megaphone, Webhook } from 'lucide-react';
 import SecretsCard from './SecretsCard';
 import BirthdayRewardsCard from './BirthdayRewardsCard';
 import AppSettingsCard from './AppSettingsCard';
+import WebhookSettingsCard from './WebhookSettingsCard';
 
 export default function SettingsTab() {
   const [settings, setSettings] = useState(null);
@@ -81,6 +82,10 @@ export default function SettingsTab() {
     <div className="grid gap-5">
       <Section icon={Megaphone} title="Public banner & lockdown">
         <AppSettingsCard />
+      </Section>
+
+      <Section icon={Webhook} title="Slack / Discord alert webhook">
+        <WebhookSettingsCard />
       </Section>
 
       <Section icon={UserPlus} title="New user defaults">

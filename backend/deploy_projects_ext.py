@@ -1096,6 +1096,15 @@ async def _trigger_promote(project_id: str, settings: dict, deployment_id: Optio
         },
         settings=settings,
     )
+    # Best-effort Slack/Discord notification — never blocks promote success.
+    try:
+        from webhook_ext import send_event
+        await send_event(
+            f'Promoted to production · {project.get("projectName") or project_id} · {promoted_url or ""}',
+            kind='promote',
+        )
+    except Exception as e:
+        logger.warning('promote send_event failed: %s', e)
     return {
         'ok': True,
         'project_id': project_id,

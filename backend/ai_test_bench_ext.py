@@ -385,6 +385,14 @@ async def _nightly_drift_alert() -> dict:
                 '<p>View full results in <strong>Operator → AI Tests</strong>.</p>'
             )
             await send_email(op_email, subject, body)
+            try:
+                from webhook_ext import send_event
+                await send_event(
+                    f'AI Test Bench drift — {len(alerts)} alert(s):\n' + '\n'.join(alerts),
+                    kind='drift',
+                )
+            except Exception as e:
+                logger.warning('Nightly drift webhook failed: %s', e)
             return {'sent': True, 'to': op_email, 'alerts': len(alerts)}
     except Exception as e:
         logger.warning('Nightly drift email failed: %s', e)
