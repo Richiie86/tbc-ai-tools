@@ -83,7 +83,11 @@ def _seed_projects_and_patch(mongo_db):
     mongo_db.deploy_projects.replace_one({'id': SEED_BLOCKED_ID}, blocked_doc, upsert=True)
     mongo_db.deploy_projects.replace_one({'id': SEED_SHIP_ID}, ship_doc, upsert=True)
 
-    orig_review = deploy_projects_ext._run_code_review
+    # `_run_code_review` was moved to deploy.code_review.run_code_review and
+    # autopilot now imports it as `run_code_review`. To stub it for tests we
+    # need to patch the binding the autopilot module captured at import time.
+    from deploy import autopilot as _autopilot_mod
+    orig_review = _autopilot_mod.run_code_review
 
     async def fake_review(project, settings):
         verdict = project.get('_verdict_for_test', 'ship')
@@ -111,7 +115,7 @@ def _seed_projects_and_patch(mongo_db):
         )
         return review
 
-    deploy_projects_ext._run_code_review = fake_review
+    _autopilot_mod.run_code_review = fake_review
 
     # Override the operator-auth dependency so we don't need real cookies.
     app.dependency_overrides[get_current_operator] = lambda: FAKE_OPERATOR
@@ -127,7 +131,7 @@ def _seed_projects_and_patch(mongo_db):
 
     yield {'ai_key': test_ai_key}
 
-    deploy_projects_ext._run_code_review = orig_review
+    _autopilot_mod.run_code_review = orig_review
     app.dependency_overrides.pop(get_current_operator, None)
     app.dependency_overrides.pop(get_current_user, None)
     mongo_db.deploy_projects.delete_one({'id': SEED_BLOCKED_ID})

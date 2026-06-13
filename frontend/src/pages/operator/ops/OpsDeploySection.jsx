@@ -59,6 +59,7 @@ function SelfSourceDownloadButton() {
 function KeysCard({ keysStatus, onSaved }) {
   const [vercelToken, setVercelToken] = useState('');
   const [teamId, setTeamId] = useState(keysStatus.vercel_team_id || '');
+  const [githubToken, setGithubToken] = useState('');
   const [saving, setSaving] = useState(false);
   const [showAiKey, setShowAiKey] = useState(false);
   const [revealedKey, setRevealedKey] = useState(null);
@@ -80,6 +81,24 @@ function KeysCard({ keysStatus, onSaved }) {
       });
       toast.success(vercelToken ? 'Vercel token saved' : 'Vercel team id saved');
       setVercelToken('');
+      onSaved();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Save failed');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveGithubToken = async () => {
+    if (!githubToken) {
+      toast.error('Paste a GitHub token first');
+      return;
+    }
+    setSaving(true);
+    try {
+      await api.post('/operator/deploy/key', { github_token: githubToken });
+      toast.success('GitHub token saved — code review + private downloads unlocked');
+      setGithubToken('');
       onSaved();
     } catch (e) {
       toast.error(e?.response?.data?.detail || 'Save failed');
@@ -132,7 +151,7 @@ function KeysCard({ keysStatus, onSaved }) {
         </div>
       </div>
 
-      <div className="grid gap-3 lg:grid-cols-2">
+      <div className="grid gap-3 lg:grid-cols-3">
         <div className="rounded-lg border border-tbc-900/60 bg-ink-950 p-3">
           <div className="mb-2 flex items-center justify-between">
             <label className="text-[10px] font-semibold uppercase tracking-wider text-tbc-200/70">
@@ -257,6 +276,56 @@ function KeysCard({ keysStatus, onSaved }) {
                 ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
                 : <RefreshCw className="mr-1.5 h-3 w-3" />}
               {keysStatus.has_ai_api_key ? 'Rotate key' : 'Generate key'}
+            </Button>
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-tbc-900/60 bg-ink-950 p-3">
+          <div className="mb-2 flex items-center justify-between">
+            <label className="text-[10px] font-semibold uppercase tracking-wider text-tbc-200/70">
+              GitHub token (for code review &amp; private repo downloads)
+            </label>
+            {keysStatus.has_github_token ? (
+              <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[9px] uppercase tracking-wider text-emerald-300">
+                ✓ configured
+              </span>
+            ) : (
+              <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[9px] uppercase tracking-wider text-amber-300">
+                optional
+              </span>
+            )}
+          </div>
+          <Input
+            data-testid="deploy-key-github-token"
+            type="password"
+            placeholder={keysStatus.has_github_token ? '••••••••  (paste a new value to rotate)' : 'ghp_... or github_pat_...'}
+            value={githubToken}
+            onChange={(e) => setGithubToken(e.target.value)}
+            className="border-tbc-900/60 bg-ink-900 font-mono text-xs text-tbc-100"
+          />
+          <p className="mt-2 text-[10px] text-tbc-200/60">
+            Unlocks private-repo downloads + raises the GitHub API limit from
+            60/hr (anonymous) to 5 000/hr (authenticated) so the code review +
+            autopilot loop never get rate-limited mid-run.
+          </p>
+          <div className="mt-2 flex items-center justify-between">
+            <a
+              href="https://github.com/settings/tokens?type=beta"
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 text-[10px] text-tbc-300 hover:text-tbc-200"
+            >
+              Generate a fine-grained PAT <ExternalLink className="h-2.5 w-2.5" />
+            </a>
+            <Button
+              size="sm"
+              data-testid="deploy-key-github-save"
+              onClick={saveGithubToken}
+              disabled={saving || !githubToken}
+              className="bg-tbc-500 text-ink-950 hover:bg-tbc-400 font-semibold"
+            >
+              {saving ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : <Save className="mr-1.5 h-3 w-3" />}
+              Save
             </Button>
           </div>
         </div>

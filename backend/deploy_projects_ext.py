@@ -460,6 +460,7 @@ async def op_get_key_status(_user: dict = Depends(get_current_operator)):
         'has_vercel_token': bool((settings or {}).get('vercel_token')),
         'has_vercel_team_id': bool((settings or {}).get('vercel_team_id')),
         'has_ai_api_key': bool((settings or {}).get('ai_api_key')),
+        'has_github_token': bool((settings or {}).get('github_token')),
         'vercel_team_id': (settings or {}).get('vercel_team_id'),
     }
 
@@ -467,6 +468,10 @@ async def op_get_key_status(_user: dict = Depends(get_current_operator)):
 class KeyUpdate(BaseModel):
     vercel_token: Optional[str] = None
     vercel_team_id: Optional[str] = None
+    # GitHub PAT used for private-repo downloads + higher API rate limits on
+    # code reviews. Fine-grained tokens with `Contents: Read` on the target
+    # repo are enough.
+    github_token: Optional[str] = None
     # When `regenerate_ai_api_key` is true the server mints a fresh token and
     # returns it once (the only time it's ever sent to the client).
     regenerate_ai_api_key: bool = False
@@ -485,6 +490,8 @@ async def op_update_keys(
         update['vercel_token'] = payload.vercel_token.strip() or None
     if payload.vercel_team_id is not None:
         update['vercel_team_id'] = payload.vercel_team_id.strip() or None
+    if payload.github_token is not None:
+        update['github_token'] = payload.github_token.strip() or None
 
     new_key: Optional[str] = None
     if payload.regenerate_ai_api_key:
@@ -964,289 +971,13 @@ async def op_update_domain(
     return _project_to_out(doc)
 
 
-# ===================================================================
-# Run Code Review (AI on a project's repo)
-# ===================================================================
-GITHUB_API = 'https://api.github.com'
-# Keep prompt bounded so a huge repo doesn't blow our token budget; we sample
-# the highest-signal files (config + entry points + top-level source).
-_REVIEW_PER_FILE_CHARS = 6_000
-_REVIEW_TOTAL_CHARS = 40_000
-# File patterns we ALWAYS try to include if present (high signal).
-_REVIEW_PRIORITY_FILES = (
-    'README.md', 'readme.md', 'package.json', 'pyproject.toml',
-    'requirements.txt', 'tsconfig.json', 'next.config.js', 'next.config.mjs',
-    'vercel.json', 'Dockerfile', '.env.example',
-)
-# Extensions we consider "code" for the secondary sweep.
-_REVIEW_CODE_EXTS = ('.py', '.js', '.jsx', '.ts', '.tsx', '.go', '.rs', '.rb', '.java', '.json', '.md', '.yml', '.yaml')
-
-
-async def _gh_get_json(client: httpx.AsyncClient, url: str, token: Optional[str], params: Optional[dict] = None):
-    headers = {'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28'}
-    if token:
-        headers['Authorization'] = f'Bearer {token}'
-    r = await client.get(url, headers=headers, params=params)
-    if r.status_code == 404:
-        return None
-    if r.status_code == 403:
-        # Rate-limited or auth-required — bubble up a clear message.
-        msg = r.json().get('message', 'GitHub rate limit')
-        raise HTTPException(502, f'GitHub: {msg}. Configure a github_token in Operator → Security for private repos / higher limits.')
-    if r.status_code >= 400:
-        raise HTTPException(502, f'GitHub: HTTP {r.status_code} on {url}')
-    return r.json()
-
-
-async def _gh_get_text(client: httpx.AsyncClient, url: str, token: Optional[str]) -> Optional[str]:
-    headers = {'Accept': 'application/vnd.github.raw'}
-    if token:
-        headers['Authorization'] = f'Bearer {token}'
-    r = await client.get(url, headers=headers)
-    if r.status_code >= 400:
-        return None
-    return r.text
-
-
-async def _fetch_repo_snapshot(repo: str, git_ref: Optional[str], gh_token: Optional[str]) -> dict:
-    """Snapshot the repo's high-signal files for code review.
-
-    Returns a dict with `files: [{path, content, truncated}], file_count, total_chars`.
-    Public repos work without a token (rate-limited); private repos require one.
-    """
-    ref = git_ref or 'main'
-    files: list[dict] = []
-    total = 0
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        # 1) Repo metadata so we can resolve the default branch if `ref` is wrong.
-        meta = await _gh_get_json(client, f'{GITHUB_API}/repos/{repo}', gh_token)
-        if not meta:
-            raise HTTPException(404, f'Repo {repo!r} not found on GitHub')
-        default_branch = meta.get('default_branch', 'main')
-        ref = ref or default_branch
-
-        # 2) Tree of the ref — recursive so we can pick paths without N round-trips.
-        # GitHub's tree endpoint may truncate; that's fine for review purposes.
-        tree_resp = await _gh_get_json(
-            client, f'{GITHUB_API}/repos/{repo}/git/trees/{ref}', gh_token,
-            params={'recursive': '1'},
-        )
-        if not tree_resp:
-            # Branch resolution failed — fall back to the repo default.
-            tree_resp = await _gh_get_json(
-                client, f'{GITHUB_API}/repos/{repo}/git/trees/{default_branch}', gh_token,
-                params={'recursive': '1'},
-            )
-            ref = default_branch
-        if not tree_resp:
-            raise HTTPException(502, f'GitHub: could not fetch tree for {repo}@{ref}')
-
-        tree = [t for t in (tree_resp.get('tree') or []) if t.get('type') == 'blob']
-
-        # Bucketed selection: priority files first, then small top-level code files.
-        chosen_paths: list[str] = []
-        # Priority (exact filename match anywhere in repo, prefer root-level).
-        for name in _REVIEW_PRIORITY_FILES:
-            for t in tree:
-                p = t['path']
-                if p == name or p.endswith(f'/{name}'):
-                    chosen_paths.append(p)
-                    break
-        # Top-level code files (no slash in path, has a known code ext).
-        for t in tree:
-            p = t['path']
-            if '/' not in p and p.endswith(_REVIEW_CODE_EXTS) and p not in chosen_paths:
-                chosen_paths.append(p)
-                if len(chosen_paths) >= 20:
-                    break
-        # Add a few src/* entry points if we still have budget.
-        if len(chosen_paths) < 20:
-            for t in tree:
-                p = t['path']
-                if p.startswith(('src/', 'backend/', 'frontend/src/', 'app/')) and p.endswith(_REVIEW_CODE_EXTS):
-                    if p not in chosen_paths:
-                        chosen_paths.append(p)
-                        if len(chosen_paths) >= 30:
-                            break
-
-        # 3) Fetch each file's content (cap per-file + cap total).
-        for path in chosen_paths:
-            if total >= _REVIEW_TOTAL_CHARS:
-                break
-            content = await _gh_get_text(
-                client, f'{GITHUB_API}/repos/{repo}/contents/{path}', gh_token,
-            )
-            if content is None:
-                continue
-            truncated = False
-            if len(content) > _REVIEW_PER_FILE_CHARS:
-                content = content[:_REVIEW_PER_FILE_CHARS]
-                truncated = True
-            # Trim if adding would exceed total cap.
-            if total + len(content) > _REVIEW_TOTAL_CHARS:
-                content = content[: max(0, _REVIEW_TOTAL_CHARS - total)]
-                truncated = True
-            files.append({'path': path, 'content': content, 'truncated': truncated})
-            total += len(content)
-
-    return {
-        'repo': repo,
-        'ref': ref,
-        'default_branch': default_branch,
-        'files': files,
-        'file_count': len(files),
-        'total_chars': total,
-    }
-
-
-_CODE_REVIEW_SYSTEM = (
-    "You are an expert senior code reviewer. Review the provided files from a "
-    "real production repo and return STRICT JSON with the schema:\n"
-    "{\n"
-    '  "summary": "<one paragraph plain English>",\n'
-    '  "verdict": "ship" | "ship_with_fixes" | "do_not_ship",\n'
-    '  "findings": [\n'
-    "     {\n"
-    '       "severity": "high" | "medium" | "low",\n'
-    '       "file": "<repo path>",\n'
-    '       "line_hint": "<optional snippet or N/A>",\n'
-    '       "title": "<short>",\n'
-    '       "explanation": "<plain language>",\n'
-    '       "suggested_fix": "<concrete code/config change>"\n'
-    "     }\n"
-    "  ],\n"
-    '  "missing_files": ["<file the repo should have but lacks>"]\n'
-    "}\n"
-    "Focus on: correctness bugs, security holes (secrets, auth, injection), "
-    "performance footguns, deployment-readiness, and missing essentials (env "
-    "examples, README, build config). Be specific — name files, lines, and the "
-    "exact change. Do NOT output anything except the JSON object."
-)
-
-
-async def _run_code_review(project: dict, settings: dict) -> dict:
-    """Fetch the repo snapshot, hand it to the LLM, parse JSON. Always returns
-    a dict — even on parse failure we surface the raw text so the operator can
-    still act on it."""
-    from emergentintegrations.llm.chat import LlmChat, UserMessage  # local import to avoid top-level cost
-
-    gh_token = (settings or {}).get('github_token') or os.environ.get('GITHUB_TOKEN')
-    snapshot = await _fetch_repo_snapshot(project['repo'], project.get('gitRef'), gh_token)
-    if not snapshot['files']:
-        raise HTTPException(502, f"Could not fetch any source files from {project['repo']}@{snapshot['ref']}")
-
-    # Build the prompt: file listing + each file's content with header.
-    file_blocks = []
-    for f in snapshot['files']:
-        marker = '  [TRUNCATED]' if f['truncated'] else ''
-        file_blocks.append(f"--- FILE: {f['path']}{marker} ---\n{f['content']}")
-    prompt = (
-        f"Repo: {project['repo']}\n"
-        f"Branch: {snapshot['ref']}\n"
-        f"Project name: {project.get('projectName', '(unnamed)')}\n"
-        f"Domain: {project.get('domain', '(unset)')}\n"
-        f"Files sampled: {snapshot['file_count']} ({snapshot['total_chars']} chars)\n\n"
-        + '\n\n'.join(file_blocks)
-        + '\n\nReturn the strict JSON review object now.'
-    )
-
-    llm_key = (settings or {}).get('emergent_llm_key') or os.environ.get('EMERGENT_LLM_KEY')
-    if not llm_key:
-        raise HTTPException(503, 'Emergent LLM key not configured. Set EMERGENT_LLM_KEY in backend env or operator settings.')
-
-    chat = LlmChat(
-        api_key=llm_key,
-        session_id=f'code-review-{project["id"]}',
-        system_message=_CODE_REVIEW_SYSTEM,
-    ).with_model('openai', 'gpt-4o')
-
-    try:
-        raw = await chat.send_message(UserMessage(text=prompt))
-    except Exception as e:
-        raise HTTPException(502, f'LLM error: {str(e)[:300]}')
-
-    # Robust JSON parse: strip ```json fences if the model added them.
-    text = (raw or '').strip()
-    if text.startswith('```'):
-        # remove opening fence (with optional language) and closing fence
-        text = re.sub(r'^```[a-zA-Z]*\n?', '', text)
-        text = re.sub(r'\n?```$', '', text)
-    parsed: Optional[dict] = None
-    try:
-        parsed = json.loads(text)
-    except Exception:
-        # Best-effort: try to grab the first {...} block.
-        m = re.search(r'\{.*\}', text, re.DOTALL)
-        if m:
-            try:
-                parsed = json.loads(m.group(0))
-            except Exception:
-                parsed = None
-
-    review = parsed or {
-        'summary': 'LLM returned non-JSON output (shown below in raw_text).',
-        'verdict': 'ship_with_fixes',
-        'findings': [],
-        'missing_files': [],
-        'raw_text': text[:6000],
-    }
-    review['project_id'] = project['id']
-    review['repo'] = project['repo']
-    review['ref'] = snapshot['ref']
-    review['files_sampled'] = [f['path'] for f in snapshot['files']]
-    review['reviewed_at'] = datetime.now(timezone.utc).isoformat()
-
-    # Persist last review snapshot on the project so the UI can re-show it
-    # after navigation without re-running the AI.
-    await db.deploy_projects.update_one(
-        {'id': project['id']},
-        {'$set': {
-            'last_code_review': review,
-            'last_code_review_at': datetime.now(timezone.utc),
-            'updated_at': datetime.now(timezone.utc),
-        }},
-    )
-    return review
-
-
-@ops_router.post('/{project_id}/code-review')
-async def op_code_review(
-    project_id: str,
-    _user: dict = Depends(get_current_operator),
-):
-    """Run an AI code review on this project's repo.
-
-    Fetches a snapshot of the repo from GitHub, sends it to the LLM with a
-    strict JSON schema prompt, returns findings + suggested fixes. Result is
-    cached on the project doc so it survives a refresh.
-    """
-    project = await db.deploy_projects.find_one({'id': project_id})
-    if not project and project_id == SELF_PROJECT_ID:
-        project = await _ensure_self_project()
-    if not project:
-        raise HTTPException(404, 'Project not found')
-    settings = await get_settings_doc()
-    return await _run_code_review(project, settings)
-
-
-@projects_router.post('/{project_id}/code-review')
-async def ai_code_review(
-    project_id: str,
-    settings: dict = Depends(_require_ai_api_key),
-):
-    """Same as op_code_review but on the Bearer-token AI surface — lets an
-    autonomous agent gate its ship-and-watch loop on the review verdict."""
-    project = await db.deploy_projects.find_one({'id': project_id})
-    if not project and project_id == SELF_PROJECT_ID:
-        project = await _ensure_self_project()
-    if not project:
-        raise HTTPException(404, 'Project not found')
-    return await _run_code_review(project, settings)
-
 
 # ===================================================================
 # Code download (per-project repo zip + self source zip)
 # ===================================================================
+# Re-used by both the download endpoints below and `deploy.code_review`.
+GITHUB_API = 'https://api.github.com'
+
 async def _stream_github_zip(repo: str, ref: Optional[str], gh_token: Optional[str]):
     """Yield bytes from GitHub's zipball endpoint. Public repos work tokenless
     (rate-limited); private repos need `github_token` in operator settings.
@@ -1432,194 +1163,20 @@ async def ai_download_self_source(_settings: dict = Depends(_require_ai_api_key)
     )
 
 
-# ===================================================================
-# Autopilot — propose → review → ship → watch → react (SSE)
-# ===================================================================
-class AutopilotRequest(BaseModel):
-    target: str = 'preview'           # 'preview' default for safety
-    git_ref: Optional[str] = None
-    # When True, autopilot continues past a do_not_ship verdict — useful for
-    # demos. Default False keeps the safety net.
-    bypass_review: bool = False
-    # How long to poll Vercel before giving up (seconds). 0 disables watch.
-    watch_timeout_s: int = 90
-
-
-def _sse(event: str, data: dict) -> str:
-    """Format an SSE frame. `event:` lines let the EventSource client switch
-    on type instead of parsing a `kind` field."""
-    payload = json.dumps(data, default=str)
-    return f'event: {event}\ndata: {payload}\n\n'
-
-
-async def _autopilot_stream(project_id: str, settings: dict, req: AutopilotRequest, user_id: Optional[str]):
-    """Drive the AI ship-and-watch loop end-to-end. Streams structured
-    Server-Sent Events so the operator console can render a live timeline:
-
-        loop_start    → loop has begun, includes project info
-        review_start  → fetching repo + running LLM review
-        review_done   → review payload (verdict, findings, ...)
-        gate_blocked  → do_not_ship + seeded fix chat id; loop ends here
-        deploy_start  → calling Vercel
-        deploy_state  → polled `readyState` from Vercel (one per poll)
-        deploy_ready  → readyState == READY (or ERROR — see `error` field)
-        health_check  → final HTTP probe of the deployed URL
-        loop_complete → terminal success
-        loop_error    → terminal failure (caught exception, etc)
-
-    The stream is run synchronously so the connection stays open until the
-    loop terminates — the front-end EventSource closes naturally when we stop
-    yielding.
-    """
-    try:
-        project = await db.deploy_projects.find_one({'id': project_id})
-        if not project and project_id == SELF_PROJECT_ID:
-            project = await _ensure_self_project()
-        if not project:
-            yield _sse('loop_error', {'message': 'Project not found', 'project_id': project_id})
-            return
-
-        yield _sse('loop_start', {
-            'project_id': project_id,
-            'project_name': project.get('projectName'),
-            'repo': project.get('repo'),
-            'ref': req.git_ref or project.get('gitRef'),
-            'target': req.target,
-            'bypass_review': req.bypass_review,
-        })
-
-        # ---- Step 1: review ----------------------------------------------
-        yield _sse('review_start', {'project_id': project_id})
-        try:
-            review = await _run_code_review(project, settings)
-        except HTTPException as he:
-            yield _sse('loop_error', {'stage': 'review', 'status': he.status_code, 'message': str(he.detail)})
-            return
-        yield _sse('review_done', {
-            'verdict': review.get('verdict'),
-            'summary': (review.get('summary') or '')[:600],
-            'findings_count': len(review.get('findings') or []),
-            'findings': (review.get('findings') or [])[:10],
-        })
-
-        # ---- Step 2: gate ------------------------------------------------
-        if review.get('verdict') == 'do_not_ship' and not req.bypass_review:
-            fix_session_id = await _create_fix_review_chat(project, review, user_id)
-            yield _sse('gate_blocked', {
-                'verdict': review.get('verdict'),
-                'fix_chat_session_id': fix_session_id,
-                'next_action': 'Open the fix chat or rerun autopilot with bypass_review=true',
-            })
-            return
-
-        # ---- Step 3: deploy ----------------------------------------------
-        yield _sse('deploy_start', {'target': req.target, 'ref': req.git_ref or project.get('gitRef')})
-        try:
-            deploy_res = await _vercel_create_deployment(settings, project, req.target, req.git_ref)
-        except HTTPException as he:
-            yield _sse('loop_error', {'stage': 'deploy', 'status': he.status_code, 'message': str(he.detail)})
-            return
-        await _record_deployment(project_id, deploy_res)
-        deployment_id = deploy_res.get('id') or deploy_res.get('uid')
-        deployment_url = deploy_res.get('url')
-        yield _sse('deploy_started', {
-            'deployment_id': deployment_id,
-            'url': deployment_url,
-            'state': deploy_res.get('readyState') or deploy_res.get('state'),
-        })
-
-        # ---- Step 4: watch (poll Vercel) ---------------------------------
-        terminal_state = None
-        deadline = datetime.now(timezone.utc).timestamp() + max(0, req.watch_timeout_s)
-        if deployment_id and req.watch_timeout_s > 0:
-            while datetime.now(timezone.utc).timestamp() < deadline:
-                await asyncio.sleep(4)
-                try:
-                    state_res = await _vercel_get_deployment(settings, deployment_id)
-                except Exception as e:
-                    yield _sse('deploy_state', {'state': 'POLL_ERROR', 'detail': str(e)[:200]})
-                    continue
-                state = state_res.get('readyState') or state_res.get('state')
-                yield _sse('deploy_state', {'state': state, 'deployment_id': deployment_id})
-                if state in ('READY', 'ERROR', 'CANCELED'):
-                    terminal_state = state
-                    break
-        yield _sse('deploy_ready', {
-            'state': terminal_state or 'WATCH_TIMEOUT',
-            'deployment_id': deployment_id,
-            'url': deployment_url,
-        })
-
-        # ---- Step 5: react (healthcheck) — only on READY -----------------
-        if terminal_state == 'READY':
-            # Persist the latest state so a subsequent Ops tab refresh is
-            # consistent with what we just observed.
-            await db.deploy_projects.update_one(
-                {'id': project_id},
-                {'$set': {'last_deployment_state': 'READY'}},
-            )
-            fresh = await db.deploy_projects.find_one({'id': project_id}) or project
-            health = await _project_health(fresh, settings)
-            yield _sse('health_check', health)
-            yield _sse('loop_complete', {
-                'ok': health.get('ok'),
-                'state': terminal_state,
-                'url': deployment_url,
-            })
-        else:
-            yield _sse('loop_complete', {
-                'ok': False,
-                'state': terminal_state or 'WATCH_TIMEOUT',
-                'url': deployment_url,
-                'message': 'Deploy did not reach READY within the watch window.',
-            })
-
-    except Exception as e:  # absolute last-resort safety net
-        logger.exception('autopilot crashed for project %s', project_id)
-        yield _sse('loop_error', {'stage': 'unexpected', 'message': str(e)[:300]})
-
-
-def _autopilot_response(project_id: str, settings: dict, req: AutopilotRequest, user_id: Optional[str]):
-    """Wrap the async generator in a StreamingResponse with SSE headers."""
-    return StreamingResponse(
-        _autopilot_stream(project_id, settings, req, user_id),
-        media_type='text/event-stream',
-        headers={
-            'Cache-Control': 'no-cache, no-transform',
-            'X-Accel-Buffering': 'no',  # disable nginx/CF buffering
-            'Connection': 'keep-alive',
-        },
-    )
-
-
-@ops_router.post('/{project_id}/autopilot')
-async def op_autopilot(
-    project_id: str,
-    req: AutopilotRequest,
-    user: dict = Depends(get_current_operator),
-):
-    """Run the full propose → review → ship → watch → react loop on this
-    project and stream progress as Server-Sent Events. Frontend opens an
-    `EventSource` on this endpoint (cookie auth) and renders the timeline
-    live in the AutopilotDialog.
-    """
-    settings = await get_settings_doc()
-    return _autopilot_response(project_id, settings, req, user.get('sub'))
-
-
-@projects_router.post('/{project_id}/autopilot')
-async def ai_autopilot(
-    project_id: str,
-    req: AutopilotRequest,
-    settings: dict = Depends(_require_ai_api_key),
-):
-    """AI-surface twin of op_autopilot (Bearer token auth). Same SSE stream."""
-    return _autopilot_response(project_id, settings, req, None)
-
-
 def setup_routers(app):
     """Attach all routers. Literal-path routers are added *first* so they take
-    precedence over the parameterized `/{project_id}/...` matches."""
+    precedence over the parameterized `/{project_id}/...` matches.
+
+    Importing the `deploy` submodules here (rather than at top of file)
+    avoids a circular import — those modules import shared helpers from
+    THIS module, and their @router.post decorators register their endpoints
+    onto the shared routers as a side-effect. Once registered we then call
+    `app.include_router` and the new routes ship.
+    """
+    # noqa: F401 — imported for the decorator side-effects (route registration).
+    from deploy import code_review as _code_review  # noqa: F401
+    from deploy import autopilot as _autopilot  # noqa: F401
+
     app.include_router(self_ai_router)
     app.include_router(self_ops_router)
     app.include_router(projects_router)

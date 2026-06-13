@@ -1,0 +1,41 @@
+{
+  "summary": "Post-refactor regression validated. Backend: 56 passed + 1 skipped (unchanged from iter-5). deploy_projects_ext.py shrunk from 1634 → 1183 lines (under 1200 target). New /app/backend/deploy/{code_review,autopilot}.py modules exist with required exports. OpenAPI registers all 4 review/autopilot routes + /key. github_token set/get/clear cycle on /api/operator/deploy/key works; GET only returns has_github_token boolean (token never echoed). Frontend: third-column GitHub-token card in Ops → Deploy keys works end-to-end — optional badge (amber) → paste placeholder → click save → success toast fires → reload shows ✓ configured (green). All 9 per-project action button testids (deploy/preview/redeploy/copy-url/clone/download/code-review/autopilot/health) render — 48 instances each across seeded rows. chat-scroll testid + module-level STICK_TO_BOTTOM_THRESHOLD_PX preserved in Dashboard.jsx. Cleanup confirmed: github_token cleared at end so operator can paste their real token.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_p0_review.py",
+    "/app/backend/tests/test_p1_refactor.py",
+    "/app/backend/tests/test_p2_deploy_extras.py",
+    "/app/backend/tests/test_p3_ship_gate.py",
+    "/app/backend/tests/test_p4_autopilot.py",
+    "/app/test_reports/pytest/iter6_full.xml"
+  ],
+  "action_items": [
+    "USER ACTION: paste a real GitHub fine-grained PAT in Ops → Deploy keys → GitHub token card; then paste a real VERCEL_TOKEN to run the AI loop end-to-end against a Vercel-connected repo.",
+    "Optional (carry-over from iter-5): migrate `.dict()` → `.model_dump()` in referrals_ext.py + _create_fix_review_chat to silence Pydantic V2 deprecation warnings."
+  ],
+  "critical_code_review_comments": [
+    "Refactor is clean — deploy/code_review.py and deploy/autopilot.py are sibling submodules; deploy_projects_ext.setup_routers() imports them for route registration side-effects. No circular import issue at runtime; the children import from the parent at module load before setup_routers() runs.",
+    "github_token is stored under settings.github_token alongside vercel_token/ai_api_key; KeyUpdate.github_token is Optional[str] so empty string clears it via `.strip() or None` — matches the contract (POST {'github_token':''} sets has_github_token=false on next GET).",
+    "GET /api/operator/deploy/key correctly returns only has_github_token boolean — token plaintext never leaves the server.",
+    "OpsDeploySection KeysCard now correctly has 3 cards: Vercel token, AI key, GitHub token (data-testid deploy-key-github-token + deploy-key-github-save). saveGithubToken() validates non-empty, fires toast, clears input, calls onSaved() to refresh keysStatus.",
+    "deploy_projects_ext.py still has `@ops_router.get('/key')` reading settings.github_token directly — wiring intact post-refactor."
+  ],
+  "updated_files": [
+    "/app/test_reports/pytest/iter6_full.xml (new)"
+  ],
+  "success_rate": {"backend": "100% (56/56 passed + 1 skipped)", "frontend": "100% (all flows verified)"},
+  "test_credentials": "Operator rac.investments.swe@gmail.com / 123Admin@98 — used for the github_token UI flow. Browser redirected to /setup-2fa first (RESET_OPERATOR_PASSWORD=true clears 2FA on boot), then direct nav to /operator works (cookie session valid).",
+  "seed_data_creation": "None — used existing seed projects rendered in Ops tab (P2 Test Project, Clone Variant, etc.). github_token set to 'ghp_test_placeholder_token' transiently, then cleared at end (verified has_github_token=false at finish).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Refactor passed all regression. The /api/operator/deploy/key endpoint now accepts/returns has_github_token. AutopilotDialog SSE stream halts at review_start → loop_error when no github_token is set on a public repo if GitHub anon rate limit is hit — both behaviors are acceptable per spec. The real end-to-end AI loop verification is BLOCKED on user pasting a real GitHub PAT + Vercel token in the Ops tab.",
+  "rca of the issue": "N/A — no regressions. Submodule split was successful: parent stays at 1183 lines, children expose only the symbols the routers need."
+}
