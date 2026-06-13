@@ -12,6 +12,29 @@ gold theme. Domain: **tbctools.org**.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
 ## Implemented
+- ✅ **Password-overwrite bug fix + Operator quick guide** (Feb 2026):
+  - **Bug fix (HIGH)**: pasting any API key (Emergent LLM Universal Key,
+    Stripe, NOWPayments, Resend, PayPal, Vercel PAT, GitHub PAT) into the
+    operator's Security/Ops tabs was silently overwriting the operator's
+    SAVED LOGIN PASSWORD in the browser. Chrome / 1Password / LastPass /
+    Bitwarden were misidentifying the secret-token inputs as a password
+    change form. Fix: every secret `<Input type="password">` now ships with
+    `name="secret-<fieldKey>"`, `autoComplete="off"`,
+    `data-1p-ignore="true"`, `data-lpignore="true"`, `data-bwignore="true"`,
+    `data-form-type="other"`, `spellCheck={false}`. Applied to the shared
+    `KeyRow` in `SettingsTab.jsx` (covers Stripe, NOWPayments, PayPal,
+    Resend, Emergent LLM, Vercel, AI API key, deploy_webhook_secret) and the
+    two standalone inputs in `OpsDeploySection.jsx` (Vercel + GitHub token).
+  - **Operator quick guide**: new `OperatorGuideTour.jsx` walks first-time
+    users through every tab (Users → Projects → Plans → Payments → Treasury
+    → Money → Licenses → Royalties → Security → Ops → Audit → Contacts →
+    Codes — 13 steps). Each step has a title, body, optional tip card, and
+    a progress bar. Tour auto-opens on first visit (localStorage flag
+    `tbc_operator_tour_seen_v1`) and can be re-launched any time via the
+    new **Guide** button (`open-operator-guide`) in the Console header.
+    Tabs are now controlled (`activeTab` state) so the tour jumps the
+    active tab as it advances.
+
 - ✅ **Auto-fix until ship** (Feb 2026):
   - New `deploy/auto_fix.py` module: `request_patches()` asks the LLM for a
     strict JSON patch set (`[{path, content, rationale}]` + commit message),

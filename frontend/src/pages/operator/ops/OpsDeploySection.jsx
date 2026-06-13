@@ -170,6 +170,14 @@ function KeysCard({ keysStatus, onSaved }) {
           <Input
             data-testid="deploy-key-vercel-token"
             type="password"
+            name="secret-vercel-token"
+            id="secret-vercel-token"
+            autoComplete="off"
+            data-1p-ignore="true"
+            data-lpignore="true"
+            data-bwignore="true"
+            data-form-type="other"
+            spellCheck={false}
             placeholder={keysStatus.has_vercel_token ? '••••••••  (paste a new value to rotate)' : 'Paste your Vercel PAT'}
             value={vercelToken}
             onChange={(e) => setVercelToken(e.target.value)}
@@ -298,6 +306,14 @@ function KeysCard({ keysStatus, onSaved }) {
           <Input
             data-testid="deploy-key-github-token"
             type="password"
+            name="secret-github-token"
+            id="secret-github-token"
+            autoComplete="off"
+            data-1p-ignore="true"
+            data-lpignore="true"
+            data-bwignore="true"
+            data-form-type="other"
+            spellCheck={false}
             placeholder={keysStatus.has_github_token ? '••••••••  (paste a new value to rotate)' : 'ghp_... or github_pat_...'}
             value={githubToken}
             onChange={(e) => setGithubToken(e.target.value)}

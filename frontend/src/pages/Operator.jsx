@@ -22,6 +22,8 @@ import OpsTab       from './operator/OpsTab';
 import MoneyTab     from './operator/MoneyTab';
 import AuditTab     from './operator/AuditTab';
 
+import { OperatorGuideTour, OperatorGuideButton } from './OperatorGuideTour';
+
 import { UsersBulkToolbar } from './operator/users/UsersBulkToolbar';
 import { UsersTable } from './operator/users/UsersTable';
 import CodesBrowser from './operator/CodesBrowser';
@@ -59,6 +61,12 @@ export default function Operator() {
   const [userSearch, setUserSearch] = useState('');
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
+  // Controlled tab so the first-time tour can drive the view. Defaults to
+  // 'users' (the historical default) so the existing UX is unchanged.
+  const [activeTab, setActiveTab] = useState('users');
+  // Re-launch handle for the guide. Bumping the counter forces the tour to
+  // open even if `tbc_operator_tour_seen_v1` is already set in localStorage.
+  const [guideKey, setGuideKey] = useState(0);
 
   const clearSelection = () => setSelectedIds(new Set());
   const toggleSelect = (id) => {
@@ -201,14 +209,17 @@ export default function Operator() {
     <div className="min-h-screen bg-ink-950">
       <Navbar />
       <section className="mx-auto max-w-7xl px-5 py-10">
-        <div className="flex items-center gap-3">
-          <div className="grid h-11 w-11 place-items-center rounded-xl bg-tbc-500/15 text-tbc-300">
-            <ShieldCheck className="h-6 w-6" />
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="grid h-11 w-11 place-items-center rounded-xl bg-tbc-500/15 text-tbc-300">
+              <ShieldCheck className="h-6 w-6" />
+            </div>
+            <div>
+              <h1 className="text-3xl font-bold text-tbc-100">Operator Console</h1>
+              <p className="text-sm text-tbc-200/60">Manage members, payments, plans, treasury, licenses, and source code.</p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-3xl font-bold text-tbc-100">Operator Console</h1>
-            <p className="text-sm text-tbc-200/60">Manage members, payments, plans, treasury, licenses, and source code.</p>
-          </div>
+          <OperatorGuideButton onOpen={() => setGuideKey((k) => k + 1)} />
         </div>
 
         {loading ? (
@@ -224,7 +235,7 @@ export default function Operator() {
               <StatCard icon={DollarSign}   label="Revenue (USD)"   value={`$${(stats?.revenue_usd ?? 0).toLocaleString()}`} />
             </div>
 
-            <Tabs defaultValue="users" className="mt-10">
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="mt-10">
               <TabsList className="bg-ink-900 border border-tbc-900/60 flex flex-wrap h-auto">
                 <TabTrigger value="users"     icon={Users}>Users ({users.length})</TabTrigger>
                 <TabTrigger value="projects"  icon={FolderKanban}>Projects</TabTrigger>
@@ -306,6 +317,16 @@ export default function Operator() {
           </>
         )}
       </section>
+
+      {/* First-time tour & re-launchable guide. `key={guideKey}` forces the
+          tour to re-mount when the Guide button is clicked, even after the
+          user has already dismissed it once. */}
+      <OperatorGuideTour
+        key={guideKey}
+        forceOpen={guideKey > 0}
+        onJumpToTab={setActiveTab}
+        onClose={() => { /* leave guideKey as-is so re-clicking still bumps */ }}
+      />
     </div>
   );
 }

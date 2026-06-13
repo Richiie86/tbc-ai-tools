@@ -528,9 +528,29 @@ function KeyRow({ label, fieldKey, isSet, masked, value, reveal, onReveal, onCha
           )}
         </div>
         <div className="relative mt-1.5">
+          {/*
+            The combination of attributes below prevents browser /
+            password-manager autofill from treating these as login
+            credentials. Without them, Chrome would silently overwrite the
+            operator's SAVED LOGIN PASSWORD with the API key the user just
+            pasted (reported & fixed Feb 2026).
+              - `name` is the field key (NOT "password")
+              - `autoComplete="off"` blocks Chrome
+              - `data-1p-ignore` blocks 1Password
+              - `data-lpignore` blocks LastPass
+              - `data-bwignore` blocks Bitwarden
+          */}
           <Input
             className="bg-ink-950 border-tbc-900/60 text-tbc-100 pr-10"
             type={reveal ? 'text' : 'password'}
+            name={`secret-${fieldKey}`}
+            id={`secret-${fieldKey}`}
+            autoComplete="off"
+            data-1p-ignore="true"
+            data-lpignore="true"
+            data-bwignore="true"
+            data-form-type="other"
+            spellCheck={false}
             value={value}
             onChange={(e) => onChange(e.target.value)}
             placeholder={placeholder || (isSet ? 'Replace existing key…' : 'Paste key here')}
