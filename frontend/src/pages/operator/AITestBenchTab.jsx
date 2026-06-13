@@ -38,23 +38,34 @@ export default function AITestBenchTab() {
 
   useEffect(() => { load(); }, [load]);
 
-  const runOne = async (modelId) => {
-    setRunning(modelId);
+  const _runOneInner = async (modelId) => {
     try {
       const { data } = await api.post(`/operator/ai-tests/run/${modelId}`);
       setModels((cur) => cur.map((m) => (m.id === modelId ? { ...m, last_test: data } : m)));
-      toast[data.pass ? 'success' : 'error'](
-        `${modelId}: ${data.pass ? 'PASS' : 'FAIL'} · ${data.avg_latency_ms}ms`,
-      );
+      // Distinguish "all green" from "core probes pass but regression
+      // probe didn't echo the learning" — the latter is informational,
+      // not an outage.
+      const failed = (data.probes || []).filter((p) => !p.pass);
+      const onlyLearningsFail = failed.length === 1 && failed[0].name === 'learnings';
+      if (data.pass) {
+        toast.success(`${modelId}: PASS · ${data.avg_latency_ms}ms`);
+      } else if (onlyLearningsFail) {
+        toast.info(`${modelId}: partial · regression probe didn't echo learning · ${data.avg_latency_ms}ms`);
+      } else {
+        toast.error(`${modelId}: FAIL · ${failed.map((p) => p.name).join(', ')}`);
+      }
     } catch (e) {
       toast.error(e?.response?.data?.detail || 'Probe failed');
     } finally {
       setRunning(null);
     }
   };
+  const runOne = (modelId) => {
+    setRunning(modelId);
+    _runOneInner(modelId);
+  };
 
-  const runAll = async () => {
-    setRunning('all');
+  const _runAllInner = async () => {
     try {
       const { data } = await api.post('/operator/ai-tests/run-all');
       setModels(data.models || []);
@@ -68,6 +79,10 @@ export default function AITestBenchTab() {
     } finally {
       setRunning(null);
     }
+  };
+  const runAll = () => {
+    setRunning('all');
+    _runAllInner();
   };
 
   if (loading) {
@@ -134,15 +149,27 @@ export default function AITestBenchTab() {
 
 function ModelCard({ model, running, onRun }) {
   const t = model.last_test;
-  const status = t ? (t.pass ? 'pass' : 'fail') : 'idle';
-  const StatusIcon = status === 'pass' ? CheckCircle2 : status === 'fail' ? XCircle : TestTube;
+  // Three states: clean pass, hard fail (something fundamental broke),
+  // partial (only the learnings regression probe didn't echo the keyword).
+  let status = 'idle';
+  if (t) {
+    if (t.pass) status = 'pass';
+    else {
+      const failed = (t.probes || []).filter((p) => !p.pass);
+      const onlyLearningsFail = failed.length === 1 && failed[0].name === 'learnings';
+      status = onlyLearningsFail ? 'partial' : 'fail';
+    }
+  }
+  const StatusIcon = status === 'pass' ? CheckCircle2 : status === 'fail' ? XCircle : status === 'partial' ? Zap : TestTube;
   const colorRing =
-    status === 'pass' ? 'border-emerald-500/40' :
-    status === 'fail' ? 'border-red-500/50' :
+    status === 'pass'    ? 'border-emerald-500/40' :
+    status === 'fail'    ? 'border-red-500/50' :
+    status === 'partial' ? 'border-amber-500/40' :
     'border-tbc-900/60';
   const colorAccent =
-    status === 'pass' ? 'text-emerald-300' :
-    status === 'fail' ? 'text-red-300' :
+    status === 'pass'    ? 'text-emerald-300' :
+    status === 'fail'    ? 'text-red-300' :
+    status === 'partial' ? 'text-amber-300' :
     'text-tbc-200/50';
   return (
     <div

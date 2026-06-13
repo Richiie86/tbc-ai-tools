@@ -11,6 +11,35 @@ gold theme. Domain: **tbctools.org**.
 - **End user (member)** — Chats with the AI builder, manages plan, copies referral link.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
+## Implemented — Feb 2026 (latest session, continued)
+- ✅ **AI Brain tab** (`AIBrainTab.jsx` + `ai_brain_ext.py`):
+  - Maturity cards per model (Claude/GPT/Gemini/Other/All) — total enabled, pending proposals, 7-day delta, approval-rate bar.
+  - 12-week timeline chart (recharts) showing learnings added per ISO week, per model.
+  - Skill-bucket grouping (deploy/code/voice/security/ux/money/general) via cheap keyword taxonomy.
+  - `_as_aware()` defensively normalises any naive `created_at` so timezone math never breaks the endpoint.
+- ✅ **Chat-level LLM auto-retry** (`server.py:149-153` + `event_generator`):
+  - Ordered fallback chain (Claude Sonnet → GPT-4.1 → Gemini Flash) tries the next provider when the primary stream errors BEFORE any tokens are produced. Partial responses are kept (no double-replies).
+  - Emits a `fallback_used` SSE frame so the UI shows a sonner toast: "Retried with X after Y failed".
+- ✅ **Per-project Self-healing toggle** (`auto_heal` on `deploy_projects`):
+  - When ON, autopilot defaults `auto_fix_max_iterations=3` so the AI silently fixes do_not_ship verdicts and reships.
+  - New switch `auto-heal-<id>` sits next to `auto-promote-<id>` in `ProjectRow.jsx`.
+- ✅ **AI Test Bench tab** (`AITestBenchTab.jsx` + `ai_test_bench_ext.py`):
+  - Three probes per model run in parallel: `health`, `arithmetic` (deterministic), `learnings` (regression — model must echo the longest content keyword from the most-recent approved learning).
+  - Per-model "Run probes" + master "Run all" — fan-out via `asyncio.gather(return_exceptions=True)`.
+  - Three-state visual: green pass, amber partial (only the regression probe failed), red hard-fail.
+  - Persists every run in `ai_model_tests` for trend / history queries (`GET /history?model=…`).
+- ✅ **Polish from iter15 review**:
+  - `?tab=` URL sync (clicking tabs now properly updates the query param via `onTabChange`).
+  - Sandbox tree defaults to repo root (was hardcoded to `frontend/src` and silently empty for non-monorepo `self_repo` configs).
+  - `AILearningsTab` delete now uses shadcn `AlertDialog` instead of `window.confirm` (accessibility win).
+
+## Backlog — explicit deferrals
+- Runtime error capture (sentry-like collector → LLM patch → human approval). Big — needs its own session.
+- Skill-tree visualisation as a true graph (react-flow). Currently rendered as grouped lists.
+- `Dashboard.jsx` & `_autopilot_stream()` complexity refactor (still flagged by code reviewers; functional but high cyclomatic complexity).
+- ESLint v9 migration — project has no `eslint.config.js` yet; `eslint-plugin-react-hooks@5.2.0` has a false-positive on `set-state-in-effect` for non-effect handlers in `AITestBenchTab.jsx`. Dev server compiles fine; rule should be configured to allow this pattern or upgraded once a v9 config lands.
+
+
 ## Implemented — Feb 2026 (latest session)
 - ✅ **AI Self-Learning loop + Operator UI** (Feb 2026):
   - `ai_learnings_auto.py` extracts patterns from chat (sampled 20%) via a small Gemini Flash call,

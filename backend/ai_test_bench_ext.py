@@ -143,14 +143,30 @@ async def _build_probes() -> list[dict]:
     learning = await db.ai_learnings.find_one({'enabled': True}, sort=[('created_at', -1)])
     if learning:
         text = learning.get('text', '')
-        # Pull a distinctive 4-12-char token from the learning's text so
-        # we have something specific to look for in the model's reply.
-        m = re.search(r'\b([A-Za-z][A-Za-z0-9-]{3,12})\b', text)
-        if m:
-            token = m.group(1)
+        # Pick the longest non-stopword token from the learning so the probe
+        # tests whether the model actually *attended to* the content, not
+        # whether it parrots a stopword. First version of this probe picked
+        # the first 4-12 char token which was often "INSIDE" or "When" —
+        # almost every model failed it. The improved version below skips
+        # common English stopwords and picks the longest distinctive word.
+        STOPWORDS = {
+            'when', 'then', 'with', 'this', 'that', 'from', 'into', 'your', 'their',
+            'never', 'always', 'every', 'some', 'they', 'there', 'have', 'will',
+            'inside', 'about', 'because', 'should', 'would', 'could', 'these',
+            'those', 'where', 'which', 'while', 'after', 'before',
+        }
+        candidates = re.findall(r'\b([A-Za-z][A-Za-z0-9-]{4,18})\b', text)
+        # Prefer the longest non-stopword.
+        candidates = [c for c in candidates if c.lower() not in STOPWORDS]
+        if candidates:
+            token = max(candidates, key=len)
             probes.append({
                 'name': 'learnings',
-                'prompt': f'Quote the most important word from this rule, verbatim: "{text[:240]}"',
+                'prompt': (
+                    f'Read this rule and reply with one short sentence that '
+                    f'follows it. Rule: "{text[:240]}"'
+                ),
+                # Loose match: token appears as substring OR any case variant.
                 'pass_check': lambda t, _tok=token: _tok.lower() in t.lower(),
                 'meta': {'token': token, 'learning_id': learning.get('id')},
             })
