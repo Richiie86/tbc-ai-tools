@@ -1289,6 +1289,14 @@ async def op_update_domain(
     if res.matched_count == 0:
         raise HTTPException(404, 'Project not found')
     doc = await db.deploy_projects.find_one({'id': project_id})
+    # Auto-allowlist this domain for CORS so the browser can hit /api
+    # from `https://{domain}` on the next page load. Lazy import keeps
+    # cors_dynamic_ext optional in test contexts that don't load it.
+    try:
+        from cors_dynamic_ext import invalidate_cors_cache
+        invalidate_cors_cache()
+    except Exception:
+        pass
 
     # Best-effort Vercel attach. Skips silently if no Vercel project id yet
     # (operator must Deploy once to create the project) or no PAT configured.

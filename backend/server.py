@@ -55,6 +55,11 @@ from alerts_ext import router as alerts_router
 from secrets_ext import router as secrets_router
 from self_edit_ext import router as self_edit_router
 from deploy_access_ext import router as deploy_access_router
+from cors_dynamic_ext import (
+    DynamicCORSMiddleware,
+    router as cors_origins_router,
+    invalidate_cors_cache,
+)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger('tbc')
@@ -1575,43 +1580,15 @@ app.include_router(analytics_router)
 app.include_router(alerts_router)
 app.include_router(secrets_router)
 app.include_router(deploy_access_router)
+app.include_router(cors_origins_router)
 # app.include_router(marketplace_router)  # Marketplace deferred — skipped per user.
-# CORS — read from env so production redeploys land on whatever host the
-# user pointed the app at (Emergent-managed `*.emergent.host`, custom
-# domain, etc.). `CORS_ORIGINS` formats:
-#   '*'                          → wide-open (no cookies — browsers reject `*` w/ credentials)
-#   'https://a.com,https://b.io' → explicit allow-list (cookies enabled)
-#   <unset>                      → falls back to the historical
-#                                  preview/tbctools.org regex so the
-#                                  current deployment doesn't break.
-_cors_env = (os.environ.get('CORS_ORIGINS') or '').strip()
-if _cors_env == '*':
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=['*'],
-        allow_credentials=False,  # spec: cannot mix `*` with credentials
-        allow_methods=['*'],
-        allow_headers=['*'],
-        expose_headers=['*'],
-    )
-elif _cors_env:
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=[o.strip() for o in _cors_env.split(',') if o.strip()],
-        allow_credentials=True,
-        allow_methods=['*'],
-        allow_headers=['*'],
-        expose_headers=['*'],
-    )
-else:
-    # Historical default — match production custom domain + preview/Emergent
-    # subdomains. Kept so the current deployment doesn't break if the
-    # operator hasn't set CORS_ORIGINS yet.
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origin_regex=r'^https://([a-z0-9-]+\.)?(preview\.emergentagent\.com|tbctools\.org|emergent\.host)(:\d+)?$',
-        allow_credentials=True,
-        allow_methods=['*'],
-        allow_headers=['*'],
-        expose_headers=['*'],
-    )
+# CORS — fully dynamic. Allow-list is built at request-time from:
+#   1. `CORS_ORIGINS` env var ('*' for wide-open, else comma-separated)
+#   2. Every `deploy_projects.domain` value (auto-attached when operator
+#      sets a domain via the Ops tab inline editor)
+#   3. Operator-managed extras from `cors_settings.extra_origins`
+#   4. Always-allowed regex (preview / emergent.host / tbctools.org)
+# Cached for 60s and invalidated on every domain or extras mutation, so
+# typing a new domain in the Operator Console "just works" — no redeploy
+# or env change needed.
+app.add_middleware(DynamicCORSMiddleware)
