@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { deployToVercel, type DeployRequest } from "@/lib/vercel-deploy"
+import { deployToVercel, friendlyDeployError, type DeployRequest } from "@/lib/vercel-deploy"
 
 export async function POST(request: NextRequest) {
   const token = process.env.VERCEL_API_TOKEN
@@ -44,7 +44,6 @@ export async function POST(request: NextRequest) {
     })
     return NextResponse.json(result)
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Deployment failed."
-    return NextResponse.json({ error: message }, { status: 502 })
+    return NextResponse.json({ error: friendlyDeployError(err) }, { status: 502 })
   }
 }

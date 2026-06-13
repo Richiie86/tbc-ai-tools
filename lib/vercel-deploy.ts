@@ -53,9 +53,33 @@ async function vercelFetch(token: string, path: string, init?: RequestInit) {
   }
   if (!res.ok) {
     const message = json?.error?.message || json?.message || `Vercel API error (${res.status})`
-    throw new Error(message)
+    const err = new Error(message) as Error & { code?: string; status?: number }
+    err.code = json?.error?.code || json?.code
+    err.status = res.status
+    throw err
   }
   return json
+}
+
+/** Translate raw Vercel API errors into clear, actionable messages for the UI. */
+export function friendlyDeployError(err: unknown): string {
+  const e = err as { message?: string; code?: string; status?: number }
+  const code = e?.code || ""
+  const msg = e?.message || "Deployment failed."
+
+  if (code === "api-deployments-free-per-day" || /more than 100/i.test(msg)) {
+    return "Daily deploy limit reached (100/day on the Vercel Hobby plan). Try again tomorrow, or upgrade to Vercel Pro for more deployments."
+  }
+  if (e?.status === 429 || /rate limit/i.test(msg)) {
+    return "Vercel is rate-limiting requests right now. Please wait a moment and try again."
+  }
+  if (code === "forbidden" || e?.status === 403) {
+    return "Your Vercel token doesn't have access to this resource. Check VERCEL_API_TOKEN and VERCEL_TEAM_ID."
+  }
+  if (/not found/i.test(msg) && /repo/i.test(msg)) {
+    return msg // already friendly from resolveGithubRepoId
+  }
+  return msg
 }
 
 /**
