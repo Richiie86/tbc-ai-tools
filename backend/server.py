@@ -58,6 +58,7 @@ from self_edit_ext import router as self_edit_router
 from deploy_access_ext import router as deploy_access_router
 from ai_learnings_ext import router as ai_learnings_router
 from ai_brain_ext import router as ai_brain_router
+from ai_test_bench_ext import router as ai_test_bench_router
 from sandbox_ai_ext import router as sandbox_ai_router, proj_router as sandbox_ai_proj_router
 from cors_dynamic_ext import (
     DynamicCORSMiddleware,
@@ -1747,6 +1748,7 @@ app.include_router(secrets_router)
 app.include_router(deploy_access_router)
 app.include_router(ai_learnings_router)
 app.include_router(ai_brain_router)
+app.include_router(ai_test_bench_router)
 app.include_router(sandbox_ai_router)
 app.include_router(sandbox_ai_proj_router)
 app.include_router(cors_origins_router)
