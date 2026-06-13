@@ -12,6 +12,16 @@ gold theme. Domain: **tbctools.org**.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
 ## Implemented — Feb 2026 (latest session, batch 7 + final)
+- ✅ **Slack/Discord webhook bridge** (`webhook_ext.py` + `WebhookSettingsCard.jsx`):
+  - One operator-configured `https://` URL works for both Slack incoming-webhooks and Discord `/api/webhooks/...` (payload sends both `text` and `content` keys).
+  - Settings live on the existing `payment_settings` doc: `webhook_url` + `webhook_enabled` kill-switch.
+  - Endpoints: `GET/PUT /api/operator/webhook` (write-only URL — server returns only the hostname for masked display), `POST /api/operator/webhook/test` (sends a real ping).
+  - Wired into 4 notification sites — critical errors (`runtime_errors_ext._maybe_page_operator`), AI Test Bench drift (`ai_test_bench_ext._nightly_drift_alert`), production promotes (`deploy_projects_ext._trigger_promote`), and lockdown blocked login/register attempts (`server.py`).
+  - All call sites are fire-and-forget (try/except + WARNING log) — webhook failures never break the primary flow.
+  - Frontend operator card in Settings ("Security" tab): URL input, save, enable toggle, "Send test ping", "remove" clear.
+  - Tested end-to-end (iter21): 14/14 backend pytest + 8/8 frontend selectors, real httpbin.org/post round-trip confirmed.
+
+## Implemented — Feb 2026 (previous session, batch 7 + final)
 - ✅ **Emergency lockdown pill** (`EmergencyLockdownPill.jsx`):
   - Always-visible top-bar pill in the Operator console next to OperatorGuideButton.
   - One-click PATCH flips BOTH `banner_enabled` AND `login_lockdown_enabled` to true (with `window.confirm` on engage; one-click release without confirm).
