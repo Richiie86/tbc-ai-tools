@@ -12,6 +12,33 @@ gold theme. Domain: **tbctools.org**.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
 ## Implemented
+- ✅ **Component refactor + UI gaps closed + GitHub webhook live-validated** (Feb 2026):
+  - **Refactor**: Operator.jsx 444→158 lines; Dashboard.jsx 380→343 lines.
+    New modules: `operator/StatCard.jsx`, `operator/StatsToolbar.jsx`,
+    `operator/UsersTab.jsx`, `dashboard/DashboardHeader.jsx`,
+    `operator/BirthdayRewardsCard.jsx`.
+  - **UI gaps fixed** (caught by iteration_9 frontend agent):
+    - `TestUserBanner` is now actually mounted inside `Operator.jsx`
+      under the StatsToolbar — surfaces seeded preview-user creds with
+      copy + "Open as test user" CTA.
+    - `BirthdayRewardsCard` shipped to Settings/Security tab — operator
+      can toggle the programme on/off, tune credits + % discount,
+      edit the message template (with `{credits}`/`{discount_pct}`/`{name}`
+      placeholders), Save, and "Run pass now" for QA. Persistence
+      verified by retest (credits 200→275, discount 10→15 survive reload).
+    - `ProjectRow.jsx` gained two NEW per-row controls:
+      `promote-{projectId}` (Promote-to-Prod button, disabled with helpful
+      title until a Preview exists) and `auto-promote-{projectId}`
+      (shadcn Switch wired to PATCH /api/operator/deploy/{id} → success
+      toast + auto-promote badge appears next to the project name).
+  - **GitHub webhook validated**: new pytest
+    `backend/tests/test_p6_4_github_webhook.py` (5 tests, all passing) —
+    covers ping/pong, push with valid HMAC signature → project matched
+    + deploy triggered, push with bad signature → invalid_signature,
+    push for unknown repo → matched:0, non-push event ignored.
+    Backend suite now at **90/90** (was 80/80; +5 webhook +5 already
+    in place).
+
 - ✅ **Clickable stat cards + delete messages + Dashboard tour** (Feb 2026):
   - **Clickable stat cards**: Operator Console header stats (Total Users /
     Paid Customers / Total Messages / Revenue) are now full-width buttons
