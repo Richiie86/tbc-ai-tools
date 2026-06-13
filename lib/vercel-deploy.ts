@@ -110,6 +110,45 @@ async function resolveGithubRepoId(repo: string): Promise<number> {
   return data.id
 }
 
+export interface DeployUsage {
+  /** Deployments created in the last 24 hours. */
+  used: number
+  /** Daily cap for the plan (Hobby = 100). */
+  limit: number
+  /** Deployments remaining before hitting the cap. */
+  remaining: number
+}
+
+/** Hobby plan daily deployment cap. */
+const HOBBY_DAILY_LIMIT = 100
+
+/**
+ * Count how many deployments were created in the last 24 hours.
+ * Paginates the deployments list until entries fall outside the window.
+ */
+export async function getDeployUsage(token: string, teamId?: string): Promise<DeployUsage> {
+  const since = Date.now() - 24 * 60 * 60 * 1000
+  let used = 0
+  let until: number | undefined
+  // Cap pagination so we never loop indefinitely (limit is 100/day anyway).
+  for (let page = 0; page < 5; page++) {
+    let path = `/v6/deployments?limit=100&since=${since}`
+    if (until) path += `&until=${until}`
+    const data = await vercelFetch(token, withTeam(path, teamId))
+    const list: any[] = data?.deployments || []
+    if (list.length === 0) break
+    used += list.length
+    const oldest = list[list.length - 1]?.createdAt ?? list[list.length - 1]?.created
+    if (!oldest || oldest <= since || list.length < 100) break
+    until = oldest - 1
+  }
+  return {
+    used,
+    limit: HOBBY_DAILY_LIMIT,
+    remaining: Math.max(0, HOBBY_DAILY_LIMIT - used),
+  }
+}
+
 /** Find an existing project by name, or create one linked to the git repo. */
 async function ensureProject(token: string, req: DeployRequest) {
   const { projectName, repo, repoType = "github", teamId } = req

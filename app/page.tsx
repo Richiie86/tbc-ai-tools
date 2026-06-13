@@ -1,4 +1,5 @@
 import { DeployForm } from "@/components/deploy-form"
+import { DeployUsage } from "@/components/deploy-usage"
 import { listProjects } from "@/app/actions/projects"
 
 export const dynamic = "force-dynamic"
@@ -18,6 +19,7 @@ export default async function Home() {
             press.
           </p>
         </div>
+        <DeployUsage />
         <DeployForm initialProjects={projects} />
       </main>
     </div>
