@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { PreviewReadyPill } from './dashboard/PostAiDeploySuggestion';
 import { Switch } from '../components/ui/switch';
+import WebhookCard from './WebhookCard';
 
 /**
  * Per-project settings page: lets the operator manage the project admin
@@ -30,6 +31,7 @@ export default function ProjectSettings() {
   const [previewUrl, setPreviewUrl] = useState('');
   const [autoPromote, setAutoPromote] = useState(false);
   const [savingAuto, setSavingAuto] = useState(false);
+  const [repoFullName, setRepoFullName] = useState('');
 
   const [emailDraft, setEmailDraft] = useState('');
   const [passwordDraft, setPasswordDraft] = useState('');
@@ -52,7 +54,10 @@ export default function ProjectSettings() {
           const u = me.last_deployment_url;
           setPreviewUrl(u.startsWith('http') ? u : `https://${u}`);
         }
-        if (me) setAutoPromote(!!me.auto_promote);
+        if (me) {
+          setAutoPromote(!!me.auto_promote);
+          setRepoFullName(me.repo || '');
+        }
       } catch { /* non-fatal */ }
     } catch (e) {
       toast.error(e?.response?.data?.detail || 'Failed to load project');
@@ -243,6 +248,7 @@ export default function ProjectSettings() {
         </div>
 
         <div className="grid gap-5 lg:grid-cols-2">
+          <WebhookCard projectId={projectId} repo={repoFullName} />
           <Card className="border-tbc-900/60 bg-ink-900/60 p-5">
             <h2 className="flex items-center gap-2 text-sm font-bold uppercase tracking-wider text-tbc-200">
               <Mail className="h-4 w-4 text-tbc-300" /> Admin credentials

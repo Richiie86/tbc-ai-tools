@@ -19,6 +19,8 @@ class RegisterRequest(BaseModel):
     password: str = Field(min_length=10, max_length=128)
     name: Optional[str] = None
     referral_code: Optional[str] = None
+    # ISO date "YYYY-MM-DD" — powers the operator birthday-rewards feature.
+    dob: Optional[str] = None
 
 
 class LoginRequest(BaseModel):
@@ -70,6 +72,11 @@ class User(BaseModel):
     # Bumped by `Sign out everywhere` — every JWT carries the version it was
     # issued with; mismatch on decode = forced re-login on this device.
     token_version: int = 0
+    # Optional birth date (YYYY-MM-DD). Powers the operator birthday rewards
+    # campaign — users get auto-credited on the morning of their birthday.
+    dob: Optional[str] = None
+    # Year of the last birthday payout so we never double-grant in a year.
+    birthday_rewarded_year: Optional[int] = None
     created_at: datetime = Field(default_factory=_now)
 
 

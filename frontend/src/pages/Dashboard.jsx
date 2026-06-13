@@ -2,23 +2,17 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom';
 import api, { streamChat } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
-import {
-  Select, SelectContent, SelectGroup, SelectItem, SelectLabel,
-  SelectTrigger, SelectValue,
-} from '../components/ui/select';
 import { toast } from 'sonner';
-import { Cpu, Menu, ArrowDownToLine } from 'lucide-react';
+import { ArrowDownToLine } from 'lucide-react';
 
 import { DashboardSidebar } from './dashboard/DashboardSidebar';
+import { DashboardHeader } from './dashboard/DashboardHeader';
 import { TrialBanner } from './dashboard/TrialBanner';
 import { EmptyState, MessageBubble } from './dashboard/ChatMessages';
 import { ChatComposer } from './dashboard/ChatComposer';
-import CreditsBadge from '../components/CreditsBadge';
 import { OutOfCreditsDialog } from './dashboard/OutOfCreditsDialog';
-import { DashboardGuideTour, DashboardGuideButton } from './dashboard/DashboardGuideTour';
-import { InChatDeployControls } from './dashboard/InChatDeployControls';
+import { DashboardGuideTour } from './dashboard/DashboardGuideTour';
 import { PostAiDeploySuggestion } from './dashboard/PostAiDeploySuggestion';
-import { NotificationsBell } from './dashboard/NotificationsBell';
 
 // Anything within this many pixels from the bottom counts as "still at the
 // end" so a stray scroll-wheel nudge doesn't unstick the stream. Module-level
@@ -273,46 +267,16 @@ export default function Dashboard({ variant = 'tbc1' }) {
 
       {/* MAIN */}
       <main className="flex flex-1 flex-col overflow-hidden">
-        <div className="flex items-center justify-between border-b border-slate-800 bg-ink-950/80 px-5 py-3 backdrop-blur">
-          <div className="flex items-center gap-3">
-            {!sidebarOpen && (
-              <button
-                onClick={() => setSidebarOpen(true)}
-                className="rounded-md p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white"
-              >
-                <Menu className="h-4 w-4" />
-              </button>
-            )}
-            <div className="text-sm font-semibold text-white">{brandTitle}</div>
-          </div>
-          <div className="flex items-center gap-3">
-            {/* Operator-only deploy controls so we can ship code from inside chat. */}
-            <InChatDeployControls user={user} />
-            <NotificationsBell />
-            {/* Credits badge sits right next to the model picker so users
-                always see how much budget they have left while chatting. */}
-            <CreditsBadge user={user} testid="dashboard-credits-badge" />
-            <DashboardGuideButton onOpen={() => setGuideKey((k) => k + 1)} />
-            <Select value={model} onValueChange={setModel}>
-              <SelectTrigger className="h-9 w-[230px] border-slate-700 bg-slate-900 text-slate-100">
-                <div className="flex items-center gap-2 text-sm">
-                  <Cpu className="h-3.5 w-3.5 text-tbc-400" />
-                  <SelectValue placeholder="Select model" />
-                </div>
-              </SelectTrigger>
-              <SelectContent className="border-slate-800 bg-slate-900 text-slate-100">
-                {Object.entries(models.providers || {}).map(([provider, items]) => (
-                  <SelectGroup key={provider}>
-                    <SelectLabel className="text-[10px] uppercase tracking-wider text-slate-500">{provider}</SelectLabel>
-                    {items.map((m) => (
-                      <SelectItem key={m.id} value={m.id} className="focus:bg-slate-800">{m.label}</SelectItem>
-                    ))}
-                  </SelectGroup>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
+        <DashboardHeader
+          brandTitle={brandTitle}
+          sidebarOpen={sidebarOpen}
+          onOpenSidebar={() => setSidebarOpen(true)}
+          user={user}
+          models={models}
+          model={model}
+          setModel={setModel}
+          onOpenGuide={() => setGuideKey((k) => k + 1)}
+        />
 
         <TrialBanner user={user} />
 

@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { Megaphone, X } from 'lucide-react';
 import api from '../lib/api';
+import { useAuth } from '../context/AuthContext';
 
 const DISMISS_KEY = 'tbc.marketingBanner.dismissedHash';
 
@@ -35,16 +36,31 @@ export default function MarketingBanner() {
   const [dismissedHash, setDismissedHash] = useState(() => {
     try { return localStorage.getItem(DISMISS_KEY) || ''; } catch { return ''; }
   });
+  const location = useLocation();
+  const { user } = useAuth() || {};
+
+  // Pick which named banner to show based on context:
+  //   * /dashboard or /chat → "dashboard_subscription" for paying plans,
+  //     "dashboard_new" otherwise.
+  //   * everything else → "landing".
+  const scope = useMemo(() => {
+    const path = location.pathname || '/';
+    const inDashboard = path.startsWith('/dashboard') || path.startsWith('/chat');
+    if (!inDashboard) return 'landing';
+    const plan = (user?.plan || '').toLowerCase();
+    const isPaid = ['starter', 'pro', 'enterprise'].includes(plan);
+    return isPaid ? 'dashboard_subscription' : 'dashboard_new';
+  }, [location.pathname, user?.plan]);
 
   useEffect(() => {
     let cancelled = false;
-    api.get('/marketing/banner')
+    api.get(`/marketing/banner?scope=${scope}`)
       .then((r) => { if (!cancelled) setCfg(r.data); })
       .catch(() => { /* banner is optional */ });
     return () => { cancelled = true; };
-  }, []);
+  }, [scope]);
 
-  const currentHash = useMemo(() => (cfg ? hashMessages(cfg.messages || []) : ''), [cfg]);
+  const currentHash = useMemo(() => (cfg ? `${scope}|${hashMessages(cfg.messages || [])}` : ''), [cfg, scope]);
 
   if (!cfg || !cfg.enabled) return null;
   if (!Array.isArray(cfg.messages) || cfg.messages.length === 0) return null;

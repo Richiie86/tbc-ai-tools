@@ -427,9 +427,20 @@ async def op_discount_campaign(
 ):
     """Apply a global % discount across selected (or all) plans.
 
-    Body: {"percent": 20, "plan_ids": ["starter", "pro"] | null, "clear": false}
+    Body: {
+      "percent": 20,
+      "plan_ids": ["starter", "pro"] | null,
+      "clear": false,
+      "announce_on_banner": true,
+      "starts_at": "2026-02-01T00:00:00Z" | null,
+      "ends_at":   "2026-02-08T00:00:00Z" | null,
+      "banner_text": "20% off PRO this week!" | null
+    }
     - When clear=true, restores price = regular_price and intro=false for the selected scope.
     - Otherwise, sets price = round(regular_price * (1 - percent/100), 2) and intro=true.
+    - When announce_on_banner=true, *also* writes a corresponding entry into
+      the scrolling marketing banner (with optional start/end window). Pair
+      with `clear=true` to retract both the prices and the banner in one call.
     """
     db = await get_db()
     clear = bool(payload.get('clear'))
@@ -454,23 +465,94 @@ async def op_discount_campaign(
             {'$set': {'price': new_price, 'regular_price': regular, 'intro': intro}},
         )
         updated += 1
-    return {'success': True, 'updated': updated, 'clear': clear}
 
+    # Optional: keep the scrolling banner(s) in sync with the campaign.
+    # Operator can target one or more banner scopes (defaults to landing).
+    announce = bool(payload.get('announce_on_banner'))
+    scopes = payload.get('banner_scopes') or ['landing']
+    scopes = [s for s in scopes if s in BANNER_SCOPES] or ['landing']
+    banner_updated = False
+    if announce or clear:
+        for scope in scopes:
+            doc_id = _banner_doc_id(scope)
+            existing = await db.settings.find_one({'_id': doc_id}) or {}
+            if clear:
+                # Pull out any auto-generated campaign messages but keep the
+                # operator's hand-written ones.
+                kept = [
+                    m for m in (existing.get('messages') or [])
+                    if not (isinstance(m, dict) and m.get('source') == 'campaign')
+                ]
+                banner_doc = {
+                    **existing,
+                    '_id': doc_id,
+                    'messages': kept,
+                    'enabled': bool(existing.get('enabled', False)) and len(kept) > 0,
+                }
+                await db.settings.update_one({'_id': doc_id}, {'$set': banner_doc}, upsert=True)
+                banner_updated = True
+            else:
+                pct = max(0.0, min(100.0, float(payload.get('percent') or 0)))
+                default_text = f'Limited offer — {int(pct)}% off all plans!'
+                text = (payload.get('banner_text') or default_text).strip()
+                new_msg = {
+                    'text': text,
+                    'href': '/pricing',
+                    'source': 'campaign',
+                }
+                kept_user_msgs = [
+                    m for m in (existing.get('messages') or [])
+                    if not (isinstance(m, dict) and m.get('source') == 'campaign')
+                ]
+                banner_doc = {
+                    '_id': doc_id,
+                    'enabled': True,
+                    'messages': kept_user_msgs + [new_msg],
+                    'speed_seconds': float(existing.get('speed_seconds') or 30),
+                    'starts_at': payload.get('starts_at') or existing.get('starts_at'),
+                    'ends_at': payload.get('ends_at') or existing.get('ends_at'),
+                }
+                await db.settings.update_one({'_id': doc_id}, {'$set': banner_doc}, upsert=True)
+                banner_updated = True
 
-# ===================================================================
-# MARKETING BANNER (scrolling ticker)
-# ===================================================================
-@router.get('/marketing/banner')
-async def get_marketing_banner():
-    """Public — fetch the current scrolling marketing banner config.
-
-    Returns the messages list (each: {text, href?}), the enabled flag, the
-    speed in seconds, and the optional start/end dates so the banner can
-    auto-hide outside the campaign window.
-    """
-    db = await get_db()
-    doc = await db.settings.find_one({'_id': 'marketing_banner'}) or {}
     return {
+        'success': True,
+        'updated': updated,
+        'clear': clear,
+        'banner_updated': banner_updated,
+        'banner_scopes': scopes if (announce or clear) else [],
+    }
+
+
+# ===================================================================
+# MARKETING BANNER (scrolling ticker) — multiple named scopes
+# ===================================================================
+BANNER_SCOPES = {'landing', 'dashboard_new', 'dashboard_subscription'}
+
+
+def _banner_doc_id(scope: str) -> str:
+    """Backwards-compatible doc id: the original single banner lives at
+    `marketing_banner`; the new named ones at `marketing_banner:{scope}`."""
+    if scope == 'landing':
+        return 'marketing_banner'
+    return f'marketing_banner:{scope}'
+
+
+@router.get('/marketing/banner')
+async def get_marketing_banner(scope: str = Query('landing')):
+    """Public — fetch the current scrolling marketing banner config for a
+    given scope. Defaults to `landing` so older clients keep working.
+
+    Valid scopes: `landing`, `dashboard_new`, `dashboard_subscription`.
+    Each scope is an independent banner the operator can run on its own
+    schedule and audience.
+    """
+    if scope not in BANNER_SCOPES:
+        raise HTTPException(400, f'Unknown scope. Use one of {sorted(BANNER_SCOPES)}')
+    db = await get_db()
+    doc = await db.settings.find_one({'_id': _banner_doc_id(scope)}) or {}
+    return {
+        'scope': scope,
         'enabled': bool(doc.get('enabled', False)),
         'messages': doc.get('messages') or [],
         'speed_seconds': float(doc.get('speed_seconds') or 30),
@@ -482,19 +564,15 @@ async def get_marketing_banner():
 @router.put('/operator/marketing/banner')
 async def update_marketing_banner(
     payload: dict = Body(...),
+    scope: str = Query('landing'),
     _: dict = Depends(get_current_operator),
 ):
-    """Operator — replace the marketing banner config.
+    """Operator — replace the marketing banner config for a scope.
 
-    Body shape:
-        {
-          "enabled": true,
-          "messages": [{"text": "20% off PRO this week!", "href": "/pricing"}],
-          "speed_seconds": 30,
-          "starts_at": "2026-02-01T00:00:00Z" | null,
-          "ends_at":   "2026-02-08T00:00:00Z" | null
-        }
+    Query param: `scope=landing|dashboard_new|dashboard_subscription`.
     """
+    if scope not in BANNER_SCOPES:
+        raise HTTPException(400, f'Unknown scope. Use one of {sorted(BANNER_SCOPES)}')
     db = await get_db()
     # Defensive normalisation — accept str messages too.
     raw_msgs = payload.get('messages') or []
@@ -513,16 +591,17 @@ async def update_marketing_banner(
             if href:
                 item['href'] = href
             clean_msgs.append(item)
+    doc_id = _banner_doc_id(scope)
     doc = {
-        '_id': 'marketing_banner',
+        '_id': doc_id,
         'enabled': bool(payload.get('enabled', False)),
         'messages': clean_msgs,
         'speed_seconds': max(5.0, min(300.0, float(payload.get('speed_seconds') or 30))),
         'starts_at': payload.get('starts_at') or None,
         'ends_at': payload.get('ends_at') or None,
     }
-    await db.settings.update_one({'_id': 'marketing_banner'}, {'$set': doc}, upsert=True)
-    return {'success': True, 'messages_count': len(clean_msgs)}
+    await db.settings.update_one({'_id': doc_id}, {'$set': doc}, upsert=True)
+    return {'success': True, 'scope': scope, 'messages_count': len(clean_msgs)}
 
 
 # ===================================================================

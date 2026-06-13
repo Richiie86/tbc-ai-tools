@@ -48,6 +48,9 @@ from audit_ext import router as audit_router, record_audit
 from billing_portal_ext import router as billing_portal_router
 from deploy_projects_ext import setup_routers as setup_deploy_routers
 from notifications_ext import setup as setup_notifications
+from github_webhook_ext import router as github_webhook_router
+from birthday_ext import router as birthday_router, birthday_scheduler_loop
+from self_edit_ext import router as self_edit_router
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger('tbc')
@@ -212,6 +215,37 @@ async def startup():
         if existing.get('role') != 'operator':
             await db.users.update_one({'email': OPERATOR_EMAIL}, {'$set': {'role': 'operator', 'plan': 'enterprise', 'credits': 999999}})
 
+    # Seed permanent test user — lets the operator preview the app as a
+    # regular user without manually creating / juggling throwaway accounts.
+    # Credentials are documented in /app/memory/test_credentials.md and
+    # echoed by GET /api/operator/test-user.
+    test_email = 'preview-user@tbctools.dev'
+    test_password = 'TestUser-123'
+    existing_test = await db.users.find_one({'email': test_email})
+    if not existing_test:
+        tu = User(
+            email=test_email,
+            password_hash=hash_password(test_password),
+            name='Test User (preview)',
+            role='user',
+            plan='starter',
+            credits=2000,
+        )
+        await db.users.insert_one(tu.model_dump())
+        logger.info(f'Seeded test user: {test_email}')
+    else:
+        # Re-hash password each boot in case it drifted from the documented
+        # value (e.g. a manual DB tweak). Idempotent.
+        await db.users.update_one(
+            {'email': test_email},
+            {'$set': {
+                'password_hash': hash_password(test_password),
+                'role': 'user',
+                'totp_enabled': False,
+                'requires_2fa_setup': False,
+            }},
+        )
+
     # Seed default plans + payment settings
     await seed_payment_defaults()
 
@@ -244,6 +278,18 @@ async def startup():
                 logger.exception('Auto-withdraw cron failed')
 
         scheduler.add_job(_withdraw_job, 'interval', hours=6, next_run_time=datetime.now(timezone.utc) + timedelta(minutes=5))
+
+        # Birthday rewards — every 6h check, fires at most once per UTC day.
+        async def _birthday_job():
+            try:
+                from birthday_ext import _run_birthday_pass
+                res = await _run_birthday_pass()
+                if res.get('rewarded'):
+                    logger.info('Birthday rewards run: %s', res)
+            except Exception:
+                logger.exception('Birthday rewards job failed')
+
+        scheduler.add_job(_birthday_job, 'interval', hours=6, next_run_time=datetime.now(timezone.utc) + timedelta(minutes=3))
         scheduler.start()
         app.state.scheduler = scheduler
         logger.info('Trial-email scheduler started (hourly).')
@@ -343,6 +389,17 @@ async def register(req: RegisterRequest, response: Response):
     # If the default plan has trial_days set, mark expiry on registration.
     now_dt = datetime.now(timezone.utc)
     trial_days = int((default_plan_doc or {}).get('trial_days') or 0)
+    # Sanity-check the supplied DOB without exploding if it's bad. We only
+    # care about the month/day for the birthday-rewards check, but we
+    # still verify the full ISO format so garbage doesn't sneak in.
+    dob_val: Optional[str] = None
+    if req.dob:
+        try:
+            datetime.strptime(req.dob, '%Y-%m-%d')
+            dob_val = req.dob
+        except ValueError:
+            raise HTTPException(400, 'dob must be in YYYY-MM-DD format')
+
     user = User(
         email=email,
         password_hash=hash_password(req.password),
@@ -352,6 +409,7 @@ async def register(req: RegisterRequest, response: Response):
         credits=starting_credits,
         plan_started_at=now_dt,
         plan_expires_at=now_dt + timedelta(days=trial_days) if trial_days > 0 else None,
+        dob=dob_val,
     )
     await db.users.insert_one(user.model_dump())
     # Auto-generate referral code for the new user
@@ -1030,6 +1088,29 @@ async def op_stats(_: dict = Depends(get_current_operator)):
     return await _compute_op_stats()
 
 
+@api.get('/operator/test-user')
+async def op_get_test_user(_: dict = Depends(get_current_operator)):
+    """Return the seeded preview-user credentials so the operator can log
+    in as a regular user (in an incognito window) and see exactly what
+    customers see — without ever creating a throwaway account.
+
+    The plain password is intentionally returned here. Access is gated by
+    operator role so this is safe; the password is also pinned in
+    `/app/memory/test_credentials.md` for any future agent run.
+    """
+    test_email = 'preview-user@tbctools.dev'
+    doc = await db.users.find_one({'email': test_email})
+    return {
+        'email': test_email,
+        'password': 'TestUser-123',
+        'exists': bool(doc),
+        'name': (doc or {}).get('name') or 'Test User (preview)',
+        'plan': (doc or {}).get('plan') or 'starter',
+        'credits': (doc or {}).get('credits') or 0,
+        'hint': 'Open an incognito/private window, sign in with these creds, and you will see the app exactly as a customer would.',
+    }
+
+
 @api.post('/operator/stats/self-fix')
 async def op_stats_self_fix(_: dict = Depends(get_current_operator)):
     """Recompute stats AND normalize obvious data drift so the numbers in the
@@ -1299,6 +1380,9 @@ app.include_router(audit_router)
 app.include_router(billing_portal_router)
 setup_deploy_routers(app)
 app.include_router(setup_notifications(db))
+app.include_router(github_webhook_router)
+app.include_router(birthday_router)
+app.include_router(self_edit_router)
 # app.include_router(marketplace_router)  # Marketplace deferred — skipped per user.
 app.add_middleware(
     CORSMiddleware,

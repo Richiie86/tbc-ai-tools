@@ -7,7 +7,7 @@ import { toast } from 'sonner';
 import {
   Rocket, Globe, Loader2, Copy, Check, GitBranch, ExternalLink, RotateCw, Save,
   Sparkles, Activity, AlertCircle, CheckCircle2, GitFork, Pencil, ShieldCheck, Bot,
-  Cog,
+  Cog, BadgeCheck, Zap,
 } from 'lucide-react';
 
 import { CodeReviewDialog } from './CodeReviewDialog';
@@ -330,6 +330,25 @@ export function ProjectRow({ project, onDeployed }) {
                 Last deploy: <span className="text-tbc-200/80">{project.last_deployment_state || '—'}</span>
                 {' · '}
                 {new Date(project.last_deployed_at).toLocaleString()}
+              </span>
+            )}
+            {project.last_promoted_at && (
+              <span
+                data-testid={`project-promoted-at-${project.id}`}
+                className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 font-semibold text-emerald-300"
+              >
+                <BadgeCheck className="h-3 w-3" />
+                Promoted {new Date(project.last_promoted_at).toLocaleString()}
+              </span>
+            )}
+            {project.auto_promote && (
+              <span
+                data-testid={`project-auto-promote-${project.id}`}
+                className="inline-flex items-center gap-1 rounded-full border border-emerald-500/40 px-2 py-0.5 font-semibold text-emerald-300"
+                title="Auto-promote enabled — successful previews ship on their own"
+              >
+                <Zap className="h-3 w-3" />
+                Auto-promote
               </span>
             )}
           </div>

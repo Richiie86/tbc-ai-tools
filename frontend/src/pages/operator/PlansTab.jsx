@@ -247,6 +247,10 @@ function Field({ label, children }) {
 function DiscountCampaignButton({ onDone }) {
   const [open, setOpen] = useState(false);
   const [percent, setPercent] = useState(20);
+  const [announce, setAnnounce] = useState(true);
+  const [startsAt, setStartsAt] = useState('');
+  const [endsAt, setEndsAt] = useState('');
+  const [bannerText, setBannerText] = useState('');
   const [busy, setBusy] = useState(false);
 
   const apply = async (clear) => {
@@ -255,8 +259,17 @@ function DiscountCampaignButton({ onDone }) {
       const { data } = await api.post('/operator/plans/discount-campaign', {
         percent: Number(percent) || 0,
         clear,
+        announce_on_banner: announce,
+        starts_at: startsAt || null,
+        ends_at: endsAt || null,
+        banner_text: bannerText || null,
       });
-      toast.success(clear ? `Cleared discounts on ${data.updated} plans` : `Applied ${percent}% off to ${data.updated} plans`);
+      const bannerNote = data.banner_updated ? ' · banner updated' : '';
+      toast.success(
+        clear
+          ? `Cleared discounts on ${data.updated} plans${bannerNote}`
+          : `Applied ${percent}% off to ${data.updated} plans${bannerNote}`
+      );
       setOpen(false);
       onDone?.();
     } catch (e) {
@@ -277,14 +290,15 @@ function DiscountCampaignButton({ onDone }) {
           <Percent className="mr-1.5 h-4 w-4" /> Discount campaign
         </Button>
       </DialogTrigger>
-      <DialogContent className="border-tbc-900/60 bg-ink-900 text-tbc-100">
+      <DialogContent className="border-tbc-900/60 bg-ink-900 text-tbc-100 sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Apply a global discount campaign</DialogTitle>
         </DialogHeader>
         <div className="space-y-3">
           <p className="text-xs text-tbc-200/60">
-            Sets each plan&apos;s first-month price to its regular price minus this percentage. The original price is preserved
-            as <span className="font-semibold text-tbc-100">regular_price</span> so customers see the savings on the pricing page.
+            Sets each plan&apos;s first-month price to its regular price minus this percentage.
+            Optionally pushes a matching message into the scrolling banner, scheduled to
+            auto-start and auto-end at the times you pick.
           </p>
           <Field label="% off (0-100)">
             <Input
@@ -297,6 +311,56 @@ function DiscountCampaignButton({ onDone }) {
               onChange={(e) => setPercent(e.target.value)}
             />
           </Field>
+          <label className="flex items-center justify-between rounded-md border border-tbc-900/60 bg-ink-950/50 px-3 py-2">
+            <div className="flex flex-col">
+              <span className="text-xs font-semibold text-tbc-100">Also announce on marketing banner</span>
+              <span className="text-[10px] text-tbc-200/60">Adds a scrolling message linking to /pricing across landing + dashboard.</span>
+            </div>
+            <input
+              type="checkbox"
+              data-testid="plans-campaign-announce"
+              checked={announce}
+              onChange={(e) => setAnnounce(e.target.checked)}
+              className="h-4 w-4 accent-emerald-500"
+            />
+          </label>
+          {announce && (
+            <>
+              <Field label="Banner text (optional — defaults to '20% off all plans!')">
+                <Input
+                  data-testid="plans-campaign-banner-text"
+                  className="bg-ink-950 border-tbc-900/60 text-tbc-100"
+                  placeholder={`Limited offer — ${percent || 20}% off all plans!`}
+                  value={bannerText}
+                  onChange={(e) => setBannerText(e.target.value)}
+                />
+              </Field>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Starts at (date + time)">
+                  <Input
+                    type="datetime-local"
+                    data-testid="plans-campaign-starts-at"
+                    className="bg-ink-950 border-tbc-900/60 text-tbc-100"
+                    value={startsAt}
+                    onChange={(e) => setStartsAt(e.target.value)}
+                  />
+                </Field>
+                <Field label="Ends at (date + time)">
+                  <Input
+                    type="datetime-local"
+                    data-testid="plans-campaign-ends-at"
+                    className="bg-ink-950 border-tbc-900/60 text-tbc-100"
+                    value={endsAt}
+                    onChange={(e) => setEndsAt(e.target.value)}
+                  />
+                </Field>
+              </div>
+              <p className="text-[10px] text-tbc-200/50">
+                Leave both blank to start immediately and run until you retract it.
+                Banner only renders to users when the current time falls inside the window.
+              </p>
+            </>
+          )}
         </div>
         <DialogFooter className="flex-col gap-2 sm:flex-row">
           <Button
@@ -306,7 +370,7 @@ function DiscountCampaignButton({ onDone }) {
             className="border-tbc-900/60 bg-ink-900 text-tbc-100 hover:bg-ink-950"
             data-testid="plans-campaign-clear-btn"
           >
-            Clear all discounts
+            Clear discounts &amp; retract banner
           </Button>
           <Button
             onClick={() => apply(false)}
@@ -315,7 +379,7 @@ function DiscountCampaignButton({ onDone }) {
             data-testid="plans-campaign-apply-btn"
           >
             {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-            Apply {percent}% off to all plans
+            Apply {percent}% off
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -1,0 +1,39 @@
+{
+  "summary": "Frontend-only smoke + UI verification for the Operator/Dashboard refactor and the new feature batch (Sandbox, Marketing, SecretsCard, ops Promote/Auto-Promote, Birthday Rewards, TestUserBanner). Operator login works (lands on /setup-2fa due to RESET_OPERATOR_PASSWORD=true; cookie still authenticates /api so /operator works on manual nav). Operator Console mounts cleanly with the new modular StatCard x4 + StatsToolbar (Show JSON + Self-fix, both functional). All 16 tabs render without runtime errors. Sandbox tab loads the GitHub tree, opens files into the editor, and shows Save commit + Update app buttons with commit-message input. Marketing tab has all 3 scopes (landing / dashboard_new / dashboard_subscription) each with messages textarea, scroll-speed input, starts/ends datetime-local inputs, enabled switch, and save button. Security/Settings tab shows the SecretsCard with Vercel token + Vercel team + GitHub token rows and Save/Rotate-key buttons. Dashboard /dashboard mounts the new DashboardHeader with brand title 'TBC AI Tools', InChatDeployControls (operator-only — visible), NotificationsBell, dashboard-credits-badge, Guide button, and model-picker combobox. THREE GAPS WERE FOUND vs the review request: (1) Ops tab project rows have NO Promote-to-Prod button or Auto-Promote toggle — the per-row controls are Deploy/Preview/Redeploy/Copy URL/Clone/Download/Code Review/Autopilot/Health only (0 promote-* testids, 0 [role='switch'] in the panel). (2) TestUserBanner.jsx is NEVER mounted — it's not imported by Operator.jsx and not visible on /login, /operator, or /dashboard (data-testid='test-user-banner' returns null on all three). (3) Birthday Rewards UI is absent — Security/Settings tab body contains no 'birthday' / 'reward' / 'dob' text and no DOB credits/discount inputs.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "OpsTab → operator/ops/deploy/ProjectRow.jsx", "issue": "Per-project Promote-to-Prod button is missing from every row. Visible per-row buttons are Deploy / Preview / Redeploy / Copy URL / Clone / Download / Code Review / Autopilot / Health. None have data-testid starting with 'promote-' and no button text contains 'Promote'.", "selector": "[data-testid^='deploy-project-'] button", "priority": "HIGH"},
+      {"component": "OpsTab → operator/ops/deploy/ProjectRow.jsx", "issue": "Auto-Promote toggle is missing — 0 [role='switch'] elements rendered inside the active Ops tabpanel. PATCH /api/operator/deploy/{id} cannot be exercised from the UI.", "selector": "[role='tabpanel'][data-state='active'] [role='switch']", "priority": "HIGH"},
+      {"component": "operator/TestUserBanner.jsx", "issue": "Component exists but is NOT imported/mounted anywhere. data-testid='test-user-banner' is absent on /login, /operator and /dashboard. Either mount it in Operator.jsx (under the Stats grid or above tabs) and/or on /login above the form when ?prefill=… or always.", "selector": "[data-testid='test-user-banner']", "priority": "HIGH"},
+      {"component": "operator/SettingsTab.jsx (Security)", "issue": "Birthday Rewards card (DOB credits + % discount inputs) is not rendered. Tab body has no 'birthday', 'reward', or 'dob' text. Either add the card to SettingsTab or to MarketingTab as a sub-card so operator can configure the rewards and persist them.", "selector": "Settings/Marketing — no birthday-rewards fields", "priority": "HIGH"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Dashboard / Operator first-load", "issues": ["Pre-existing — Quick-Guide DialogOverlay intercepts pointer events for bell/tabs until 'Skip' is clicked. Already noted in iteration_8."]}
+    ]
+  },
+  "test_report_links": ["/app/test_reports/iteration_9.json"],
+  "action_items": [
+    "Add Promote-to-Prod button and Auto-Promote [role='switch'] toggle to operator/ops/deploy/ProjectRow.jsx for every row; wire toggle to PATCH /api/operator/deploy/{id} and the button to POST /api/operator/deploy/{id}/promote. Use data-testid like promote-{projectId} and auto-promote-{projectId}.",
+    "Mount TestUserBanner in Operator.jsx (e.g. <TestUserBanner /> directly above the <Tabs> block) so operators can preview the customer experience. Also consider rendering it conditionally on /login when ?prefill=test_user is present.",
+    "Build the Birthday Rewards card (DOB-driven credits amount + % discount) inside operator/SettingsTab.jsx (or a new Marketing sub-card) and wire to the corresponding GET/PUT /api/operator/birthday-rewards endpoints. Verify data persists on reload.",
+    "(Polish) After landing on /setup-2fa post-login, surface a 'Skip for now → go to Operator Console' link so the operator doesn't have to manually type /operator on every login while RESET_OPERATOR_PASSWORD=true."
+  ],
+  "critical_code_review_comments": [
+    "Operator.jsx (158 lines, well below the 700-line guideline post-refactor) — modular tabs imports are clean; StatCard + StatsToolbar + UsersTab extraction is correct and reused via named exports.",
+    "Dashboard.jsx (343 lines) — DashboardHeader is fully wired with all 6 expected slots (brand, InChatDeployControls, NotificationsBell, CreditsBadge, Guide, model picker); good separation of concerns from the chat scroller.",
+    "SandboxTab.jsx — 'Update app' performs commit → deploy → promote sequentially with toast progress (Step 1/3, 2/3, 3/3) and tracks last preview URL in localStorage; uses window.confirm twice (commit & full-ship) to prevent accidental prod pushes — good defensive UX.",
+    "MarketingTab.jsx — 3-scope tabs render the same BannerEditor with scoped data-testids (marketing-editor-{scope}, marketing-save-btn-{scope}, etc.) — clean parametric pattern.",
+    "operator/ops/deploy/ProjectRow.jsx — needs Promote-to-Prod and Auto-Promote toggle UI to match the shipped backend (review request item explicitly calls these out).",
+    "TestUserBanner.jsx — orphan component. Either import it or delete to avoid drift."
+  ],
+  "updated_files": [],
+  "success_rate": { "backend": "n/a (not exercised this iteration)", "frontend": "60% — 6 of 10 review items pass (Operator login + 16 tabs, StatCard/StatsToolbar, Sandbox, Marketing, SecretsCard, DashboardHeader). 4 items fail/missing (Promote button, Auto-Promote toggle, TestUserBanner mount, Birthday Rewards UI)." },
+  "test_credentials": "Operator rac.investments.swe@gmail.com / 123Admin@98 (cookie auth works; post-login redirects to /setup-2fa — navigate manually to /operator).",
+  "seed_data_creation": "None this iteration.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "After main agent ships fixes for the 4 missing items: (a) check Ops tab for data-testid='promote-{projectId}' and data-testid='auto-promote-{projectId}'; (b) confirm <TestUserBanner /> renders on /operator (data-testid='test-user-banner'); (c) confirm Birthday Rewards inputs are persisted (set values → reload → assert). Login still routes via /setup-2fa due to RESET_OPERATOR_PASSWORD=true — don't rely on auto-redirect to /operator. Still skip the Quick-Guide tour with 'Skip' before touching the bell or tabs.",
+  "rca of the issue": "Promote/Auto-Promote: ProjectRow.jsx was likely refactored without adding the new shipped controls — backend PATCH /api/operator/deploy/{id} + POST /api/operator/deploy/{id}/promote exist (verified in iter8) but the UI surface was not added. TestUserBanner: component file exists at /app/frontend/src/pages/operator/TestUserBanner.jsx but is not referenced in Operator.jsx imports — likely created in this batch but never wired in. Birthday Rewards: SettingsTab snippet shows New User Defaults / Stripe / NowPayments / PayPal / Resend / Emergent LLM / Vercel cards only — Birthday Rewards card was not added during this batch."
+}

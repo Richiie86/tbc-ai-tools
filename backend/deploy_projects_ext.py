@@ -213,7 +213,6 @@ async def _vercel_create_deployment(
     payload = {
         # Vercel requires `name` even when targeting an existing project.
         'name': _slugify(project['projectName']),
-        'target': target,
         'gitSource': {
             'type': repo_type,
             'org': org_part,
@@ -221,6 +220,11 @@ async def _vercel_create_deployment(
             'ref': ref,
         },
     }
+    # Vercel's API accepts only 'production', 'staging' or a custom env id
+    # for `target`. To request a *preview* deployment, omit the field —
+    # Vercel then creates one on a preview alias automatically.
+    if target == 'production':
+        payload['target'] = 'production'
     if project.get('vercel_project_id'):
         # Existing project — Vercel uses its own stored settings for the
         # build, so we don't need to supply `projectSettings` here.
