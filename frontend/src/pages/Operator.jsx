@@ -8,7 +8,7 @@ import {
   Users, CreditCard, MessageSquare, DollarSign, Loader2, ShieldCheck, Mail,
   Code2, Sparkles, Wallet, KeyRound, Settings as SettingsIcon, Coins,
   FolderKanban, Activity, ScrollText, Megaphone, MessageCircle, FlaskConical,
-  TrendingUp, Lock, Brain,
+  TrendingUp, Lock, Brain, Network,
 } from 'lucide-react';
 
 import PlansTab     from './operator/PlansTab';
@@ -25,6 +25,7 @@ import MarketingTab from './operator/MarketingTab';
 import MessagingTab from './operator/MessagingTab';
 import SandboxTab   from './operator/SandboxTab';
 import AILearningsTab from './operator/AILearningsTab';
+import AIBrainTab from './operator/AIBrainTab';
 import AnalyticsTab from './operator/AnalyticsTab';
 import { StatCard }      from './operator/StatCard';
 import { StatsToolbar }  from './operator/StatsToolbar';
@@ -200,6 +201,7 @@ export default function Operator() {
                 <TabTrigger value="messaging" icon={MessageCircle}>Messaging</TabTrigger>
                 <TabTrigger value="sandbox"   icon={FlaskConical}>Sandbox</TabTrigger>
                 <TabTrigger value="learnings" icon={Brain}>AI Learnings</TabTrigger>
+                <TabTrigger value="brain"     icon={Network}>AI Brain</TabTrigger>
               </TabsList>
 
               <TabsContent value="users" className="mt-5">
@@ -224,6 +226,7 @@ export default function Operator() {
               <TabsContent value="messaging" className="mt-5"><MessagingTab users={users} /></TabsContent>
               <TabsContent value="sandbox"   className="mt-5"><SandboxTab /></TabsContent>
               <TabsContent value="learnings" className="mt-5"><AILearningsTab /></TabsContent>
+              <TabsContent value="brain"     className="mt-5"><AIBrainTab /></TabsContent>
             </Tabs>
           </>
         )}

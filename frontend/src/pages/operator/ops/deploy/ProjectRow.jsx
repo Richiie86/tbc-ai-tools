@@ -327,6 +327,18 @@ export function ProjectRow({ project, onDeployed }) {
             />
             <span>Auto-promote</span>
           </label>
+          <label
+            className="inline-flex items-center gap-2 rounded-md border border-tbc-900/60 bg-ink-900 px-2.5 py-1.5 text-[11px] text-tbc-200/80"
+            title="When ON, autopilot auto-fixes do_not_ship verdicts and re-ships (up to 3 iterations)."
+          >
+            <Switch
+              data-testid={`auto-heal-${project.id}`}
+              checked={!!project.auto_heal}
+              onCheckedChange={a.toggleAutoHeal}
+              disabled={a.busy !== null}
+            />
+            <span>Self-healing</span>
+          </label>
         </div>
       </div>
 

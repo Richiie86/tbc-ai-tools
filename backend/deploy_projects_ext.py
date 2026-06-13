@@ -81,6 +81,11 @@ class ProjectIn(BaseModel):
     # the existing ship-gate (block on AI `do_not_ship`) this turns the
     # pipeline into "land preview → AI reviews → if green, auto-ship".
     auto_promote: bool = False
+    # When true, autopilot defaults to `auto_fix_max_iterations=3` for this
+    # project so the AI silently fixes do_not_ship verdicts and reships.
+    # The operator can still override per-run. Default off — explicit opt-in
+    # because auto-commits to GitHub are irreversible.
+    auto_heal: bool = False
 
 
 class ProjectOut(BaseModel):
@@ -137,6 +142,7 @@ def _project_to_out(doc: dict) -> dict:
         'gitRef': doc.get('gitRef'),
         'vercel_project_id': doc.get('vercel_project_id'),
         'auto_promote': bool(doc.get('auto_promote', False)),
+        'auto_heal': bool(doc.get('auto_heal', False)),
         'last_deployment_id': doc.get('last_deployment_id'),
         'last_deployment_url': doc.get('last_deployment_url'),
         'last_deployment_state': doc.get('last_deployment_state'),
@@ -935,6 +941,7 @@ class ProjectFlagsUpdate(BaseModel):
     without churning the endpoint signature.
     """
     auto_promote: Optional[bool] = None
+    auto_heal: Optional[bool] = None
 
 
 @ops_router.patch('/{project_id}')
@@ -950,6 +957,8 @@ async def op_patch_project_flags(
     update: dict = {'updated_at': datetime.now(timezone.utc)}
     if payload.auto_promote is not None:
         update['auto_promote'] = bool(payload.auto_promote)
+    if payload.auto_heal is not None:
+        update['auto_heal'] = bool(payload.auto_heal)
     await db.deploy_projects.update_one({'id': project_id}, {'$set': update})
     fresh = await db.deploy_projects.find_one({'id': project_id})
     return _project_to_out(fresh)

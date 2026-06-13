@@ -184,6 +184,26 @@ export function useProjectActions(project, onDeployed) {
     }
   };
 
+  // --- self-healing toggle (PATCH /api/operator/deploy/{id}) -----------
+  // When ON, autopilot runs `auto_fix_max_iterations=3` by default for
+  // this project so the AI silently fixes do_not_ship verdicts and reships.
+  const toggleAutoHeal = async (next) => {
+    setBusy('auto-heal');
+    try {
+      await api.patch(`/operator/deploy/${project.id}`, { auto_heal: next });
+      toast.success(
+        next
+          ? 'Self-healing ON · AI will auto-fix failed reviews and reship (up to 3 iterations)'
+          : 'Self-healing OFF'
+      );
+      onDeployed();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Could not toggle self-healing');
+    } finally {
+      setBusy(null);
+    }
+  };
+
   // --- ship-gate recovery ----------------------------------------------
   const openFixChat = () => {
     if (!gateBlock?.fix_chat_session_id) {
@@ -245,7 +265,7 @@ export function useProjectActions(project, onDeployed) {
     // setters (for dialogs)
     setReviewOpen, setCloneOpen, setPromoteOpen, setAutopilotOpen, setGateBlock,
     // actions
-    trigger, promote, toggleAutoPromote,
+    trigger, promote, toggleAutoPromote, toggleAutoHeal,
     openFixChat, bypassAndShip, submitClone, copyUrl,
   };
 }

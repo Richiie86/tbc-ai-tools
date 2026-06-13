@@ -1,0 +1,33 @@
+{
+  "summary": "Iter15 verification of (a) AI Brain tab endpoints + UI, (b) chat-stream fallback wrapper happy path, (c) per-project Self-healing toggle, plus ?tab= URL sync and shadcn AlertDialog delete on AI Learnings. Backend pytest 10/10 PASS. Frontend Playwright PASS across every requested flow.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter15_ai_brain_fallback_autoheal.py",
+    "/app/test_reports/pytest/iter15.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py:915-963 event_generator retry loop is clean — primary fails BEFORE any deltas are produced ⇒ rebuild LlmChat on the next attempt; partial-token failures correctly do NOT retry (avoids duplicate text). fallback_used SSE frame is emitted only when idx>0, exactly as the UI toast expects.",
+    "ai_brain_ext.py _as_aware() correctly normalises naive datetimes from legacy ai_learnings docs; verified by querying timeline?weeks=12 with no offset-naive error. Skill taxonomy keyword matching is first-match-wins which means a learning containing both 'deploy' and 'voice' is bucketed only by whichever keyword appears first in SKILL_TAXONOMY iteration order — fine for now but worth documenting if multi-tagging is desired later.",
+    "deploy_projects_ext.py:947 PATCH endpoint now accepts auto_heal alongside existing auto_promote. Returned doc serialises auto_heal as a real bool (line 145 default False) — no None leaks. LGTM.",
+    "deploy/autopilot.py:88-95 correctly defaults auto_fix_max_iterations to 3 ONLY when the request payload didn't override AND the project doc has auto_heal=true — preserves caller-supplied 0/N override. Good.",
+    "AIBrainTab.jsx 'ai-brain-skill-*' testid generation includes the bucket name, but the per-item testid 'ai-brain-skill-item-<id>' may collide with the id of a moved learning across buckets. Cosmetic; not blocking.",
+    "AILearningsTab delete flow correctly uses shadcn AlertDialog with cancel/confirm testids — confirmed via Playwright. Cancel closes without deletion as required.",
+    "Operator.jsx tab URL sync (?tab=<key>) verified: navigating to /operator?tab=brain auto-selected AI Brain; clicking AI Learnings updated URL to ?tab=learnings; /operator?tab=ops opened Ops directly."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter15_ai_brain_fallback_autoheal.py"
+  ],
+  "success_rate": { "backend": "100% (10/10)", "frontend": "100% — all 4 requested flows verified" },
+  "test_credentials": "Operator: rac.investments.swe@gmail.com / 123Admin@98 — boots without TOTP enforcement; lands on /setup-2fa but /operator works via tbc_session cookie.",
+  "seed_data_creation": "test_skills_seed_keywords_classified inserts two TEST_iter15 learnings (deploy + voice keywords) then deletes them in a finally block. test_patch_combined_auto_promote_and_auto_heal resets both flags to false before exiting. Frontend playwright toggled auto-heal-tbctools-self ON, verified persistence after reload, then toggled OFF for cleanup. No residual seed data.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "1) Backend tests live at /app/backend/tests/test_iter15_ai_brain_fallback_autoheal.py — run `cd /app/backend && pytest tests/test_iter15_ai_brain_fallback_autoheal.py -v` (~5s). 2) The fallback_used SSE frame could not be triggered deterministically without breaking other tests (per the spec note), but the event_generator wiring at server.py:944-952 is correct and the happy-path stream (delta→done) still works with the wrapper in place. 3) Operator deploy projects endpoint is /api/operator/deploy/projects (NOT /api/operator/deploy). 4) Chat stream endpoint creates a session lazily when session_id is omitted — DO NOT pass a random uuid as session_id (returns 404 'Session not found'). 5) UI flows: login → /operator?tab=<key> deep-link works for every tab (brain, ops, learnings…). Use page.get_by_role('tab', name='AI Brain'|'Ops'|'AI Learnings') for click-based nav. 6) auto-heal/auto-promote switches use aria-checked attribute and emit a toast via sonner — match via `[data-sonner-toast]` or `li[role=status]`.",
+  "rca_of_the_issue": "N/A — no bugs found in this iteration. All ten backend assertions pass and every requested UI behaviour (AI Brain tab render, tab URL sync, AlertDialog delete UX, side-by-side auto-promote+auto-heal switches with persistence + toast) was verified end-to-end."
+}

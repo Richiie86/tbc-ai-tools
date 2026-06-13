@@ -85,7 +85,18 @@ async def _autopilot_stream(
     from deploy.auto_fix import commit_patches, request_patches
 
     MAX_ALLOWED = 5  # absolute hard cap; ignore caller values above this.
-    max_iters = max(0, min(int(req.auto_fix_max_iterations or 0), MAX_ALLOWED))
+    requested_iters = int(req.auto_fix_max_iterations or 0)
+    # When the caller didn't ask for auto-fix but the project has the
+    # operator-toggled `auto_heal` flag on, default to 3 iterations. This is
+    # the "self-healing" switch wired in the Operator → Projects UI.
+    if requested_iters == 0:
+        try:
+            proj_doc = await db.deploy_projects.find_one({'id': project_id}, {'auto_heal': 1})
+            if proj_doc and proj_doc.get('auto_heal'):
+                requested_iters = 3
+        except Exception:
+            pass  # never block autopilot on a flag lookup
+    max_iters = max(0, min(requested_iters, MAX_ALLOWED))
 
     try:
         project = await db.deploy_projects.find_one({'id': project_id})

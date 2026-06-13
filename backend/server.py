@@ -57,6 +57,7 @@ from secrets_ext import router as secrets_router
 from self_edit_ext import router as self_edit_router
 from deploy_access_ext import router as deploy_access_router
 from ai_learnings_ext import router as ai_learnings_router
+from ai_brain_ext import router as ai_brain_router
 from sandbox_ai_ext import router as sandbox_ai_router, proj_router as sandbox_ai_proj_router
 from cors_dynamic_ext import (
     DynamicCORSMiddleware,
@@ -140,6 +141,16 @@ MODEL_PROVIDERS = {
 }
 
 DEFAULT_MODEL = 'claude-opus-4-7'
+
+# Ordered fallback chain — when a chat stream errors before producing any
+# tokens we try the next entry. Picking a *different provider* every step
+# so we recover from one-provider outages (which is the common case).
+# Kept short to bound latency and cost.
+CHAT_FALLBACK_CHAIN: list[str] = [
+    'claude-sonnet-4-6',         # Anthropic
+    'gpt-4.1',                   # OpenAI
+    'gemini-3-flash-preview',    # Google
+]
 
 
 def resolve_model(name: Optional[str]):
@@ -882,13 +893,10 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
         effective_prompt = SYSTEM_PROMPT + learnings_block
     else:
         effective_prompt = SYSTEM_PROMPT
-    chat = LlmChat(
-        api_key=llm_key,
-        session_id=session_id,
-        system_message=effective_prompt,
-    )
-    provider, model_name = resolve_model(req.model)
-    chat = chat.with_model(provider, model_name)
+    # The chat instance is built per-attempt inside `event_generator` so the
+    # fallback chain can switch providers cleanly. We resolve the *primary*
+    # model up front purely as a validation step.
+    resolve_model(req.model)
 
     # Replay history into the chat object so context is preserved across stateless requests
     # The library tracks history per-instance; we use stream with the new user message.
@@ -906,18 +914,58 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
 
     async def event_generator():
         full_response = ''
-        try:
-            async for ev in chat.stream_message(UserMessage(text=prompt)):
-                if isinstance(ev, TextDelta):
-                    full_response += ev.content
-                    # SSE event
-                    data = json.dumps({'type': 'delta', 'content': ev.content, 'session_id': session_id})
-                    yield f'data: {data}\n\n'
-                elif isinstance(ev, StreamDone):
+        # Build the model attempt list: primary first, then any fallbacks
+        # not already equal to the primary (de-duped, order preserved).
+        primary = req.model or DEFAULT_MODEL
+        attempts = [primary] + [m for m in CHAT_FALLBACK_CHAIN if m != primary]
+        last_error: Optional[str] = None
+        used_model = primary
+        ok = False
+        for idx, model_id in enumerate(attempts):
+            # Re-build the LlmChat for this attempt — emergentintegrations
+            # binds the model at chat-construction time, so we need a new
+            # instance per attempt to switch providers cleanly.
+            provider_i, model_name_i = resolve_model(model_id)
+            chat_i = LlmChat(
+                api_key=llm_key,
+                session_id=session_id,
+                system_message=effective_prompt,
+            ).with_model(provider_i, model_name_i)
+            try:
+                async for ev in chat_i.stream_message(UserMessage(text=prompt)):
+                    if isinstance(ev, TextDelta):
+                        full_response += ev.content
+                        data = json.dumps({'type': 'delta', 'content': ev.content, 'session_id': session_id})
+                        yield f'data: {data}\n\n'
+                    elif isinstance(ev, StreamDone):
+                        break
+                ok = True
+                used_model = model_id
+                if idx > 0:
+                    # Surface that we recovered with a fallback so the UI can
+                    # render the "retried with X after Y failed" pill.
+                    yield 'data: ' + json.dumps({
+                        'type': 'fallback_used',
+                        'attempted': attempts[:idx],
+                        'failed_reason': last_error or 'unknown',
+                        'final_model': model_id,
+                    }) + '\n\n'
+                break
+            except Exception as e:
+                last_error = str(e)[:300]
+                logger.warning('LLM stream error (model=%s, attempt=%d/%d): %s',
+                               model_id, idx + 1, len(attempts), last_error)
+                # Only retry if we haven't yet produced any deltas — partial
+                # responses are kept and shown, no fallback in that case.
+                if full_response:
                     break
-        except Exception as e:
-            logger.exception('LLM stream error')
-            err = json.dumps({'type': 'error', 'message': str(e)})
+                # else fall through to next model in the chain
+        if not ok and not full_response.strip():
+            err = json.dumps({
+                'type': 'error',
+                'message': last_error or 'All chat models failed. Please try again.',
+                'attempted': attempts,
+            })
             yield f'data: {err}\n\n'
             return
         # Save assistant message
@@ -951,6 +999,7 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
                         {'role': 'assistant', 'content': full_response},
                     ],
                     api_key=llm_key,
+                    chat_model=used_model,
                 )
             )
         except Exception as e:
@@ -1697,6 +1746,7 @@ app.include_router(alerts_router)
 app.include_router(secrets_router)
 app.include_router(deploy_access_router)
 app.include_router(ai_learnings_router)
+app.include_router(ai_brain_router)
 app.include_router(sandbox_ai_router)
 app.include_router(sandbox_ai_proj_router)
 app.include_router(cors_origins_router)

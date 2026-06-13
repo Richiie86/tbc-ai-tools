@@ -208,6 +208,18 @@ export default function Dashboard({ variant = 'tbc1' }) {
         if (ev.type === 'delta') {
           if (ev.session_id && !acquiredSessionId) acquiredSessionId = ev.session_id;
           setStreamText((t) => t + (ev.content || ''));
+        } else if (ev.type === 'fallback_used') {
+          // The primary model failed but a fallback caught the stream.
+          // Surface a small "I retried with X after Y failed" pill — uses
+          // sonner so it lives only as long as the user reads it.
+          const failed = (ev.attempted || []).slice(-1)[0] || 'primary model';
+          const finalModel = ev.final_model || 'fallback';
+          toast.info(`Retried with ${finalModel} after ${failed} failed`, {
+            description: ev.failed_reason
+              ? `Reason: ${String(ev.failed_reason).slice(0, 120)}`
+              : undefined,
+            duration: 6000,
+          });
         } else if (ev.type === 'done') {
           if (ev.session_id && !acquiredSessionId) acquiredSessionId = ev.session_id;
           break;

@@ -55,8 +55,14 @@ async def propose_learning_from_session(
     session_id: str,
     history: list[dict],
     api_key: str,
+    chat_model: str | None = None,
 ) -> None:
-    """Background task — never raises."""
+    """Background task — never raises.
+
+    `chat_model` is the model the *user* was talking to when the learning
+    surfaced. Stored on the proposal so the AI Brain tab can group
+    learnings by model and render per-model maturity.
+    """
     try:
         if not api_key:
             return
@@ -99,6 +105,7 @@ async def propose_learning_from_session(
             'auto_proposed': True,
             'content_hash': h,
             'source_session_id': session_id,
+            'source_model': chat_model,
             'created_at': datetime.now(timezone.utc),
             'updated_at': datetime.now(timezone.utc),
             'created_by_email': 'auto-learner',
