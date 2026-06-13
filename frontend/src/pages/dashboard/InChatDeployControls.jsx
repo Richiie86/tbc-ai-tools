@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Rocket, ShieldCheck, Activity, ChevronDown, Loader2 } from 'lucide-react';
+import { Rocket, ShieldCheck, Activity, ChevronDown, Loader2, Folder } from 'lucide-react';
 import { toast } from 'sonner';
 import api from '../../lib/api';
 import {
@@ -201,6 +201,22 @@ export function InChatDeployControls({ user }) {
           </span>
           <ChevronDown className="h-3 w-3 text-tbc-200/60" />
         </DropdownMenuTrigger>
+        {/* Repo pill — shows operators at a glance which GitHub repo is
+            wired up so they don't second-guess whether Deploy will land
+            on the right code. Hidden when no repo configured yet. */}
+        {selected?.repo && (
+          <a
+            href={`https://github.com/${selected.repo}`}
+            target="_blank"
+            rel="noreferrer"
+            data-testid={`in-chat-repo-pill-${selected.id}`}
+            title={`Open ${selected.repo} on GitHub`}
+            className="ml-1 hidden items-center gap-1 rounded-md border border-tbc-900/60 bg-ink-950 px-1.5 py-0.5 font-mono text-[10px] text-tbc-200/70 hover:text-tbc-100 sm:inline-flex"
+          >
+            <Folder className="h-2.5 w-2.5" />
+            <span className="max-w-[140px] truncate">{selected.repo}</span>
+          </a>
+        )}
         <DropdownMenuContent
           align="end"
           className="max-h-64 w-56 overflow-auto border-tbc-900/60 bg-ink-900 text-tbc-100"

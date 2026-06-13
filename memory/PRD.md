@@ -12,6 +12,15 @@ gold theme. Domain: **tbctools.org**.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
 ## Implemented
+- ✅ **Repo pill + Session status dot** (Feb 2026):
+  - Dashboard header now shows a `📁 Richiie86/tbc-ai-tools` pill right
+    after the project picker — clickable link to GitHub, hidden when
+    no repo is configured yet.
+  - Live `SessionStatusDot` component pings `/api/auth/me` every 30s +
+    on visibility-change. Green pulse = signed in, amber = network
+    issue, red = session expired. Rendered both inline (Dashboard
+    header) and as a corner anchor (Navbar avatar).
+
 - ✅ **Auto-fill operator repo + kill `.com` references** (Feb 2026):
   - New `OPERATOR_DEFAULT_REPO` env var (set to `Richiie86/tbc-ai-tools`
     in `/app/backend/.env`). `_ensure_self_project()` now uses a 3-tier

@@ -5,6 +5,7 @@ import {
   SelectTrigger, SelectValue,
 } from '../../components/ui/select';
 import CreditsBadge from '../../components/CreditsBadge';
+import SessionStatusDot from '../../components/SessionStatusDot';
 import { InChatDeployControls } from './InChatDeployControls';
 import { NotificationsBell } from './NotificationsBell';
 import { DashboardGuideButton } from './DashboardGuideTour';
@@ -44,6 +45,10 @@ export function DashboardHeader({
         {/* Credits badge sits right next to the model picker so users
             always see how much budget they have left while chatting. */}
         <CreditsBadge user={user} testid="dashboard-credits-badge" />
+        {/* Live "am I signed in?" status — green = OK, amber = network
+            issue, red = session expired. Hovers to a tooltip with the
+            current status. */}
+        <SessionStatusDot position="inline" />
         <DashboardGuideButton onOpen={onOpenGuide} />
         <Select value={model} onValueChange={setModel}>
           <SelectTrigger className="h-9 w-[230px] border-slate-700 bg-slate-900 text-slate-100">
