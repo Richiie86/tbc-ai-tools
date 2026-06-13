@@ -1,6 +1,6 @@
 import React from 'react';
 import { Button } from '../../../components/ui/button';
-import { Download, Loader2 } from 'lucide-react';
+import { Download, Loader2, RotateCcw } from 'lucide-react';
 
 /**
  * Bulk-action toolbar that appears above the users table when 1+ users are
@@ -9,7 +9,7 @@ import { Download, Loader2 } from 'lucide-react';
  */
 export function UsersBulkToolbar({
   selectedCount, bulkBusy, onExportCsv, onPause, onResume,
-  onGrantCredits, onSetPlan, onDelete,
+  onGrantCredits, onSetPlan, onDelete, onRestore, onVanish,
 }) {
   if (selectedCount === 0) return null;
   return (
@@ -69,6 +69,23 @@ export function UsersBulkToolbar({
         onClick={onDelete}
       >
         Soft-delete
+      </Button>
+      <Button
+        data-testid="bulk-restore" size="sm" disabled={bulkBusy} variant="outline"
+        title="Undo soft-delete — re-activate the selected accounts"
+        className="border-emerald-500/40 bg-ink-900 text-emerald-300 hover:bg-emerald-500/10"
+        onClick={onRestore}
+      >
+        <RotateCcw className="mr-1.5 h-3 w-3" />
+        Restore
+      </Button>
+      <Button
+        data-testid="bulk-vanish" size="sm" disabled={bulkBusy} variant="outline"
+        title="Permanent delete — vanish the selected accounts from the database. Cannot be undone."
+        className="border-rose-500/60 bg-rose-500/10 text-rose-200 hover:bg-rose-500/20"
+        onClick={onVanish}
+      >
+        Vanish (permanent)
       </Button>
     </div>
   );

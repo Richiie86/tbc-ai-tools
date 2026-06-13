@@ -3,6 +3,9 @@ import { Search } from 'lucide-react';
 import { toast } from 'sonner';
 import api from '../../lib/api';
 import { Input } from '../../components/ui/input';
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '../../components/ui/select';
 import { UsersBulkToolbar } from './users/UsersBulkToolbar';
 import { UsersTable } from './users/UsersTable';
 
@@ -14,6 +17,8 @@ import { UsersTable } from './users/UsersTable';
  */
 export function UsersTab({ users, onChanged }) {
   const [userSearch, setUserSearch] = useState('');
+  // 'active' (default — hides deleted), 'deleted', 'paused', or 'all'.
+  const [statusFilter, setStatusFilter] = useState('active');
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
 
@@ -39,6 +44,7 @@ export function UsersTab({ users, onChanged }) {
     if (selectedIds.size === 0) return;
     let confirmMsg = `${action.replace('_', ' ')} ${selectedIds.size} user${selectedIds.size === 1 ? '' : 's'}?`;
     if (action === 'delete') confirmMsg += '\n\nSoft-delete keeps history but blocks login.';
+    if (action === 'vanish') confirmMsg += '\n\nPERMANENT DELETE — the user documents are removed from the database. This cannot be undone.';
     if (!window.confirm(confirmMsg)) return;
     setBulkBusy(true);
     try {
@@ -132,14 +138,39 @@ export function UsersTab({ users, onChanged }) {
       onChanged?.();
     } catch (e) { toast.error(e?.response?.data?.detail || 'Could not delete user'); }
   };
+  const restoreUser = async (userId, email) => {
+    try {
+      const { data } = await api.post(`/operator/users/${userId}/restore`);
+      toast.success(data?.already_active ? `${email} was already active` : `${email} restored`);
+      onChanged?.();
+    } catch (e) { toast.error(e?.response?.data?.detail || 'Could not restore user'); }
+  };
+  const vanishUser = async (userId, email) => {
+    // The UsersTable AlertDialog already required typing the email — we
+    // re-send it on the wire so the backend re-verifies (defense in depth).
+    try {
+      await api.post(`/operator/users/${userId}/vanish`, { confirm_email: email });
+      toast.success(`${email} permanently deleted`);
+      onChanged?.();
+    } catch (e) { toast.error(e?.response?.data?.detail || 'Could not vanish user'); }
+  };
 
   const filteredUsers = useMemo(() => {
     const q = userSearch.trim().toLowerCase();
-    if (!q) return users;
-    return users.filter(
+    let list = users;
+    if (statusFilter === 'active') {
+      list = list.filter((u) => !u.deleted_at && u.status !== 'deleted' && u.status !== 'paused');
+    } else if (statusFilter === 'deleted') {
+      list = list.filter((u) => u.deleted_at || u.status === 'deleted');
+    } else if (statusFilter === 'paused') {
+      list = list.filter((u) => !u.deleted_at && u.status === 'paused');
+    }
+    // 'all' → no status filter
+    if (!q) return list;
+    return list.filter(
       (u) => u.email.toLowerCase().includes(q) || (u.name || '').toLowerCase().includes(q),
     );
-  }, [users, userSearch]);
+  }, [users, userSearch, statusFilter]);
 
   return (
     <>
@@ -156,6 +187,20 @@ export function UsersTab({ users, onChanged }) {
         <div className="text-xs text-tbc-200/60">
           {filteredUsers.length} of {users.length} users
         </div>
+        <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <SelectTrigger
+            data-testid="users-status-filter"
+            className="h-9 w-36 border-tbc-900/60 bg-ink-900 text-tbc-100"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent className="border-tbc-900/60 bg-ink-900 text-tbc-100">
+            <SelectItem value="active" className="focus:bg-ink-950">Active only</SelectItem>
+            <SelectItem value="paused" className="focus:bg-ink-950">Paused</SelectItem>
+            <SelectItem value="deleted" className="focus:bg-ink-950">Deleted</SelectItem>
+            <SelectItem value="all" className="focus:bg-ink-950">All (incl. deleted)</SelectItem>
+          </SelectContent>
+        </Select>
         {selectedIds.size > 0 && (
           <button
             data-testid="bulk-clear"
@@ -176,6 +221,8 @@ export function UsersTab({ users, onChanged }) {
         onGrantCredits={(credits) => runBulk('grant_credits', { credits })}
         onSetPlan={(plan) => runBulk('set_plan', { plan })}
         onDelete={() => runBulk('delete')}
+        onRestore={() => runBulk('restore')}
+        onVanish={() => runBulk('vanish')}
       />
 
       <UsersTable
@@ -188,6 +235,8 @@ export function UsersTab({ users, onChanged }) {
         onReset2FA={reset2FA}
         onTogglePause={togglePause}
         onDelete={deleteUser}
+        onRestore={restoreUser}
+        onVanish={vanishUser}
       />
     </>
   );

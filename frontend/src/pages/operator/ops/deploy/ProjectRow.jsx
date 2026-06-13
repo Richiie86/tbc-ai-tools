@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../../../../components/ui/button';
 import { Input } from '../../../../components/ui/input';
@@ -50,6 +50,9 @@ export function ProjectRow({ project, onDeployed }) {
   const navigate = useNavigate();
   const domain = useInlineDomain(project, onDeployed);
   const a = useProjectActions(project, onDeployed);
+  // Typed-confirmation gate for the promote AlertDialog (Vercel-style).
+  // Lives here in the row (not the hook) since it's pure dialog state.
+  const [promoteConfirmText, setPromoteConfirmText] = useState('');
 
   return (
     <div
@@ -370,8 +373,13 @@ export function ProjectRow({ project, onDeployed }) {
       />
 
       {/* Promote-to-prod confirmation. Replaces window.confirm() so the
-          visual language matches the rest of our shadcn dialogs. */}
-      <AlertDialog open={a.promoteOpen} onOpenChange={a.setPromoteOpen}>
+          visual language matches the rest of our shadcn dialogs.
+          Vercel-style: requires the operator to type the project name to
+          unlock the Confirm button — eliminates fat-finger promotes. */}
+      <AlertDialog
+        open={a.promoteOpen}
+        onOpenChange={(v) => { a.setPromoteOpen(v); if (!v) setPromoteConfirmText(''); }}
+      >
         <AlertDialogContent
           data-testid={`promote-confirm-${project.id}`}
           className="border-tbc-900/60 bg-ink-950 text-tbc-100"
@@ -382,10 +390,23 @@ export function ProjectRow({ project, onDeployed }) {
             </AlertDialogTitle>
             <AlertDialogDescription className="text-tbc-200/70">
               This ships the last preview deployment to your production domain on Vercel.
-              Make sure the preview looks right — the operation is immediate and visible
-              to every customer.
+              The operation is immediate and visible to every customer — type the project
+              name below to confirm.
             </AlertDialogDescription>
           </AlertDialogHeader>
+          <div className="mt-3">
+            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-tbc-200/60">
+              Type <span className="font-mono text-amber-300">{project.projectName}</span> to confirm
+            </label>
+            <Input
+              data-testid={`promote-confirm-input-${project.id}`}
+              autoFocus
+              value={promoteConfirmText}
+              onChange={(e) => setPromoteConfirmText(e.target.value)}
+              placeholder={project.projectName}
+              className="border-tbc-900/60 bg-ink-900 font-mono text-tbc-100"
+            />
+          </div>
           <AlertDialogFooter>
             <AlertDialogCancel
               data-testid={`promote-cancel-${project.id}`}
@@ -395,8 +416,9 @@ export function ProjectRow({ project, onDeployed }) {
             </AlertDialogCancel>
             <AlertDialogAction
               data-testid={`promote-confirm-btn-${project.id}`}
-              onClick={a.promote}
-              className="bg-amber-500 text-ink-950 hover:bg-amber-400 font-semibold"
+              disabled={promoteConfirmText.trim() !== project.projectName}
+              onClick={() => { setPromoteConfirmText(''); a.promote(); }}
+              className="bg-amber-500 text-ink-950 hover:bg-amber-400 font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Yes, promote to production
             </AlertDialogAction>

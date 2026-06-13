@@ -35,6 +35,9 @@ function Sparkline({ values = [], color = '#d4a028', height = 48 }) {
     <svg
       viewBox={`0 0 ${width} ${height}`}
       preserveAspectRatio="none"
+      aria-hidden="true"
+      focusable="false"
+      role="presentation"
       className="h-full w-full"
     >
       {fillPath && (

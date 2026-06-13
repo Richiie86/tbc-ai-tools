@@ -65,7 +65,29 @@ export default function Operator() {
     } catch { toast.error('Failed to load operator data'); }
     finally { setLoading(false); }
   }, []);
+
+  // Refresh ONLY the stats — keeps the live cards in sync without
+  // re-fetching the whole users table every 25s.
+  const refreshStats = useCallback(async () => {
+    try {
+      const s = await api.get('/operator/stats');
+      setStats(s.data);
+    } catch { /* silent — surface only on the manual refresh button */ }
+  }, []);
+
   useEffect(() => { loadAll(); }, [loadAll]);
+
+  // Real-time-ish: poll stats every 25s while the tab is foregrounded.
+  // We pause when the document is hidden so background tabs don't burn
+  // requests (and unblock immediately on visibility-change).
+  useEffect(() => {
+    let id = setInterval(() => {
+      if (!document.hidden) refreshStats();
+    }, 25_000);
+    const onVis = () => { if (!document.hidden) refreshStats(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => { clearInterval(id); document.removeEventListener('visibilitychange', onVis); };
+  }, [refreshStats]);
 
   return (
     <div className="min-h-screen bg-ink-950">

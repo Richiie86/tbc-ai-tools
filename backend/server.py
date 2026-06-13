@@ -16,7 +16,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, APIRouter, Depends, HTTPException, Request, Response, Query
+from fastapi import FastAPI, APIRouter, Depends, HTTPException, Request, Response, Query, Body
 from fastapi.responses import StreamingResponse
 from starlette.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -443,6 +443,26 @@ async def register(req: RegisterRequest, response: Response):
     return AuthResponse(token=token, pending_2fa=False, requires_2fa_setup=True, user=_public_user(user.model_dump()))
 
 
+async def _purge_test_chat_data() -> dict:
+    """Erase all chat sessions + messages belonging to the seeded preview
+    user. Operator triggers this on login (and via a button) so the stats
+    surface real customer usage, not accumulated QA chatter.
+
+    Returns the deleted counts so the UI can toast a friendly summary.
+    Idempotent: if there's no test user or no sessions, returns zeros.
+    """
+    test_email = 'preview-user@tbctools.dev'
+    tu = await db.users.find_one({'email': test_email}, {'id': 1})
+    if not tu:
+        return {'sessions': 0, 'messages': 0}
+    sessions = [s['id'] async for s in db.chat_sessions.find({'user_id': tu['id']}, {'id': 1})]
+    if not sessions:
+        return {'sessions': 0, 'messages': 0}
+    msg_res = await db.chat_messages.delete_many({'session_id': {'$in': sessions}})
+    sess_res = await db.chat_sessions.delete_many({'user_id': tu['id']})
+    return {'sessions': sess_res.deleted_count, 'messages': msg_res.deleted_count}
+
+
 @api.post('/auth/login', response_model=AuthResponse)
 async def login(req: LoginRequest, response: Response):
     email = req.email.lower()
@@ -454,6 +474,16 @@ async def login(req: LoginRequest, response: Response):
     if user.get('status') == 'paused':
         raise HTTPException(403, 'This account is paused. Contact your administrator to restore access.')
     tv = int(user.get('token_version') or 0)
+    # On an operator login that won't be gated by 2FA, fire the test-data
+    # purge immediately. For 2FA-gated operators we instead purge on
+    # `/auth/2fa/verify` so a failed code doesn't trigger the cleanup.
+    if user.get('role') == 'operator' and not user.get('totp_enabled'):
+        try:
+            purged = await _purge_test_chat_data()
+            if purged.get('sessions') or purged.get('messages'):
+                logger.info('Operator login purge for %s: %s', user.get('email'), purged)
+        except Exception:
+            logger.exception('Operator-login test purge failed (non-fatal)')
     if user.get('totp_enabled'):
         # Issue short-lived pending_2fa token
         token = create_jwt(user['id'], user['email'], user.get('role', 'user'), pending_2fa=True, token_version=tv)
@@ -599,6 +629,15 @@ async def verify_2fa(req: Verify2FARequest, request: Request, response: Response
         raise HTTPException(400, '2FA not enabled')
     if not verify_totp(db_user['totp_secret'], req.code):
         raise HTTPException(400, 'Invalid 2FA code')
+    # Operator finishing 2FA → fire the test-data purge so the stat cards
+    # reflect real customer activity, not accumulated QA chatter.
+    if db_user.get('role') == 'operator':
+        try:
+            purged = await _purge_test_chat_data()
+            if purged.get('sessions') or purged.get('messages'):
+                logger.info('Operator 2FA-login purge for %s: %s', db_user.get('email'), purged)
+        except Exception:
+            logger.exception('Operator-2FA test purge failed (non-fatal)')
     new_token = create_jwt(db_user['id'], db_user['email'], db_user.get('role', 'user'), pending_2fa=False)
     set_session_cookie(response, new_token, pending_2fa=False)
     return AuthResponse(token=new_token, pending_2fa=False, user=_public_user(db_user))
@@ -1102,6 +1141,17 @@ async def op_stats(_: dict = Depends(get_current_operator)):
     return await _compute_op_stats()
 
 
+@api.post('/operator/purge-test-data')
+async def op_purge_test_data(request: Request, op: dict = Depends(get_current_operator)):
+    """Manual trigger for the same purge that fires on operator login.
+    Surfaces deletion counts + the refreshed stats payload so the
+    UI can update without a second round-trip."""
+    purged = await _purge_test_chat_data()
+    await record_audit(op, 'operator.purge_test_data', target=purged, request=request)
+    stats = await _compute_op_stats()
+    return {'purged': purged, 'stats': stats}
+
+
 @api.get('/operator/test-user')
 async def op_get_test_user(_: dict = Depends(get_current_operator)):
     """Return the seeded preview-user credentials so the operator can log
@@ -1225,12 +1275,13 @@ async def op_pause_user(user_id: str, request: Request, op: dict = Depends(get_c
 
 @api.post('/operator/users/{user_id}/delete')
 async def op_delete_user(user_id: str, request: Request, op: dict = Depends(get_current_operator)):
-    """Soft-delete a user — preserves audit trail and referral/payment history."""
+    """Soft-delete a user — preserves audit trail and referral/payment history.
+    Protected roles (operator/admin) are rejected outright."""
     target = await db.users.find_one({'id': user_id}, {'id': 1, 'email': 1, 'role': 1})
     if not target:
         raise HTTPException(404, 'User not found')
-    if target.get('role') == 'operator' and target.get('id') == op.get('sub'):
-        raise HTTPException(400, 'You cannot delete your own operator account.')
+    if (target.get('role') or '').lower() in {'operator', 'admin'}:
+        raise HTTPException(400, 'Operator and admin accounts cannot be deleted. Demote the user first.')
     await db.users.update_one(
         {'id': user_id},
         {'$set': {'deleted_at': datetime.now(timezone.utc), 'status': 'deleted'}},
@@ -1238,6 +1289,57 @@ async def op_delete_user(user_id: str, request: Request, op: dict = Depends(get_
     logger.warning('Operator %s soft-deleted user %s', op.get('email'), target.get('email'))
     await record_audit(op, 'user.delete', target=target.get('email'), request=request)
     return {'success': True, 'email': target.get('email')}
+
+
+@api.post('/operator/users/{user_id}/restore')
+async def op_restore_user(user_id: str, request: Request, op: dict = Depends(get_current_operator)):
+    """Undo a soft-delete — clears `deleted_at` and sets status back to 'active'
+    so the user can log in again. Auditable inverse of /delete."""
+    target = await db.users.find_one({'id': user_id}, {'id': 1, 'email': 1, 'deleted_at': 1})
+    if not target:
+        raise HTTPException(404, 'User not found')
+    if not target.get('deleted_at') and target.get('status') != 'deleted':
+        # Idempotent: already active — surface as a no-op rather than 400.
+        return {'success': True, 'email': target.get('email'), 'already_active': True}
+    await db.users.update_one(
+        {'id': user_id},
+        {'$set': {'status': 'active'}, '$unset': {'deleted_at': ''}},
+    )
+    logger.info('Operator %s restored user %s', op.get('email'), target.get('email'))
+    await record_audit(op, 'user.restore', target=target.get('email'), request=request)
+    return {'success': True, 'email': target.get('email')}
+
+
+@api.post('/operator/users/{user_id}/vanish')
+async def op_vanish_user(
+    user_id: str,
+    request: Request,
+    payload: dict = Body(default_factory=dict),
+    op: dict = Depends(get_current_operator),
+):
+    """Permanently delete a user — HARD DELETE from db.users.
+
+    Defense in depth: the request must echo the target's exact email in
+    `payload.confirm_email`, matching the typed-confirmation field in the
+    UI. Financial history (payments, referrals, audit_log) is intentionally
+    NOT touched — those records carry a `user_id` but no FK and remain as
+    an immutable trail of past activity.
+
+    Protected roles (operator/admin) cannot be vanished from this endpoint
+    regardless of who calls it — they have to be demoted in Mongo first.
+    """
+    target = await db.users.find_one({'id': user_id}, {'id': 1, 'email': 1, 'role': 1})
+    if not target:
+        raise HTTPException(404, 'User not found')
+    if (target.get('role') or '').lower() in {'operator', 'admin'}:
+        raise HTTPException(400, 'Operator and admin accounts cannot be permanently deleted. Demote the user first.')
+    confirm = (payload.get('confirm_email') or '').strip().lower()
+    if confirm != (target.get('email') or '').lower():
+        raise HTTPException(400, "confirm_email must exactly match the target user's email")
+    res = await db.users.delete_one({'id': user_id})
+    logger.warning('Operator %s VANISHED user %s (hard delete)', op.get('email'), target.get('email'))
+    await record_audit(op, 'user.vanish', target=target.get('email'), request=request)
+    return {'success': True, 'email': target.get('email'), 'deleted_count': res.deleted_count}
 
 
 @api.post('/operator/users/bulk')
@@ -1253,7 +1355,7 @@ async def op_bulk_user_action(payload: dict, request: Request, op: dict = Depend
     action = payload.get('action')
     if not isinstance(user_ids, list) or not user_ids:
         raise HTTPException(400, 'user_ids required (non-empty list)')
-    if action not in {'pause', 'resume', 'delete', 'grant_credits', 'set_plan'}:
+    if action not in {'pause', 'resume', 'delete', 'restore', 'vanish', 'grant_credits', 'set_plan'}:
         raise HTTPException(400, 'unsupported action')
 
     op_self_id = op.get('sub')
@@ -1268,15 +1370,36 @@ async def op_bulk_user_action(payload: dict, request: Request, op: dict = Depend
             skipped.append({'id': uid, 'reason': 'not found'})
 
     for t in target_list:
-        # Safety: never let the operator nuke themselves via bulk.
-        if t.get('role') == 'operator' and t.get('id') == op_self_id and action in {'pause', 'delete'}:
-            skipped.append({'id': t['id'], 'reason': 'cannot bulk-modify your own operator account'})
+        # Safety: never let the operator nuke themselves OR any other
+        # operator/admin via bulk. These have to be demoted in Mongo first.
+        if (t.get('role') or '').lower() in {'operator', 'admin'} and action in {'pause', 'delete', 'vanish'}:
+            skipped.append({'id': t['id'], 'reason': f'cannot bulk {action} a {t.get("role")} account'})
             continue
 
         if action == 'pause':
             await db.users.update_one({'id': t['id']}, {'$set': {'status': 'paused'}})
         elif action == 'resume':
-            await db.users.update_one({'id': t['id']}, {'$set': {'status': 'active'}, '$unset': {'deleted_at': ''}})
+            # `resume` only un-pauses — it does NOT undo a soft-delete. Use
+            # the explicit `restore` action for that (matches the per-row UI).
+            await db.users.update_one(
+                {'id': t['id'], 'deleted_at': {'$in': [None, False]}},
+                {'$set': {'status': 'active'}},
+            )
+        elif action == 'restore':
+            # Inverse of `delete` — clears `deleted_at` and reactivates.
+            await db.users.update_one(
+                {'id': t['id']},
+                {'$set': {'status': 'active'}, '$unset': {'deleted_at': ''}},
+            )
+        elif action == 'vanish':
+            # HARD DELETE. Audited but irreversible. The single-row endpoint
+            # requires a typed-email confirmation; bulk callers must opt in
+            # at the UI layer with a strong dialog (no confirm-by-email in
+            # bulk — it would be unergonomic for batches).
+            res = await db.users.delete_one({'id': t['id']})
+            if res.deleted_count == 0:
+                skipped.append({'id': t['id'], 'reason': 'vanish: nothing deleted'})
+                continue
         elif action == 'delete':
             await db.users.update_one(
                 {'id': t['id']},
