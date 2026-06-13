@@ -864,6 +864,7 @@ async def payment_status(session_id: str, http_request: Request, user: dict = De
                 plan_id=tx['plan_id'],
                 amount=float(tx.get('amount', 0)),
                 currency=tx.get('currency', 'usd'),
+                credits_purchased=int(plan['credits']) if plan else 0,
             )
         except Exception:
             pass

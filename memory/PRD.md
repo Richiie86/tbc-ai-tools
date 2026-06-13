@@ -519,3 +519,57 @@ gold theme. Domain: **tbctools.org**.
 
 ## Operator credentials
 See `/app/memory/test_credentials.md`.
+
+## Session 2026-02 — Operator productivity + revenue UX batch
+
+### Implemented
+- **Plans editor — % off + Discount Campaign.** Each plan row now has a
+  `% off` field that auto-recomputes `price` from `regular_price`. Operator
+  can also fire a global campaign (`POST /api/operator/plans/discount-campaign`)
+  to apply or clear a discount across every plan in one click.
+- **Scrolling Marketing Banner.** Public `GET /api/marketing/banner`,
+  operator `PUT /api/operator/marketing/banner` (Marketing tab). Right-to-left
+  ticker mounted globally on every public page; users can dismiss per campaign.
+- **In-chat deploy controls + Preview-Ready Pill.** Operator-only header
+  control with Deploy / Code Review / Health Check buttons bound to a
+  selected deploy project. After a successful redeploy the suggestion
+  morphs into a "Your Preview is ready" pill (sandboxed iframe thumbnail)
+  above the message composer — clicking opens the live URL.
+- **Per-project Settings page** at `/operator/projects/:projectId/settings`
+  with admin email/password (bcrypt-hashed), key-rotation-style env-vars
+  list with masked previews, and Deploy/Redeploy/Health/Code-Review buttons.
+- **GitHub PAT field** in Operator → Security so auto-fix and private-repo
+  code review can commit patches.
+- **Notifications + Messaging.** `notifications_ext.py` adds operator DMs,
+  filterable broadcasts (`only_no_2fa`, `only_paid`, explicit ids), and a
+  one-click `/operator/notify/2fa-reminder` that nudges every user without
+  TOTP. Users see them via the new Bell icon in the dashboard.
+- **Credits Adjuster popover** replaces the hard-coded `+100` button. Add
+  or Deduct with 100/250/500/1000 quick chips or a custom amount.
+- **Auto-credit referrals.** When a referred user pays, the referrer
+  *instantly* receives `referral_pct%` of the credits purchased (e.g. 250
+  credits on a Pro purchase). The earning row is marked `status='credited'`
+  and a bell notification is dropped. UI updated to "Earn 10% on every
+  payment — in credits" with a `credits_awarded` stats card.
+
+### Endpoints added
+- `POST /api/operator/plans/discount-campaign`
+- `GET  /api/marketing/banner`  (public)
+- `PUT  /api/operator/marketing/banner`
+- `GET/PUT /api/operator/deploy/{project_id}/settings`
+- `GET  /api/notifications`, `POST /api/notifications/{id}/read`,
+  `POST /api/notifications/read-all`, `DELETE /api/notifications/{id}`
+- `POST /api/operator/users/{user_id}/notify`,
+  `POST /api/operator/notify/broadcast`,
+  `POST /api/operator/notify/2fa-reminder`,
+  `GET  /api/operator/notify/audiences`
+
+### Tests
+- New: `/app/backend/tests/test_p6_session_features.py` (14 tests),
+  `/app/backend/tests/test_p6_1_referral_credits.py` (2 tests).
+- Full suite: **76 passed, 1 skipped** (no regressions).
+
+### Backlog
+- Audit log filter for deploy_project deletions (P2).
+- End-to-end Vercel/GitHub loop verification with real tokens (P1, blocked on user-provided creds).
+- Email transport for notifications (currently in-app only) (P2).

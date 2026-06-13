@@ -147,17 +147,24 @@ async def my_referral(user: dict = Depends(get_current_user)):
     signup_count = await db.users.count_documents({'referred_by_code': code})
     earn_cursor = db.referral_earnings.aggregate([
         {'$match': {'referrer_user_id': db_user['id']}},
-        {'$group': {'_id': '$status', 'sum': {'$sum': '$commission_amount'}, 'count': {'$sum': 1}}},
+        {'$group': {
+            '_id': '$status',
+            'sum': {'$sum': '$commission_amount'},
+            'credits': {'$sum': {'$ifNull': ['$credits_awarded', 0]}},
+            'count': {'$sum': 1},
+        }},
     ])
     accrued = 0.0
     paid = 0.0
     accrued_n = 0
     paid_n = 0
+    credits_awarded = 0
     async for row in earn_cursor:
+        credits_awarded += int(row.get('credits') or 0)
         if row['_id'] == 'accrued':
             accrued = round(row['sum'], 2)
             accrued_n = row['count']
-        elif row['_id'] == 'paid':
+        elif row['_id'] in ('paid', 'credited'):
             paid = round(row['sum'], 2)
             paid_n = row['count']
 
@@ -173,6 +180,7 @@ async def my_referral(user: dict = Depends(get_current_user)):
             'paid_usd': paid,
             'accrued_count': accrued_n,
             'paid_count': paid_n,
+            'credits_awarded': credits_awarded,
         },
     }
 
@@ -413,8 +421,17 @@ async def record_referral_signup(new_user_id: str, new_user_email: str, code: Op
     await db.users.update_one({'id': new_user_id}, {'$set': {'referred_by_code': code}})
 
 
-async def record_referral_earning(transaction_id: str, paid_user_id: str, paid_user_email: str, plan_id: str, amount: float, currency: str = 'usd'):
-    """Called when a paid transaction is confirmed. If user was referred, accrue commission for referrer."""
+async def record_referral_earning(transaction_id: str, paid_user_id: str, paid_user_email: str, plan_id: str, amount: float, currency: str = 'usd', credits_purchased: int = 0):
+    """Called when a paid transaction is confirmed.
+
+    If the buyer was referred, we accrue a USD commission record for audit and
+    *also* auto-credit the referrer's account with `referral_pct`% of the
+    credits the buyer just received. This makes the referral programme
+    instant — referrers never have to wait for a payout.
+
+    A `user_notifications` entry is created so the referrer sees a bell
+    notification immediately.
+    """
     db = await get_db()
     paid_user = await db.users.find_one({'id': paid_user_id})
     if not paid_user or not paid_user.get('referred_by_code'):
@@ -426,11 +443,17 @@ async def record_referral_earning(transaction_id: str, paid_user_id: str, paid_u
     brand = await get_brand_settings()
     pct = float(brand.get('referral_pct', 10.0))
     commission = round(float(amount) * pct / 100.0, 2)
-    # Idempotency on transaction_id
+    # Auto-credit: referrer earns `pct%` of the credits the buyer received.
+    # We round half-up so the referrer never silently loses a credit.
+    credits_award = int(round(int(credits_purchased or 0) * pct / 100.0))
+
+    # Idempotency on transaction_id — never double-pay.
     if await db.referral_earnings.find_one({'transaction_id': transaction_id}):
         return
+
+    referrer_id = rc['user_id']
     earn = ReferralEarning(
-        referrer_user_id=rc['user_id'],
+        referrer_user_id=referrer_id,
         referred_user_id=paid_user_id,
         referred_user_email=paid_user_email,
         transaction_id=transaction_id,
@@ -440,4 +463,37 @@ async def record_referral_earning(transaction_id: str, paid_user_id: str, paid_u
         commission_amount=commission,
         currency=currency,
     )
-    await db.referral_earnings.insert_one(earn.model_dump())
+    earn_doc = earn.model_dump()
+    # Stash the credits awarded + auto-credited flag on the same record so
+    # we keep one source of truth per transaction.
+    earn_doc['credits_purchased'] = int(credits_purchased or 0)
+    earn_doc['credits_awarded'] = credits_award
+    earn_doc['status'] = 'credited' if credits_award > 0 else 'accrued'
+    earn_doc['credited_at'] = datetime.now(timezone.utc) if credits_award > 0 else None
+    await db.referral_earnings.insert_one(earn_doc)
+
+    if credits_award > 0:
+        await db.users.update_one(
+            {'id': referrer_id},
+            {'$inc': {'credits': credits_award}},
+        )
+        # Drop an in-app notification so the referrer sees the win instantly.
+        try:
+            from notifications_ext import _uid as _notif_uid
+            await db.user_notifications.insert_one({
+                'id': _notif_uid(),
+                'user_id': referrer_id,
+                'from_operator_id': None,
+                'kind': 'broadcast',
+                'subject': f'+{credits_award} credits — referral payout',
+                'body': (
+                    f'Your referral {paid_user_email} just purchased the {plan_id} plan. '
+                    f'You earned {credits_award} credits ({int(pct)}% of {int(credits_purchased or 0)}). '
+                    f'Thanks for spreading the word!'
+                ),
+                'read_at': None,
+                'created_at': datetime.now(timezone.utc),
+            })
+        except Exception:
+            # Notification failure must never block the credit grant.
+            pass

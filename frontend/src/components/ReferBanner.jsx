@@ -52,10 +52,10 @@ export default function ReferBanner() {
         </div>
         <div className="min-w-0 flex-1">
           <div className="text-[11px] font-bold uppercase tracking-wider text-tbc-200">
-            Earn {info.commission_pct}% commission
+            Earn {info.commission_pct}% in credits
           </div>
           <div className="truncate text-[10px] text-tbc-200/60">
-            Share your link, earn on every payment
+            Auto-credited on every payment your referrals make
           </div>
         </div>
       </div>

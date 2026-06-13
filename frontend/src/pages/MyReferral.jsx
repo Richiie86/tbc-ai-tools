@@ -46,8 +46,8 @@ export default function MyReferral() {
         <div className="flex items-center gap-3">
           <div className="grid h-11 w-11 place-items-center rounded-xl bg-tbc-500/15 text-tbc-300"><Share2 className="h-5 w-5" /></div>
           <div>
-            <h1 className="text-3xl font-bold text-tbc-50">Refer & earn {info.commission_pct}%</h1>
-            <p className="text-sm text-tbc-200/60">Every paid subscription from your referrals pays you {info.commission_pct}% of the amount.</p>
+            <h1 className="text-3xl font-bold text-tbc-50">Earn {info.commission_pct}% on every payment — in credits</h1>
+            <p className="text-sm text-tbc-200/60">When a referral subscribes to a plan, we automatically add {info.commission_pct}% of the credits they purchased straight to your balance. No payout step, no waiting.</p>
           </div>
         </div>
 
@@ -55,8 +55,8 @@ export default function MyReferral() {
         <div className="mt-8 grid gap-3 sm:grid-cols-4">
           <Stat icon={MousePointerClick} label="Clicks" value={info.stats.clicks} />
           <Stat icon={Users} label="Signups" value={info.stats.signups} />
-          <Stat icon={Coins} label="Accrued" value={`$${(info.stats.accrued_usd || 0).toFixed(2)}`} sub={`${info.stats.accrued_count} payments`} />
-          <Stat icon={BadgeDollarSign} label="Paid out" value={`$${(info.stats.paid_usd || 0).toFixed(2)}`} sub={`${info.stats.paid_count} payments`} />
+          <Stat icon={Coins} label="Credits earned" value={(info.stats.credits_awarded || 0).toLocaleString()} sub={`${info.stats.accrued_count + info.stats.paid_count} payment${(info.stats.accrued_count + info.stats.paid_count) === 1 ? '' : 's'}`} />
+          <Stat icon={BadgeDollarSign} label="Gross referred" value={`$${((info.stats.accrued_usd || 0) + (info.stats.paid_usd || 0)).toFixed(2)}`} sub="across all referrals" />
         </div>
 
         {/* Link */}
@@ -76,7 +76,7 @@ export default function MyReferral() {
           </div>
           <div className="mt-4">
             <div className="mb-1 text-xs uppercase tracking-wider text-tbc-200/60">Share on social</div>
-            <ShareButtons url={activeUrl} text={`Build apps faster with TBC AI Tools \u2014 join via my link to support me with ${info.commission_pct}% commission:`} compact />
+            <ShareButtons url={activeUrl} text={`Build apps faster with TBC AI Tools — join via my link and I earn ${info.commission_pct}% of your credits as a thank-you:`} compact />
           </div>
         </div>
 
@@ -93,8 +93,8 @@ export default function MyReferral() {
                     <th className="px-4 py-2">Date</th>
                     <th className="px-4 py-2">Referred user</th>
                     <th className="px-4 py-2">Plan</th>
-                    <th className="px-4 py-2">Gross</th>
-                    <th className="px-4 py-2">Commission</th>
+                    <th className="px-4 py-2">Their purchase</th>
+                    <th className="px-4 py-2">Your credits</th>
                     <th className="px-4 py-2">Status</th>
                   </tr>
                 </thead>
@@ -104,10 +104,19 @@ export default function MyReferral() {
                       <td className="px-4 py-2 text-xs text-tbc-200">{new Date(e.created_at).toLocaleString()}</td>
                       <td className="px-4 py-2 text-tbc-100">{e.referred_user_email}</td>
                       <td className="px-4 py-2 capitalize text-tbc-200">{e.plan_id}</td>
-                      <td className="px-4 py-2 text-tbc-200">${e.gross_amount?.toFixed(2)}</td>
-                      <td className="px-4 py-2 font-bold text-tbc-100">${e.commission_amount?.toFixed(2)}</td>
+                      <td className="px-4 py-2 text-tbc-200">
+                        ${e.gross_amount?.toFixed(2)}
+                        {e.credits_purchased ? <span className="ml-1 text-[10px] text-tbc-200/50">· {e.credits_purchased.toLocaleString()} cr</span> : null}
+                      </td>
+                      <td className="px-4 py-2 font-bold text-tbc-100" data-testid={`referral-credits-earned-${e.id}`}>
+                        +{(e.credits_awarded || 0).toLocaleString()} cr
+                      </td>
                       <td className="px-4 py-2">
-                        <span className={`rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wider ${e.status === 'paid' ? 'bg-tbc-500/15 text-tbc-300' : 'bg-amber-500/20 text-amber-300'}`}>{e.status}</span>
+                        <span className={`rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wider ${
+                          e.status === 'credited' ? 'bg-emerald-500/15 text-emerald-300' :
+                          e.status === 'paid' ? 'bg-tbc-500/15 text-tbc-300' :
+                          'bg-amber-500/20 text-amber-300'
+                        }`}>{e.status}</span>
                       </td>
                     </tr>
                   ))}
