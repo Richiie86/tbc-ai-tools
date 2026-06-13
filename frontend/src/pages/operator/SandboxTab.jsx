@@ -24,7 +24,11 @@ import SandboxAIPanel from './SandboxAIPanel';
  */
 export default function SandboxTab() {
   const [info, setInfo] = useState(null);
-  const [cwd, setCwd] = useState('frontend/src');
+  // Start at the repo root so the operator immediately sees what's actually
+  // in `self_repo`. Hardcoding `frontend/src` here used to silently render
+  // "Empty." when the repo didn't have that folder (e.g. a minimal landing
+  // repo) — confusing operators who thought the tree was broken.
+  const [cwd, setCwd] = useState('');
   const [tree, setTree] = useState([]);
   const [loadingTree, setLoadingTree] = useState(false);
   const [openFile, setOpenFile] = useState(null);   // {path, sha, content, original}
@@ -49,14 +53,6 @@ export default function SandboxTab() {
       const { data } = await api.get('/operator/self/tree', { params: { path } });
       setTree(data.entries || []);
       setCwd(data.path || '');
-      if ((data.entries || []).length === 0) {
-        // Surface this proactively so the operator knows whether their
-        // `self_repo` / `self_git_ref` setting is wrong vs. the dir really
-        // being empty.
-        toast.message(`No files at /${data.path || ''} on this branch`, {
-          description: 'Check Operator → Security → Self repo / branch.',
-        });
-      }
     } catch (e) {
       toast.error(e?.response?.data?.detail || 'Failed to load tree');
     } finally {
@@ -64,7 +60,7 @@ export default function SandboxTab() {
     }
   }, []);
 
-  useEffect(() => { loadInfo(); loadTree('frontend/src'); }, [loadInfo, loadTree]);
+  useEffect(() => { loadInfo(); loadTree(''); }, [loadInfo, loadTree]);
 
   const openEntry = async (entry) => {
     if (entry.type === 'dir') {
@@ -83,11 +79,11 @@ export default function SandboxTab() {
   };
 
   const goUp = () => {
-    if (!cwd || cwd === 'frontend/src' || cwd === 'backend' || cwd === 'frontend/public') {
-      loadTree('frontend/src');
+    if (!cwd) {
+      loadTree('');
       return;
     }
-    const parent = cwd.split('/').slice(0, -1).join('/') || 'frontend/src';
+    const parent = cwd.split('/').slice(0, -1).join('/');
     loadTree(parent);
   };
 
@@ -274,7 +270,13 @@ export default function SandboxTab() {
           ) : (
             <ul className="max-h-[420px] overflow-y-auto py-1">
               {tree.length === 0 && (
-                <li className="px-2 py-2 text-[11px] text-tbc-200/50">Empty.</li>
+                <li className="px-2 py-3 text-[11px] text-tbc-200/60">
+                  <div className="font-semibold text-tbc-200">No files at /{cwd || '(root)'}.</div>
+                  <div className="mt-1 text-tbc-200/50">
+                    If this is unexpected, the configured <code className="text-tbc-100">self_repo</code> may
+                    not contain the source tree on this branch. Update it in <strong>Operator → Security</strong>.
+                  </div>
+                </li>
               )}
               {tree.map((e) => (
                 <li key={e.path}>

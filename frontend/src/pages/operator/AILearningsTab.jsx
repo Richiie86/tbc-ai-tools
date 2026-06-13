@@ -4,6 +4,10 @@ import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Textarea } from '../../components/ui/textarea';
 import { Switch } from '../../components/ui/switch';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '../../components/ui/alert-dialog';
 import { toast } from 'sonner';
 import {
   Brain, Plus, Loader2, Trash2, Save, Sparkles, CheckCircle2, XCircle,
@@ -24,6 +28,7 @@ export default function AILearningsTab() {
   const [adding, setAdding] = useState(false);
   const [savingId, setSavingId] = useState(null);
   const [edits, setEdits] = useState({}); // id -> draft text
+  const [confirmDelete, setConfirmDelete] = useState(null); // item pending deletion
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -91,7 +96,6 @@ export default function AILearningsTab() {
   };
 
   const deleteItem = async (item) => {
-    if (!window.confirm(`Delete this learning?\n\n"${item.text.slice(0, 120)}…"`)) return;
     setSavingId(item.id);
     try {
       await api.delete(`/operator/ai-learnings/${item.id}`);
@@ -101,6 +105,7 @@ export default function AILearningsTab() {
       toast.error(e?.response?.data?.detail || 'Delete failed');
     } finally {
       setSavingId(null);
+      setConfirmDelete(null);
     }
   };
 
@@ -186,7 +191,7 @@ export default function AILearningsTab() {
                     onApprove={() => approveProposal(item)}
                     onToggle={() => toggleEnabled(item)}
                     onSave={() => saveEdit(item)}
-                    onDelete={() => deleteItem(item)}
+                    onDelete={() => setConfirmDelete(item)}
                   />
                 ))}
               </ul>
@@ -215,7 +220,7 @@ export default function AILearningsTab() {
                     savingId={savingId}
                     onToggle={() => toggleEnabled(item)}
                     onSave={() => saveEdit(item)}
-                    onDelete={() => deleteItem(item)}
+                    onDelete={() => setConfirmDelete(item)}
                   />
                 ))}
               </ul>
@@ -223,6 +228,43 @@ export default function AILearningsTab() {
           </div>
         </>
       )}
+
+      <AlertDialog
+        open={!!confirmDelete}
+        onOpenChange={(o) => { if (!o) setConfirmDelete(null); }}
+      >
+        <AlertDialogContent
+          data-testid="ai-learning-delete-dialog"
+          className="bg-ink-900 border-tbc-900/60 text-tbc-100"
+        >
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this learning?</AlertDialogTitle>
+            <AlertDialogDescription className="text-tbc-200/70">
+              The AI will stop using this on the next reply. This cannot be undone.
+              {confirmDelete && (
+                <span className="mt-2 block rounded bg-ink-950 p-2 font-mono text-[11px] text-tbc-100">
+                  {confirmDelete.text}
+                </span>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              data-testid="ai-learning-delete-cancel"
+              className="border-tbc-900/60 bg-ink-900 text-tbc-100 hover:bg-ink-950"
+            >
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              data-testid="ai-learning-delete-confirm"
+              onClick={() => confirmDelete && deleteItem(confirmDelete)}
+              className="bg-red-500 text-white hover:bg-red-600 font-bold"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

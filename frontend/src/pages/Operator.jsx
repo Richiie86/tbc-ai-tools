@@ -180,7 +180,7 @@ export default function Operator() {
 
             <StatsToolbar stats={stats} onRefresh={loadAll} />
 
-            <Tabs value={activeTab} onValueChange={setActiveTab} className="mt-10">
+            <Tabs value={activeTab} onValueChange={onTabChange} className="mt-10">
               <TabsList className="bg-ink-900 border border-tbc-900/60 flex flex-wrap h-auto">
                 <TabTrigger value="users"     icon={Users}>Users ({users.length})</TabTrigger>
                 <TabTrigger value="analytics" icon={TrendingUp}>Analytics</TabTrigger>
