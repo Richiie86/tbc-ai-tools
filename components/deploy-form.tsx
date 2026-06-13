@@ -116,6 +116,15 @@ export function DeployForm({ initialProjects }: { initialProjects: Project[] }) 
                 value={repo}
                 onChange={(e) => setRepo(e.target.value)}
               />
+              <p className="text-xs text-muted-foreground">
+                {"The "}
+                <code className="rounded bg-muted px-1 py-0.5 text-[0.7rem]">owner/repo</code>
+                {" from your GitHub URL, e.g. github.com/"}
+                <span className="text-foreground">tbctools/my-app</span>
+                {" → "}
+                <code className="rounded bg-muted px-1 py-0.5 text-[0.7rem]">tbctools/my-app</code>
+                {". Must be connected to your Vercel account."}
+              </p>
             </div>
           </div>
 
