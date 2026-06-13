@@ -117,7 +117,33 @@ export default function AlertsCard() {
     }
   };
 
-  if (!cfg) return null;
+  if (!cfg) {
+    return (
+      <div
+        data-testid="alerts-card-skeleton"
+        className="rounded-xl border border-amber-500/30 bg-gradient-to-br from-amber-500/[0.06] via-ink-900/60 to-ink-900/60 p-4"
+      >
+        <div className="flex items-center gap-2">
+          <div className="grid h-8 w-8 place-items-center rounded-lg bg-amber-500/20 text-amber-300">
+            <Bell className="h-4 w-4" />
+          </div>
+          <div className="flex-1 space-y-2">
+            <div className="h-3 w-28 animate-pulse rounded bg-tbc-900/60" />
+            <div className="h-2 w-64 animate-pulse rounded bg-tbc-900/40" />
+          </div>
+        </div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <div className="h-9 animate-pulse rounded bg-tbc-900/40" />
+          <div className="h-9 animate-pulse rounded bg-tbc-900/40" />
+        </div>
+        <div className="mt-3 space-y-3">
+          <div className="h-9 animate-pulse rounded bg-tbc-900/40" />
+          <div className="h-9 animate-pulse rounded bg-tbc-900/40" />
+          <div className="h-9 animate-pulse rounded bg-tbc-900/40" />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
