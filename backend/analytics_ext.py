@@ -105,6 +105,21 @@ async def compute_30d_analytics() -> dict:
     revenue_map = await _series_revenue(start)
     signup_map = await _series_count(db.users, start)
     referral_map = await _series_count(db.referral_earnings, start)
+    # Founder royalty owed in the window — sum of `royalty_amount` per
+    # day where status is anything (owed/remitted/disputed all count).
+    royalty_pipeline = [
+        {'$match': {'occurred_at': {'$gte': start}}},
+        {'$group': {
+            '_id': {'$dateToString': {'format': '%Y-%m-%d', 'date': '$occurred_at'}},
+            'total': {'$sum': '$royalty_amount'},
+        }},
+    ]
+    royalty_map: dict[str, float] = {}
+    async for row in db.royalties.aggregate(royalty_pipeline):
+        try:
+            royalty_map[row['_id']] = round(float(row.get('total') or 0), 2)
+        except Exception:
+            royalty_map[row['_id']] = 0.0
     # Birthday rewards leave a notification with this exact subject (see
     # birthday_ext.py). Counting those gives us "rewards issued per day".
     birthday_map = await _series_count(
@@ -118,6 +133,7 @@ async def compute_30d_analytics() -> dict:
     revenue = _flat(revenue_map, 0.0)
     signups = _flat(signup_map)
     referrals = _flat(referral_map)
+    royalty = _flat(royalty_map, 0.0)
     birthday = _flat(birthday_map)
 
     revenue_30d = round(sum(revenue), 2)
@@ -128,12 +144,14 @@ async def compute_30d_analytics() -> dict:
             'revenue': revenue,
             'signups': signups,
             'referrals': referrals,
+            'royalty': royalty,
             'birthday': birthday,
         },
         'totals': {
             'revenue_30d': revenue_30d,
             'signups_30d': sum(signups),
             'referrals_30d': sum(referrals),
+            'royalty_30d': round(sum(royalty), 2),
             'birthday_30d': sum(birthday),
             # 30d revenue is already a monthly window, so MRR ≈ revenue_30d.
             # Operator can read it as "trailing monthly recurring proxy".

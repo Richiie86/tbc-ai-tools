@@ -48,11 +48,12 @@ def test_analytics_shape_is_correct():
     assert isinstance(body.get('days'), list) and len(body['days']) == 30
     assert body.get('currency') == 'usd'
     series = body.get('series') or {}
-    for key in ('revenue', 'signups', 'referrals', 'birthday'):
+    for key in ('revenue', 'signups', 'referrals', 'royalty', 'birthday'):
         assert key in series, f'missing series: {key}'
         assert len(series[key]) == 30, f'series {key} should be 30 wide'
     totals = body.get('totals') or {}
-    for key in ('revenue_30d', 'signups_30d', 'referrals_30d', 'birthday_30d', 'mrr_estimate'):
+    for key in ('revenue_30d', 'signups_30d', 'referrals_30d', 'royalty_30d',
+                'birthday_30d', 'mrr_estimate'):
         assert key in totals, f'missing total: {key}'
 
 

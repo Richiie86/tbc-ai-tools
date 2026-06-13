@@ -225,6 +225,24 @@ export default function AnalyticsTab() {
               {((totals.birthday_30d || 0) / 30).toFixed(2)}
             </span>
           </div>
+          <div
+            data-testid="snapshot-founder-royalty"
+            className="sm:col-span-2 mt-1 flex items-center gap-2 rounded-md border border-tbc-500/30 bg-tbc-500/5 px-2 py-1.5"
+            title="10% of every paid transaction is owed to the founder. Baked into founder_royalty.py."
+          >
+            <span className="inline-flex items-center gap-1 rounded-full bg-tbc-500/20 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-tbc-300">
+              <TrendingUp className="h-2.5 w-2.5" /> Royalty 10%
+            </span>
+            <span className="text-tbc-200/60">Founder royalty owed (30d):</span>{' '}
+            <span className="font-bold text-tbc-100">
+              {fmtUsd.format(totals.royalty_30d || 0)}
+            </span>
+            <span className="ml-auto text-[10px] text-tbc-200/40">
+              {totals.revenue_30d > 0
+                ? `${Math.round(((totals.royalty_30d || 0) / totals.revenue_30d) * 100)}% of revenue`
+                : ''}
+            </span>
+          </div>
         </div>
       </div>
 
