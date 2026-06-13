@@ -109,3 +109,23 @@ async def op_patch_settings(
         {'_id': _DOC_ID}, {'$set': update}, upsert=True,
     )
     return await get_app_settings()
+
+
+@op_router.get('/lockdown-audit')
+async def lockdown_audit(
+    limit: int = 100,
+    _op: dict = Depends(get_current_operator),
+):
+    """Returns the last N blocked login/register attempts that hit the
+    503 gate while lockdown was ON. Pure audit log — useful both for
+    "who tried during maintenance?" and as evidence of any probing
+    activity. Newest-first.
+    """
+    cursor = db.lockdown_audit.find({}).sort('created_at', -1).limit(max(1, min(limit, 500)))
+    out = []
+    async for d in cursor:
+        d.pop('_id', None)
+        if isinstance(d.get('created_at'), object) and hasattr(d['created_at'], 'isoformat'):
+            d['created_at'] = d['created_at'].isoformat()
+        out.append(d)
+    return {'entries': out, 'count': len(out)}

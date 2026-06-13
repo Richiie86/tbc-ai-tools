@@ -4,7 +4,7 @@ import { Button } from '../../components/ui/button';
 import { Textarea } from '../../components/ui/textarea';
 import { Switch } from '../../components/ui/switch';
 import { toast } from 'sonner';
-import { Megaphone, Lock, Save, Loader2 } from 'lucide-react';
+import { Megaphone, Lock, Save, Loader2, History, ChevronDown, ChevronUp } from 'lucide-react';
 
 /**
  * Operator-controlled app-wide toggles:
@@ -24,6 +24,22 @@ export default function AppSettingsCard() {
   // Live preview of the banner — renders inline below the textarea so
   // the operator sees their copy before publishing.
   const [showPreview, setShowPreview] = useState(false);
+  const [auditOpen, setAuditOpen] = useState(false);
+  const [auditEntries, setAuditEntries] = useState(null);
+
+  const loadAudit = useCallback(async () => {
+    try {
+      const { data } = await api.get('/operator/app-settings/lockdown-audit', { params: { limit: 100 } });
+      setAuditEntries(data.entries || []);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Audit load failed');
+      setAuditEntries([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (auditOpen && auditEntries === null) loadAudit();
+  }, [auditOpen, auditEntries, loadAudit]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -65,7 +81,7 @@ export default function AppSettingsCard() {
     try {
       await api.patch('/operator/app-settings', { banner_enabled: next });
       toast.success(next ? 'Banner ON · visible to everyone' : 'Banner OFF');
-    } catch (e) {
+    } catch (_e) {
       toast.error('Could not toggle banner');
       setBannerEnabled(!next);  // rollback
     }
@@ -80,7 +96,7 @@ export default function AppSettingsCard() {
     try {
       await api.patch('/operator/app-settings', { login_lockdown_enabled: next });
       toast.success(next ? '🔒 Login lockdown ON · only operators can sign in' : '🔓 Lockdown OFF');
-    } catch (e) {
+    } catch (_e) {
       toast.error('Could not toggle lockdown');
       setLockdown(!next);  // rollback
     }
@@ -179,6 +195,53 @@ export default function AppSettingsCard() {
         {lockdown && (
           <div className="mt-3 rounded border border-amber-500/40 bg-amber-500/[0.06] p-2 text-[11px] text-amber-200">
             🔒 Lockdown is ACTIVE. Existing user sessions remain valid until they log out, but no new logins or sign-ups can complete.
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={() => setAuditOpen((o) => !o)}
+          data-testid="lockdown-audit-toggle"
+          className="mt-3 flex w-full items-center justify-between rounded-md border border-tbc-900/60 bg-ink-900/40 px-2.5 py-1.5 text-[11px] text-tbc-200/70 hover:text-tbc-100"
+        >
+          <span className="flex items-center gap-1.5">
+            <History className="h-3 w-3" />
+            Lockdown audit log
+            {auditEntries && auditEntries.length > 0 && (
+              <span className="rounded-full bg-amber-500/15 px-1.5 text-[9px] text-amber-300">
+                {auditEntries.length}
+              </span>
+            )}
+          </span>
+          {auditOpen ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+        </button>
+        {auditOpen && (
+          <div className="mt-2" data-testid="lockdown-audit-panel">
+            {auditEntries === null ? (
+              <div className="grid place-items-center py-4"><Loader2 className="h-4 w-4 animate-spin text-tbc-400" /></div>
+            ) : auditEntries.length === 0 ? (
+              <div className="rounded border border-dashed border-tbc-900/60 p-3 text-center text-[10px] text-tbc-200/50">
+                🎉 No blocked attempts. Either lockdown has never been on, or no one tried to sign in.
+              </div>
+            ) : (
+              <ul className="max-h-64 space-y-1 overflow-auto">
+                {auditEntries.map((e, i) => (
+                  <li
+                    key={`${e.created_at}-${i}`}
+                    data-testid={`lockdown-audit-row-${i}`}
+                    className="rounded bg-ink-950 px-2 py-1 text-[10px] text-tbc-100"
+                  >
+                    <span className={`mr-1.5 rounded-full px-1.5 py-0.5 text-[9px] uppercase tracking-wider ${
+                      e.kind === 'register' ? 'bg-sky-500/20 text-sky-300' : 'bg-amber-500/20 text-amber-300'
+                    }`}>
+                      {e.kind}
+                    </span>
+                    <span className="font-mono">{e.email}</span>
+                    <span className="ml-2 text-tbc-200/40">{e.ip}</span>
+                    <span className="ml-2 text-tbc-200/40">{e.created_at?.slice(0, 19).replace('T', ' ')}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         )}
       </div>

@@ -537,7 +537,7 @@ async def root():
 
 # ===== AUTH =====
 @api.post('/auth/register', response_model=AuthResponse)
-async def register(req: RegisterRequest, response: Response):
+async def register(req: RegisterRequest, response: Response, request: Request):
     email = req.email.lower()
     # Hard-block the operator email from being claimed via the public
     # register form — it's reserved for the seeded operator account.
@@ -548,6 +548,16 @@ async def register(req: RegisterRequest, response: Response):
     # Login lockdown also blocks new registrations — the kill-switch is
     # meant to take the entire app private, not just login.
     if await is_login_locked_down():
+        try:
+            await db.lockdown_audit.insert_one({
+                'email': email,
+                'ip': request.client.host if request.client else 'unknown',
+                'user_agent': request.headers.get('user-agent', '')[:400],
+                'kind': 'register',
+                'created_at': datetime.now(timezone.utc),
+            })
+        except Exception:
+            pass
         raise HTTPException(
             503,
             'New sign-ups are temporarily disabled. Please try again later.',
@@ -633,7 +643,7 @@ async def _purge_test_chat_data() -> dict:
 
 
 @api.post('/auth/login', response_model=AuthResponse)
-async def login(req: LoginRequest, response: Response):
+async def login(req: LoginRequest, response: Response, request: Request):
     email = req.email.lower()
     user = await db.users.find_one({'email': email})
     if not user or not verify_password(req.password, user['password_hash']):
@@ -644,6 +654,18 @@ async def login(req: LoginRequest, response: Response):
     # password check so we don't leak the fact that lockdown is on to
     # random unauthenticated probes.
     if user.get('role') != 'operator' and await is_login_locked_down():
+        # Audit-log the blocked attempt so the operator can see who
+        # tried during lockdown. Fire-and-forget — never block the 503.
+        try:
+            await db.lockdown_audit.insert_one({
+                'email': email,
+                'ip': request.client.host if request.client else 'unknown',
+                'user_agent': request.headers.get('user-agent', '')[:400],
+                'kind': 'login',
+                'created_at': datetime.now(timezone.utc),
+            })
+        except Exception:
+            pass
         raise HTTPException(
             503,
             'Login is temporarily restricted to operators only. Please try again later.',
