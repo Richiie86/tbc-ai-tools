@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import api from '../../lib/api';
 import { Button } from '../../components/ui/button';
+import { Input } from '../../components/ui/input';
 import { Textarea } from '../../components/ui/textarea';
 import { Switch } from '../../components/ui/switch';
 import {
@@ -9,7 +10,7 @@ import {
 } from '../../components/ui/alert-dialog';
 import { toast } from 'sonner';
 import {
-  Brain, Plus, Loader2, Trash2, Save, Sparkles, CheckCircle2, XCircle, FileText,
+  Brain, Plus, Loader2, Trash2, Save, Sparkles, CheckCircle2, XCircle, FileText, Archive,
 } from 'lucide-react';
 
 /**
@@ -30,20 +31,54 @@ export default function AILearningsTab() {
   const [confirmDelete, setConfirmDelete] = useState(null); // item pending deletion
   const [digest, setDigest] = useState(null); // {markdown, count, fallback} or null
   const [digestLoading, setDigestLoading] = useState(false);
+  const [includeArchived, setIncludeArchived] = useState(false);
+  // Per-operator GC window (days). Persisted to localStorage so toggling
+  // back to the tab keeps the setting. Backend default is 14.
+  const [gcDays, setGcDays] = useState(() => {
+    const raw = parseInt(localStorage.getItem('ai_learnings_gc_days') || '14', 10);
+    return Number.isFinite(raw) && raw > 0 && raw <= 365 ? raw : 14;
+  });
+  const [gcRunning, setGcRunning] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const { data } = await api.get('/operator/ai-learnings');
+      const { data } = await api.get('/operator/ai-learnings', {
+        params: { include_archived: includeArchived },
+      });
       setItems(data || []);
     } catch (e) {
       toast.error(e?.response?.data?.detail || 'Failed to load learnings');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [includeArchived]);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    localStorage.setItem('ai_learnings_gc_days', String(gcDays));
+  }, [gcDays]);
+
+  const runGc = async () => {
+    setGcRunning(true);
+    try {
+      const { data } = await api.post('/operator/ai-learnings/gc', null, {
+        params: { days: gcDays },
+      });
+      const n = data?.archived_count || 0;
+      toast.success(
+        n === 0
+          ? `Nothing to archive — no auto-proposals older than ${gcDays} days`
+          : `Archived ${n} stale auto-proposal${n === 1 ? '' : 's'}`,
+      );
+      load();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'GC failed');
+    } finally {
+      setGcRunning(false);
+    }
+  };
 
   const addLearning = async () => {
     const text = newText.trim();
@@ -170,6 +205,50 @@ export default function AILearningsTab() {
             ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Generating…</>
             : <><FileText className="mr-1.5 h-4 w-4" />Weekly digest</>}
         </Button>
+      </div>
+
+      {/* GC controls — operator-tuned archive window for unapproved
+          auto-proposals. Backend default is 14 days; this UI persists the
+          operator's preference to localStorage and lets them archive on
+          demand without waiting for the nightly scheduler. */}
+      <div
+        className="flex flex-wrap items-center gap-3 rounded-md border border-tbc-900/60 bg-ink-900/40 p-2.5 text-[11px] text-tbc-200/80"
+        data-testid="ai-learnings-gc-bar"
+      >
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={includeArchived}
+            onChange={(e) => setIncludeArchived(e.target.checked)}
+            data-testid="ai-learnings-show-archived"
+          />
+          Show archived
+        </label>
+        <div className="ml-auto flex items-center gap-2">
+          <span>Archive auto-proposals older than</span>
+          <Input
+            type="number"
+            min={1}
+            max={365}
+            value={gcDays}
+            onChange={(e) => setGcDays(Math.max(1, Math.min(365, parseInt(e.target.value || '14', 10) || 14)))}
+            data-testid="ai-learnings-gc-days"
+            className="h-7 w-16 bg-ink-950 border-tbc-900/60 text-tbc-100 text-center"
+          />
+          <span>days</span>
+          <Button
+            onClick={runGc}
+            disabled={gcRunning}
+            data-testid="ai-learnings-gc-run"
+            size="sm"
+            variant="outline"
+            className="h-7 border-tbc-900/60 bg-ink-900 text-tbc-100 hover:bg-ink-950"
+          >
+            {gcRunning
+              ? <Loader2 className="h-3 w-3 animate-spin" />
+              : <><Archive className="mr-1 h-3 w-3" />Run GC</>}
+          </Button>
+        </div>
       </div>
 
       {digest && (
@@ -368,6 +447,14 @@ function LearningRow({ item, isPending, edits, setEdits, savingId, onApprove, on
                 title="Auto-proposed from a real runtime error after high-confidence RCA"
               >
                 from error
+              </span>
+            )}
+            {item.archived && (
+              <span
+                className="ml-1.5 rounded-full bg-tbc-200/15 px-1.5 py-0.5 text-[9px] text-tbc-200/60"
+                title="Garbage-collected — operator never approved this auto-proposal within the GC window"
+              >
+                archived
               </span>
             )}
           </div>

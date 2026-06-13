@@ -1,0 +1,43 @@
+{
+  "summary": "Iter18 — verified all 3 polish items end-to-end. Backend: 9/10 PASS, 1 SKIPPED (auto-page throttle). All severity classifier patterns (critical/high/warning/info) returned correct values in ingest response; severity persists on operator GET; pre-existing docs without severity field correctly default to 'info' via _serialize. GC manual trigger returns {archived_count, cutoff}, is idempotent (second call returns 0), correctly archives a seeded 30-day-old auto-proposal, default list omits archived, include_archived=true includes it, serialized payload exposes `archived` boolean. Frontend: GC bar visible on /operator?tab=learnings with all 3 controls (show-archived checkbox, gc-days input defaulting to 14, run-gc button); toggling checkbox triggers GET ?include_archived=true; changing gc-days persists to localStorage 'ai_learnings_gc_days'; Run GC fires POST /ai-learnings/gc. Archived pill renders with class containing 'text-tbc-200/60' and correct tooltip. Errors tab shows 6 severity badges with correct colors (red for critical with 🚨, amber for high, gray for warning); 'some routine log' (info) correctly shows no badge.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "POST /api/runtime-errors (critical severity branch)",
+        "issue": "_maybe_page_operator() in runtime_errors_ext.py:103-126 calls await send_email(...) BEFORE inserting the runtime_error_pages throttle row. send_email throws RuntimeError('RESEND_API_KEY not configured') in this preview env (and presumably any env without Resend). The outer except catches it and logs 'auto-page operator failed' — but the throttle insert is skipped. Net effect: in any environment where email is misconfigured or transiently failing, EVERY critical ingest will re-attempt send_email indefinitely (no throttle). Confirmed in /var/log/supervisor/backend.err.log. The test was set to skip rather than fail in this case (per spec note), but the design is fragile."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter18_gc_severity_autopage.py",
+    "/app/test_reports/pytest/iter18.xml"
+  ],
+  "action_items": [
+    "RECOMMENDED FIX (runtime_errors_ext.py _maybe_page_operator): swap the order — insert the throttle row FIRST, then call send_email inside its own try/except. Otherwise the throttle is silently disabled whenever email fails, which is exactly when you want throttling most. Suggested change: move db.runtime_error_pages.insert_one({...}) before the await send_email(...) and wrap send_email in its own try/except so a failed email still leaves the throttle row in place."
+  ],
+  "critical_code_review_comments": [
+    "runtime_errors_ext.py:103-126 — auto-page email-then-insert ordering is the wrong way around (see action_items). Insert-first design is standard for throttle/idempotency keys (e.g. Sentry's quota table).",
+    "ai_learnings_ext.py:119-142 archive_stale_proposals uses update_many with `archived:{$ne:true}` filter — correctly idempotent. The `archived_at` field is set on first archive only (good — second run skips). One minor improvement: the response could include the matched IDs for audit, currently only modified_count returned.",
+    "Frontend AILearningsTab.jsx:34-41 — gcDays state initialiser reads localStorage synchronously inside useState lazy init. Good pattern. Bounds-check (1-365) is enforced in onChange but not when reading from localStorage initially — fixed by the Number.isFinite + range guard already in place.",
+    "Frontend ErrorsTab.jsx:228-241 severity badge — 'critical 🚨' rendered as text inside badge; if accessibility matters, the emoji needs aria-hidden + a screen-reader-only label. Cosmetic."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter18_gc_severity_autopage.py"
+  ],
+  "success_rate": {
+    "backend": "90% (9/10 PASS, 1 SKIPPED due to env email config — see minor issue)",
+    "frontend": "100% (GC bar, localStorage persistence, GC fire, archived pill, severity badges all verified)"
+  },
+  "test_credentials": "Operator: rac.investments.swe@gmail.com / 123Admin@98 — boots without TOTP enforcement; on first login redirects to /setup-2fa, just navigate directly to /operator.",
+  "seed_data_creation": "Test creates and deletes TEST_iter18_stale_*, TEST_iter18_nosev_*, TEST_iter18_archived_pill_*. All cleaned at end of run. One transient runtime_errors doc per parametrize case (signature: e.g. 'stripe payment declined / cannot connect to backend [<hex>]') is left behind because the public ingest endpoint has no operator delete in the test flow — these will be visible in the operator Errors dashboard as new entries but are bounded (4 per run).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "1) Backend tests at /app/backend/tests/test_iter18_gc_severity_autopage.py — run `cd /app/backend && pytest tests/test_iter18_gc_severity_autopage.py -v`. 2) The auto-page throttle test SKIPS gracefully when Resend isn't configured (the page row never gets inserted because send_email throws first). To make it PASS in CI, either configure RESEND_API_KEY env var OR fix runtime_errors_ext.py to insert-first-then-email (recommended — see action_items). 3) Frontend UI selectors verified: ai-learnings-gc-bar, ai-learnings-show-archived, ai-learnings-gc-days, ai-learnings-gc-run, error-severity-<id>. Archived pill is matched by `span[title*=\"Garbage-collected\"]` (no data-testid on the pill itself). 4) Operator Quick Guide tour modal still pops on first /operator load — `get_by_role('button', name='Skip tour').click(force=True)` clears it. 5) Logged-in user is forced through /setup-2fa redirect even though TOTP isn't enforced; just navigate to /operator?tab=learnings directly.",
+  "rca_of_the_issue": "Auto-page throttle skip — RCA: in runtime_errors_ext.py _maybe_page_operator(), the line ordering is `await send_email(...)` then `db.runtime_error_pages.insert_one(...)`. Because send_email raises RuntimeError when RESEND_API_KEY is missing, the insert never runs and the outer except logs 'auto-page operator failed'. Reproduction: POST /api/runtime-errors with `{message:'database connection lost', source:'backend'}`; observe in /var/log/supervisor/backend.err.log: `auto-page operator failed ... RuntimeError: RESEND_API_KEY not configured`; query db.runtime_error_pages — no row. Fix: invert the order so the page row is inserted first (the throttle mechanism), then attempt send_email inside an inner try/except so an email failure doesn't break the throttle invariant."
+}

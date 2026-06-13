@@ -225,6 +225,20 @@ function ErrorRow({ err, expanded, onToggle, running, onRunRCA, onDismiss, onDel
             <span className={`rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider ${sourceColor}`}>
               {err.source}
             </span>
+            {err.severity && err.severity !== 'info' && (
+              <span
+                className={`rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider ${
+                  err.severity === 'critical' ? 'bg-red-500/15 text-red-300 border border-red-500/30' :
+                  err.severity === 'high'     ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30' :
+                  'bg-tbc-200/10 text-tbc-200/70'
+                }`}
+                data-testid={`error-severity-${err.id}`}
+                title={err.severity === 'critical' ? 'Auto-paged operator on first occurrence' : ''}
+              >
+                {err.severity}
+                {err.severity === 'critical' && ' 🚨'}
+              </span>
+            )}
             <span className="text-[10px] text-tbc-200/40">
               ×{err.count} · last {err.last_seen_at?.slice(0, 19).replace('T', ' ')}
             </span>

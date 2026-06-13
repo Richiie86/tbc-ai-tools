@@ -60,6 +60,74 @@ def _signature(report: ErrorReport) -> str:
     return base.strip()[:300] or 'unknown'
 
 
+# Severity heuristics — keyword patterns. First match wins. Kept small +
+# readable on purpose: adding a category is one line. Severity drives the
+# auto-page gate: anything `critical` triggers an immediate operator
+# email; `warning` and below are silent.
+import re as _re_sev
+SEVERITY_RULES: list[tuple[str, str]] = [
+    ('critical', r'\b(out of memory|segmentation fault|database connection|connection refused|cannot connect|deadlock|stripe.*declined|payment.*failed|chunkloaderror)\b'),
+    ('high',     r'\b(unauthorized|forbidden|csrf|cors|invalid token|jwt|webhook.*fail|500|502|503|504)\b'),
+    ('warning',  r'\b(typeerror|referenceerror|undefined is not|cannot read|null is not)\b'),
+]
+
+
+def _classify_severity(report: ErrorReport) -> str:
+    """Returns 'critical' | 'high' | 'warning' | 'info'. Pure function,
+    safe to call inline during ingest. The same heuristic is used for
+    backend exceptions via _signature(report)."""
+    text = f'{report.message or ""} {(report.stack or "")[:1000]}'.lower()
+    for sev, pattern in SEVERITY_RULES:
+        if _re_sev.search(pattern, text):
+            return sev
+    return 'info'
+
+
+async def _maybe_page_operator(doc: dict) -> None:
+    """Fire-and-forget operator notification when severity == 'critical'.
+    Throttled to once per (signature, 1h) so a runaway loop doesn't spam
+    inboxes. Never raises — capture flow must always succeed."""
+    try:
+        if doc.get('severity') != 'critical':
+            return
+        sig = doc.get('signature', '')
+        # Last-page check — skip if we paged for this signature in the
+        # past hour.
+        from datetime import timedelta
+        one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
+        recent_page = await db.runtime_error_pages.find_one({
+            'signature': sig, 'paged_at': {'$gte': one_hour_ago},
+        })
+        if recent_page:
+            return
+        from email_utils import send_email
+        settings = await db.settings.find_one({'_id': 'payment_settings'}) or {}
+        op_email = settings.get('operator_email') or (
+            (await db.users.find_one({'role': 'operator'}, {'email': 1})) or {}
+        ).get('email')
+        if not op_email:
+            return
+        subject = f'🚨 Critical error: {doc.get("message", "")[:80]}'
+        body = (
+            f'<p><strong>Severity:</strong> CRITICAL · <strong>Source:</strong> {doc.get("source")}'
+            f' · <strong>Count:</strong> {doc.get("count", 1)}</p>'
+            f'<p><strong>Message:</strong></p>'
+            f'<pre style="background:#1f1f23;color:#f5f5f5;padding:12px;border-radius:6px;font-family:monospace;">'
+            f'{(doc.get("message") or "")[:600]}</pre>'
+            + (f'<p><strong>URL:</strong> {doc.get("url")}</p>' if doc.get("url") else '')
+            + '<p>Open <strong>Operator → Errors</strong> to run RCA and dispatch a fix.</p>'
+        )
+        await send_email(op_email, subject, body)
+        await db.runtime_error_pages.insert_one({
+            'signature': sig,
+            'error_id': doc.get('id'),
+            'paged_at': datetime.now(timezone.utc),
+            'paged_to': op_email,
+        })
+    except Exception:
+        logger.exception('auto-page operator failed')
+
+
 # ---------- public ingest ----------
 
 # Per-IP throttle. In-memory dict — fine for a single-pod preview. For
@@ -94,6 +162,7 @@ async def ingest(report: ErrorReport, request: Request):
         # toast because we rate-limited the error report itself.
         return {'accepted': False, 'reason': 'rate_limited'}
     sig = _signature(report)
+    severity = _classify_severity(report)
     now = datetime.now(timezone.utc)
     doc = {
         'id': str(uuid.uuid4()),
@@ -101,6 +170,7 @@ async def ingest(report: ErrorReport, request: Request):
         'message': report.message[:4_000],
         'stack': (report.stack or '')[:20_000],
         'source': report.source,
+        'severity': severity,
         'url': report.url,
         'user_agent': report.user_agent,
         'user_id': report.user_id,
@@ -125,9 +195,14 @@ async def ingest(report: ErrorReport, request: Request):
                                             'stack': doc['stack'] or existing.get('stack', ''),
                                             'url': doc['url'] or existing.get('url')}},
         )
+        # Re-fetch so the paging heuristic has the updated count.
+        existing['count'] = int(existing.get('count', 0)) + 1
+        existing['severity'] = existing.get('severity') or severity
+        await _maybe_page_operator(existing)
         return {'accepted': True, 'merged_into': existing['id']}
     await db.runtime_errors.insert_one(doc)
-    return {'accepted': True, 'id': doc['id']}
+    await _maybe_page_operator(doc)
+    return {'accepted': True, 'id': doc['id'], 'severity': severity}
 
 
 # ---------- operator read/RCA ----------
@@ -139,6 +214,7 @@ def _serialize(d: dict) -> dict:
         'message': d.get('message'),
         'stack': d.get('stack'),
         'source': d.get('source'),
+        'severity': d.get('severity') or 'info',
         'url': d.get('url'),
         'user_id': d.get('user_id'),
         'count': int(d.get('count') or 1),
@@ -386,6 +462,7 @@ async def capture_backend_exception(
             user_agent=request.headers.get('user-agent') if request else None,
         )
         sig = _signature(report)
+        severity = _classify_severity(report)
         now = datetime.now(timezone.utc)
         existing = await db.runtime_errors.find_one({
             'signature': sig,
@@ -397,13 +474,17 @@ async def capture_backend_exception(
                 {'id': existing['id']},
                 {'$inc': {'count': 1}, '$set': {'last_seen_at': now}},
             )
+            existing['count'] = int(existing.get('count', 0)) + 1
+            existing['severity'] = existing.get('severity') or severity
+            await _maybe_page_operator(existing)
             return
-        await db.runtime_errors.insert_one({
+        doc = {
             'id': str(uuid.uuid4()),
             'signature': sig,
             'message': report.message,
             'stack': report.stack or '',
             'source': 'backend',
+            'severity': severity,
             'url': report.url,
             'user_agent': report.user_agent,
             'created_at': now,
@@ -411,6 +492,8 @@ async def capture_backend_exception(
             'count': 1,
             'rca': None,
             'dismissed_at': None,
-        })
+        }
+        await db.runtime_errors.insert_one(doc)
+        await _maybe_page_operator(doc)
     except Exception:
         logger.exception('Failed to capture backend exception')
