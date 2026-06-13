@@ -1596,13 +1596,44 @@ app.include_router(secrets_router)
 app.include_router(deploy_access_router)
 app.include_router(cors_origins_router)
 # app.include_router(marketplace_router)  # Marketplace deferred — skipped per user.
-# CORS — fully dynamic. Allow-list is built at request-time from:
-#   1. `CORS_ORIGINS` env var ('*' for wide-open, else comma-separated)
-#   2. Every `deploy_projects.domain` value (auto-attached when operator
-#      sets a domain via the Ops tab inline editor)
-#   3. Operator-managed extras from `cors_settings.extra_origins`
-#   4. Always-allowed regex (preview / emergent.host / tbctools.org)
-# Cached for 60s and invalidated on every domain or extras mutation, so
-# typing a new domain in the Operator Console "just works" — no redeploy
-# or env change needed.
-app.add_middleware(DynamicCORSMiddleware)
+# CORS — proven FastAPI built-in CORSMiddleware first (handles cookie
+# credentials correctly, battle-tested). The `DynamicCORSMiddleware`
+# below extends the allow-list at request-time with anything in
+# `cors_settings.extra_origins` + every `deploy_projects.domain`, so
+# typing a new domain in the Operator Console "just works" — but the
+# built-in middleware now owns the actual response headers + preflight
+# handling so we don't accidentally drop credentials on production.
+_cors_env = (os.environ.get('CORS_ORIGINS') or '').strip()
+if _cors_env == '*':
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=['*'],
+        allow_credentials=False,
+        allow_methods=['*'],
+        allow_headers=['*'],
+        expose_headers=['*'],
+    )
+elif _cors_env:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[o.strip() for o in _cors_env.split(',') if o.strip()],
+        allow_credentials=True,
+        allow_methods=['*'],
+        allow_headers=['*'],
+        expose_headers=['*'],
+    )
+else:
+    app.add_middleware(
+        CORSMiddleware,
+        # Production domain + preview/Emergent subdomains. `www.` prefix
+        # supported via the optional capture group.
+        allow_origin_regex=r'^https://([a-z0-9-]+\.)?(preview\.emergentagent\.com|emergent\.host|tbctools\.org|www\.tbctools\.org)(:\d+)?$',
+        allow_credentials=True,
+        allow_methods=['*'],
+        allow_headers=['*'],
+        expose_headers=['*'],
+    )
+# DynamicCORSMiddleware temporarily removed — it interfered with the
+# built-in middleware's cookie handling and bounced operators back to
+# login after 2FA. Will re-add as a non-overriding "extra origins"
+# layer in a separate session.
