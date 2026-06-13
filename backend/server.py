@@ -60,6 +60,11 @@ from ai_learnings_ext import router as ai_learnings_router
 from ai_brain_ext import router as ai_brain_router
 from ai_test_bench_ext import router as ai_test_bench_router
 from deploy_previews_ext import router as deploy_previews_router
+from app_settings_ext import (
+    public_router as app_settings_public_router,
+    op_router as app_settings_op_router,
+    is_login_locked_down,
+)
 from runtime_errors_ext import (
     public_router as runtime_errors_public_router,
     op_router as runtime_errors_op_router,
@@ -540,6 +545,13 @@ async def register(req: RegisterRequest, response: Response):
     # logic below: even if someone bypasses the UI hint, the API refuses.
     if email == OPERATOR_EMAIL.lower():
         raise HTTPException(400, 'This email is reserved. Please use a different address.')
+    # Login lockdown also blocks new registrations — the kill-switch is
+    # meant to take the entire app private, not just login.
+    if await is_login_locked_down():
+        raise HTTPException(
+            503,
+            'New sign-ups are temporarily disabled. Please try again later.',
+        )
     if await db.users.find_one({'email': email}):
         raise HTTPException(400, 'Email already registered')
     strength_err = validate_password_strength(req.password)
@@ -626,6 +638,16 @@ async def login(req: LoginRequest, response: Response):
     user = await db.users.find_one({'email': email})
     if not user or not verify_password(req.password, user['password_hash']):
         raise HTTPException(401, 'Invalid email or password')
+    # Login lockdown — when the operator has flipped the kill-switch in
+    # Operator → Settings → App Settings, only operator accounts may
+    # proceed. Everyone else gets a friendly 503. We check AFTER the
+    # password check so we don't leak the fact that lockdown is on to
+    # random unauthenticated probes.
+    if user.get('role') != 'operator' and await is_login_locked_down():
+        raise HTTPException(
+            503,
+            'Login is temporarily restricted to operators only. Please try again later.',
+        )
     if user.get('deleted_at'):
         raise HTTPException(403, 'This account has been deactivated. Please contact support.')
     if user.get('status') == 'paused':
@@ -1815,6 +1837,8 @@ app.include_router(ai_learnings_router)
 app.include_router(ai_brain_router)
 app.include_router(ai_test_bench_router)
 app.include_router(deploy_previews_router)
+app.include_router(app_settings_public_router)
+app.include_router(app_settings_op_router)
 app.include_router(runtime_errors_public_router)
 app.include_router(runtime_errors_op_router)
 app.include_router(sandbox_ai_router)

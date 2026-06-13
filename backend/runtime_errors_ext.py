@@ -86,13 +86,17 @@ def _classify_severity(report: ErrorReport) -> str:
 async def _maybe_page_operator(doc: dict) -> None:
     """Fire-and-forget operator notification when severity == 'critical'.
     Throttled to once per (signature, 1h) so a runaway loop doesn't spam
-    inboxes. Never raises — capture flow must always succeed."""
+    inboxes. Never raises — capture flow must always succeed.
+
+    IMPORTANT ordering: we insert the throttle row BEFORE attempting the
+    email so a failing email server (e.g. Resend down, RESEND_API_KEY
+    missing) doesn't silently disable the throttle. The throttle row IS
+    the rate-limit primitive; emailing is the side-effect.
+    """
     try:
         if doc.get('severity') != 'critical':
             return
         sig = doc.get('signature', '')
-        # Last-page check — skip if we paged for this signature in the
-        # past hour.
         from datetime import timedelta
         one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
         recent_page = await db.runtime_error_pages.find_one({
@@ -100,30 +104,39 @@ async def _maybe_page_operator(doc: dict) -> None:
         })
         if recent_page:
             return
-        from email_utils import send_email
         settings = await db.settings.find_one({'_id': 'payment_settings'}) or {}
         op_email = settings.get('operator_email') or (
             (await db.users.find_one({'role': 'operator'}, {'email': 1})) or {}
         ).get('email')
         if not op_email:
             return
-        subject = f'🚨 Critical error: {doc.get("message", "")[:80]}'
-        body = (
-            f'<p><strong>Severity:</strong> CRITICAL · <strong>Source:</strong> {doc.get("source")}'
-            f' · <strong>Count:</strong> {doc.get("count", 1)}</p>'
-            f'<p><strong>Message:</strong></p>'
-            f'<pre style="background:#1f1f23;color:#f5f5f5;padding:12px;border-radius:6px;font-family:monospace;">'
-            f'{(doc.get("message") or "")[:600]}</pre>'
-            + (f'<p><strong>URL:</strong> {doc.get("url")}</p>' if doc.get("url") else '')
-            + '<p>Open <strong>Operator → Errors</strong> to run RCA and dispatch a fix.</p>'
-        )
-        await send_email(op_email, subject, body)
+        # 1. INSERT the throttle row first — this is what prevents the
+        #    next ingest from re-attempting, even if the email below
+        #    fails. Without this ordering, a misconfigured email provider
+        #    means every critical ingest re-tries indefinitely.
         await db.runtime_error_pages.insert_one({
             'signature': sig,
             'error_id': doc.get('id'),
             'paged_at': datetime.now(timezone.utc),
             'paged_to': op_email,
         })
+        # 2. Best-effort email send — failures here are logged but don't
+        #    roll back the throttle.
+        try:
+            from email_utils import send_email
+            subject = f'🚨 Critical error: {doc.get("message", "")[:80]}'
+            body = (
+                f'<p><strong>Severity:</strong> CRITICAL · <strong>Source:</strong> {doc.get("source")}'
+                f' · <strong>Count:</strong> {doc.get("count", 1)}</p>'
+                f'<p><strong>Message:</strong></p>'
+                f'<pre style="background:#1f1f23;color:#f5f5f5;padding:12px;border-radius:6px;font-family:monospace;">'
+                f'{(doc.get("message") or "")[:600]}</pre>'
+                + (f'<p><strong>URL:</strong> {doc.get("url")}</p>' if doc.get("url") else '')
+                + '<p>Open <strong>Operator → Errors</strong> to run RCA and dispatch a fix.</p>'
+            )
+            await send_email(op_email, subject, body)
+        except Exception as e:
+            logger.warning('auto-page send_email failed (throttle row was still inserted): %s', e)
     except Exception:
         logger.exception('auto-page operator failed')
 

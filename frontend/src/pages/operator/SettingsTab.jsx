@@ -7,9 +7,10 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '../../components/ui/select';
 import { toast } from 'sonner';
-import { Loader2, KeyRound, Save, Lock, Eye, EyeOff, Plug, Mail, Sparkles, UserPlus, Rocket } from 'lucide-react';
+import { Loader2, KeyRound, Save, Lock, Eye, EyeOff, Plug, Mail, Sparkles, UserPlus, Rocket, Megaphone } from 'lucide-react';
 import SecretsCard from './SecretsCard';
 import BirthdayRewardsCard from './BirthdayRewardsCard';
+import AppSettingsCard from './AppSettingsCard';
 
 export default function SettingsTab() {
   const [settings, setSettings] = useState(null);
@@ -78,6 +79,10 @@ export default function SettingsTab() {
 
   return (
     <div className="grid gap-5">
+      <Section icon={Megaphone} title="Public banner & lockdown">
+        <AppSettingsCard />
+      </Section>
+
       <Section icon={UserPlus} title="New user defaults">
         <div className="rounded-md border border-tbc-900/40 bg-ink-950/60 p-3 text-xs text-tbc-200/70">
           Every newly-registered user is automatically placed on the plan you choose here. No manual action needed.

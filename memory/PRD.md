@@ -11,6 +11,24 @@ gold theme. Domain: **tbctools.org**.
 - **End user (member)** — Chats with the AI builder, manages plan, copies referral link.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
+## Implemented — Feb 2026 (latest session, batch 6)
+- ✅ **Personal-use banner overlay** (`PersonalUseBanner.jsx` + `app_settings_ext.py`):
+  - Full-viewport translucent red overlay (`position:fixed; inset:0; z-index:9998; pointer-events:none`). Underlying UI stays fully clickable.
+  - Centred red card with the operator's text, 2px red border, glass-morphism backdrop-filter, drop shadow. Re-enables pointer events only on the text card so "I understand · hide for this session" dismiss works.
+  - Polls `/api/app/announcement` every 60s while tab is foregrounded so operator toggles propagate to open tabs without a hard reload.
+  - sessionStorage-based per-session dismiss (`tbc_personal_use_banner_dismissed`).
+- ✅ **Login lockdown** (`is_login_locked_down()` + auth gates in server.py):
+  - `/api/auth/login` returns 503 for non-operator accounts when lockdown is ON. Password verify runs first so we don't leak the lockdown state to attackers.
+  - `/api/auth/register` returns 503 unconditionally when lockdown is ON — no new sign-ups.
+  - Existing user sessions remain valid (cookies + JWTs untouched) so this is a graceful kill-switch, not a forced sign-out.
+- ✅ **Operator control surface** (`AppSettingsCard.jsx`):
+  - New "Public banner & lockdown" section at the top of Operator → Settings.
+  - Banner card: red-themed, switch + textarea + live preview button + Save Text button.
+  - Lockdown card: amber-themed, switch with `window.confirm` warning, ACTIVE banner when ON.
+  - Toggles auto-save immediately; text edits require explicit Save.
+- ✅ **Bugfix from iter18**: `runtime_errors_ext.py:_maybe_page_operator` now **inserts the throttle row before** attempting send_email so a failing email server doesn't silently disable the rate-limiter (root cause from iter18 report).
+
+
 ## Implemented — Feb 2026 (latest session, batch 5)
 - ✅ **Promote with auto-tag + CHANGELOG** (`deploy_release_tag_ext.py`):
   - When `auto_tag=true` in PromoteRequest, autopilot creates an annotated GitHub tag `prod-YYYY-MM-DD-N` (N is a per-day sequence, looked up via `git/matching-refs`) pointing at the promoted commit. Tag carries a message + UTC tagger info.

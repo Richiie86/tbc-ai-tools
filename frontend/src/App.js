@@ -22,6 +22,7 @@ import BillingSuccess from './pages/BillingSuccess';
 import Operator from './pages/Operator';
 import ProjectSettings from './pages/ProjectSettings';
 import MarketingBanner from './components/MarketingBanner';
+import PersonalUseBanner from './components/PersonalUseBanner';
 import './App.css';
 
 function App() {
@@ -30,6 +31,7 @@ function App() {
       <AuthProvider>
         <BrowserRouter>
           <MarketingBanner />
+          <PersonalUseBanner />
           <Routes>
             <Route path="/" element={<Landing />} />
             <Route path="/about" element={<About />} />
