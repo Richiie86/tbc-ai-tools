@@ -30,7 +30,7 @@ from deploy_projects_ext import (
     _project_health,
     _record_deployment,
     _require_ai_api_key,
-    _vercel_create_deployment,
+    _slugify,
     _vercel_get_deployment,
     db,
     get_current_operator,
@@ -39,6 +39,7 @@ from deploy_projects_ext import (
     projects_router,
 )
 from deploy.code_review import run_code_review
+from vercel_api_ext import vercel_create_deployment
 
 logger = logging.getLogger(__name__)
 
@@ -197,7 +198,10 @@ async def _autopilot_stream(
         # ---- Step 3 onward: deploy on the (possibly auto-fixed) HEAD -----
         yield _sse('deploy_start', {'target': req.target, 'ref': req.git_ref or project.get('gitRef')})
         try:
-            deploy_res = await _vercel_create_deployment(settings, project, req.target, req.git_ref)
+            deploy_res = await vercel_create_deployment(
+                settings, project, req.target, req.git_ref,
+                name_slug=_slugify(project['projectName']),
+            )
         except HTTPException as he:
             yield _sse('loop_error', {'stage': 'deploy', 'status': he.status_code, 'message': str(he.detail)})
             return

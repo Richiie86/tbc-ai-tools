@@ -30,10 +30,25 @@ export function useInlineDomain(project, onSaved) {
     }
     setSaving(true);
     try {
-      await api.patch(`/operator/deploy/${project.id}/domain`, { domain: next });
+      const { data } = await api.patch(
+        `/operator/deploy/${project.id}/domain`,
+        { domain: next },
+      );
       toast.success('Domain saved');
+      // Surface Vercel attach status as a friendly secondary toast — the
+      // backend best-effort attaches the domain on Vercel so subsequent
+      // Deploy clicks can route immediately. Non-fatal if it fails.
+      if (data?.vercel_attached) {
+        toast.success('Attached on Vercel', { duration: 2000 });
+      } else if (data?.vercel_error) {
+        toast.message(`Vercel attach skipped — ${data.vercel_error}`, {
+          duration: 4500,
+        });
+      }
       setEditing(false);
-      onSaved?.();
+      // Optimistic refresh: pass the updated project doc so the parent
+      // can merge it into local state without waiting for a full refetch.
+      onSaved?.(data);
     } catch (e) {
       toast.error(e?.response?.data?.detail || 'Save failed');
     } finally {

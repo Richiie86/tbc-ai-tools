@@ -380,6 +380,17 @@ export function OpsDeploySection() {
     }
   }, []);
 
+  // Per-row update callback: when a row hands back an updated project doc
+  // (e.g. after PATCH /domain), splice it into local state immediately so
+  // the UI feels instant. We still fire `load()` afterwards to pick up any
+  // server-side derived fields (last_deployed_at, vercel_project_id, ...).
+  const onRowUpdate = useCallback((updated) => {
+    if (updated?.id) {
+      setProjects((prev) => prev.map((p) => (p.id === updated.id ? { ...p, ...updated } : p)));
+    }
+    load();
+  }, [load]);
+
   useEffect(() => { load(); }, [load]);
 
   if (loading || !keysStatus) {
@@ -425,7 +436,7 @@ export function OpsDeploySection() {
         ) : (
           <div className="space-y-2" data-testid="ops-deploy-projects">
             {projects.map((p) => (
-              <ProjectRow key={p.id} project={p} onDeployed={load} />
+              <ProjectRow key={p.id} project={p} onDeployed={onRowUpdate} />
             ))}
           </div>
         )}
