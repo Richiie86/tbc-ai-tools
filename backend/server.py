@@ -997,8 +997,10 @@ async def op_bulk_delete_contacts(
     raise HTTPException(400, 'Pass `ids: [...]` or `all: true`')
 
 
-@api.get('/operator/stats')
-async def op_stats(_: dict = Depends(get_current_operator)):
+async def _compute_op_stats() -> dict:
+    """Single source of truth for the operator stats payload. Used by both
+    `op_stats` (GET) and `op_stats_self_fix` (POST) so the shape stays in
+    sync after data normalization."""
     total_users = await db.users.count_documents({})
     paid_users = await db.users.count_documents({'plan': {'$in': ['starter', 'pro', 'enterprise']}})
     total_sessions = await db.chat_sessions.count_documents({})
@@ -1011,7 +1013,6 @@ async def op_stats(_: dict = Depends(get_current_operator)):
     ])
     revenue_doc = await revenue_cursor.to_list(1)
     revenue = revenue_doc[0]['total'] if revenue_doc else 0
-
     return {
         'total_users': total_users,
         'paid_users': paid_users,
@@ -1020,6 +1021,55 @@ async def op_stats(_: dict = Depends(get_current_operator)):
         'paid_transactions': paid_txs,
         'revenue_usd': round(revenue, 2),
     }
+
+
+@api.get('/operator/stats')
+async def op_stats(_: dict = Depends(get_current_operator)):
+    return await _compute_op_stats()
+
+
+@api.post('/operator/stats/self-fix')
+async def op_stats_self_fix(_: dict = Depends(get_current_operator)):
+    """Recompute stats AND normalize obvious data drift so the numbers in the
+    operator dashboard match the underlying source-of-truth tables.
+
+    Safe operations only — fills in missing required fields with sensible
+    defaults; never deletes anything. Returns a summary of what was fixed
+    PLUS the fresh stats payload.
+    """
+    fixes: dict[str, int] = {}
+
+    # 1) Users with no plan → mark as 'free' so the paid-vs-free split is
+    #    accurate. Anyone genuinely on free already has plan='free'.
+    res = await db.users.update_many(
+        {'plan': {'$in': [None, '']}}, {'$set': {'plan': 'free'}},
+    )
+    fixes['users_plan_filled'] = res.modified_count
+
+    # 2) Users missing the `credits` field → set to 0 so int arithmetic doesn't
+    #    blow up elsewhere.
+    res = await db.users.update_many(
+        {'credits': {'$exists': False}}, {'$set': {'credits': 0}},
+    )
+    fixes['users_credits_zeroed'] = res.modified_count
+
+    # 3) Payment transactions missing `payment_status` → 'unknown'. They get
+    #    excluded from revenue but at least the field exists.
+    res = await db.payment_transactions.update_many(
+        {'payment_status': {'$in': [None, '']}}, {'$set': {'payment_status': 'unknown'}},
+    )
+    fixes['payments_status_filled'] = res.modified_count
+
+    # 4) Chat sessions missing `model` → fall back to the platform default
+    #    so the per-model breakdown doesn't double-count NULLs.
+    res = await db.chat_sessions.update_many(
+        {'model': {'$in': [None, '']}}, {'$set': {'model': DEFAULT_MODEL}},
+    )
+    fixes['sessions_model_filled'] = res.modified_count
+
+    # Recompute via the shared helper so the shape stays in lockstep.
+    stats = await _compute_op_stats()
+    return {'fixed': fixes, 'stats': stats}
 
 
 @api.post('/operator/users/{user_id}/credits')
