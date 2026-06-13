@@ -163,7 +163,10 @@ export function InChatDeployControls({ user }) {
           data-testid="in-chat-project-picker"
         >
           <span className="max-w-[120px] truncate">
-            {selected?.name || (projects.length ? 'Pick project' : 'No projects')}
+            {/* Backend serialises the field as `projectName` (camel-case
+                Vercel convention); fall back to `name` for older
+                operator-clone forks that may still send the short key. */}
+            {selected?.projectName || selected?.name || (projects.length ? 'Pick project' : 'No projects')}
           </span>
           <ChevronDown className="h-3 w-3 text-tbc-200/60" />
         </DropdownMenuTrigger>
@@ -187,7 +190,7 @@ export function InChatDeployControls({ user }) {
               className="text-xs focus:bg-ink-950 focus:text-tbc-100"
               data-testid={`in-chat-project-option-${p.id}`}
             >
-              {p.name}
+              {p.projectName || p.name || p.id}
             </DropdownMenuItem>
           ))}
         </DropdownMenuContent>

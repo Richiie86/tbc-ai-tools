@@ -1019,22 +1019,30 @@ async def ai_promote_project(
 async def _ensure_self_project() -> Optional[dict]:
     """The `tbctools-self` magic project represents the platform itself.
 
-    Operator sets `self_repo`/`self_git_ref`/`self_vercel_project_id` in
-    Settings, and this function lazily upserts a corresponding project row so
-    every existing endpoint (Deploy/Redeploy/Health/AI surface) works on it
-    without any special-casing in the handlers.
+    Always upserts a project row so the Operator Console + Dashboard "No
+    projects" dropdown always has at least ONE entry to deploy. Operator
+    later refines `self_repo`/`self_git_ref`/`self_vercel_project_id` in
+    Settings — and we honour those overrides without clobbering the row's
+    deployment history.
+
+    Previously this returned `None` when `self_repo` was unset, which is
+    why production showed an empty dropdown + a disabled Deploy button
+    after a fresh deploy. The seed below is intentionally minimal — it
+    won't actually deploy until the operator pastes their real repo, but
+    it ALWAYS shows up so the UI never feels broken.
     """
     settings = await get_settings_doc()
-    repo = (settings or {}).get('self_repo')
-    if not repo:
-        return None
+    repo = (settings or {}).get('self_repo') or 'rac-investments/tbc-self-copy'
     git_ref = (settings or {}).get('self_git_ref') or 'main'
     now = datetime.now(timezone.utc)
     doc = {
         'id': SELF_PROJECT_ID,
         'projectName': 'TBC AI Tools (this app)',
         'repo': repo,
-        'domain': 'tbctools.org',
+        # Default domain mirrors the production custom domain so the
+        # row's "Copy URL" button is useful out of the box. Operator
+        # can override via the inline domain editor on the Ops tab.
+        'domain': (settings or {}).get('self_domain') or 'tbctools.org',
         'repoType': 'github',
         'gitRef': git_ref,
         'updated_at': now,

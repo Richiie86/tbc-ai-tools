@@ -704,6 +704,17 @@ async def create_session(req: CreateSessionRequest, user: dict = Depends(get_cur
         variant=req.variant or 'tbc1',
     )
     await db.chat_sessions.insert_one(s.model_dump())
+    # Operator-only: make sure the deploy dropdown is never empty. The
+    # first time the operator spins up a new chat session, lazily
+    # bootstrap the magic `tbctools-self` project so the dashboard's
+    # Deploy button is clickable from minute one. (Idempotent — does
+    # nothing if the project already exists.)
+    if user.get('role') == 'operator':
+        try:
+            from deploy_projects_ext import _ensure_self_project
+            await _ensure_self_project()
+        except Exception as e:
+            logger.warning('Auto-bootstrap of tbctools-self failed (non-fatal): %s', e)
     return _serialize(s.model_dump())
 
 
