@@ -58,6 +58,34 @@ async function vercelFetch(token: string, path: string, init?: RequestInit) {
   return json
 }
 
+/**
+ * Resolve a GitHub "owner/repo" to its numeric repo id.
+ * The Vercel deployments API requires `repoId` (not the slug) in gitSource.
+ */
+async function resolveGithubRepoId(repo: string): Promise<number> {
+  const ghToken = process.env.GITHUB_TOKEN
+  const headers: Record<string, string> = {
+    Accept: "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+  }
+  if (ghToken) headers.Authorization = `Bearer ${ghToken}`
+
+  const res = await fetch(`https://api.github.com/repos/${repo}`, { headers })
+  if (!res.ok) {
+    if (res.status === 404) {
+      throw new Error(
+        `GitHub repo "${repo}" not found or not accessible. Check the name and that GITHUB_TOKEN has access.`,
+      )
+    }
+    throw new Error(`Could not resolve GitHub repo "${repo}" (status ${res.status}).`)
+  }
+  const data = await res.json()
+  if (typeof data.id !== "number") {
+    throw new Error(`GitHub did not return a numeric id for "${repo}".`)
+  }
+  return data.id
+}
+
 /** Find an existing project by name, or create one linked to the git repo. */
 async function ensureProject(token: string, req: DeployRequest) {
   const { projectName, repo, repoType = "github", teamId } = req
@@ -106,18 +134,33 @@ export async function deployToVercel(token: string, req: DeployRequest): Promise
   await ensureProject(token, req)
   const domainConfigured = await ensureDomain(token, req, warnings)
 
-  const deployment = await vercelFetch(token, withTeam("/v13/deployments", req.teamId), {
-    method: "POST",
-    body: JSON.stringify({
-      name: req.projectName,
-      target: "production",
-      gitSource: {
-        type: repoType,
-        repo: req.repo,
-        ref: req.ref || "main",
-      },
-    }),
-  })
+  // Vercel's deployments API needs the numeric repo id for GitHub sources.
+  const gitSource: Record<string, unknown> = {
+    type: repoType,
+    ref: req.ref || "main",
+  }
+  if (repoType === "github") {
+    gitSource.repoId = await resolveGithubRepoId(req.repo)
+  } else {
+    // GitLab/Bitbucket accept the slug form.
+    gitSource.repo = req.repo
+  }
+
+  // skipAutoDetectionConfirmation lets Vercel auto-detect the framework for
+  // brand-new projects without requiring a full projectSettings payload.
+  const deployment = await vercelFetch(
+    token,
+    withTeam("/v13/deployments?skipAutoDetectionConfirmation=1", req.teamId),
+    {
+      method: "POST",
+      body: JSON.stringify({
+        name: req.projectName,
+        target: "production",
+        gitSource,
+        projectSettings: { framework: null },
+      }),
+    },
+  )
 
   const url: string = deployment.url ? `https://${deployment.url}` : ""
   return {
