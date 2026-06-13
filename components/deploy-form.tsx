@@ -4,6 +4,7 @@ import * as React from "react"
 import { useRouter } from "next/navigation"
 import { GitBranch, History, Trash2, Pencil, Plus, ExternalLink } from "lucide-react"
 import { DeployButton } from "@/components/deploy-button"
+import { RepoPicker } from "@/components/repo-picker"
 import { upsertProject, deleteProject, recordDeployment } from "@/app/actions/projects"
 import type { Project } from "@/lib/db/schema"
 import { Input } from "@/components/ui/input"
@@ -40,6 +41,17 @@ export function DeployForm({ initialProjects }: { initialProjects: Project[] }) 
   function handleProjectNameChange(value: string) {
     setProjectName(value)
     if (!domainEdited) setDomain(suggestDomain(value))
+  }
+
+  // When a repo is picked: fill repo + branch, and auto-fill name/domain if still empty.
+  function handleRepoSelect(picked: { fullName: string; defaultBranch: string }) {
+    setRepo(picked.fullName)
+    setRef(picked.defaultBranch || "main")
+    if (!projectName.trim()) {
+      const name = picked.fullName.split("/")[1] ?? picked.fullName
+      setProjectName(name)
+      if (!domainEdited) setDomain(suggestDomain(name))
+    }
   }
 
   function resetForm() {
@@ -110,20 +122,9 @@ export function DeployForm({ initialProjects }: { initialProjects: Project[] }) 
             </div>
             <div className="flex flex-col gap-2">
               <Label htmlFor="repo">GitHub repo</Label>
-              <Input
-                id="repo"
-                placeholder="owner/repo"
-                value={repo}
-                onChange={(e) => setRepo(e.target.value)}
-              />
+              <RepoPicker value={repo} onSelect={handleRepoSelect} />
               <p className="text-xs text-muted-foreground">
-                {"The "}
-                <code className="rounded bg-muted px-1 py-0.5 text-[0.7rem]">owner/repo</code>
-                {" from your GitHub URL, e.g. github.com/"}
-                <span className="text-foreground">tbctools/my-app</span>
-                {" → "}
-                <code className="rounded bg-muted px-1 py-0.5 text-[0.7rem]">tbctools/my-app</code>
-                {". Must be connected to your Vercel account."}
+                {"Pick from your GitHub repos. Selecting one auto-fills the branch."}
               </p>
               <a
                 href="https://github.com/settings/repositories"
@@ -131,9 +132,8 @@ export function DeployForm({ initialProjects }: { initialProjects: Project[] }) 
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-1 text-xs font-medium text-primary underline-offset-4 hover:underline"
               >
-                <GitBranch className="size-3" aria-hidden="true" />
-                {"Find your repos on GitHub"}
                 <ExternalLink className="size-3" aria-hidden="true" />
+                {"Manage repos on GitHub"}
               </a>
             </div>
           </div>
