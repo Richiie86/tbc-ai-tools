@@ -101,7 +101,7 @@ export function ProjectRow({ project, onDeployed }) {
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-3 text-[11px]">
             {domain.editing ? (
-              <div className="flex items-center gap-1.5">
+              <div className="relative z-10 flex items-center gap-1.5">
                 <Globe className="h-3 w-3 text-tbc-300" />
                 <Input
                   data-testid={`domain-input-${project.id}`}
@@ -133,7 +133,7 @@ export function ProjectRow({ project, onDeployed }) {
                 )}
               </div>
             ) : (
-              <div className="inline-flex items-center gap-1">
+              <div className="relative z-10 inline-flex items-center gap-1">
                 <a
                   href={a.domainUrl}
                   target="_blank"
@@ -143,12 +143,13 @@ export function ProjectRow({ project, onDeployed }) {
                   <Globe className="h-3 w-3" /> {project.domain}
                 </a>
                 <button
+                  type="button"
                   data-testid={`domain-edit-${project.id}`}
                   onClick={() => domain.setEditing(true)}
                   title="Edit domain"
-                  className="rounded p-0.5 text-tbc-200/50 hover:bg-ink-950 hover:text-tbc-200"
+                  className="relative z-10 rounded p-1.5 text-tbc-200/70 hover:bg-ink-950 hover:text-tbc-200"
                 >
-                  <Pencil className="h-2.5 w-2.5" />
+                  <Pencil className="h-3 w-3" />
                 </button>
               </div>
             )}

@@ -1,0 +1,50 @@
+{
+  "summary": "Full re-test of the iteration_12 blocker + the entire deploy/preview/redeploy/copy-url/clone/code-review/autopilot/health/promote smoke battery on data-testid='deploy-project-tbctools-self'. The iter_12 blocker (pencil click does NOT open the inline domain editor) is FULLY RESOLVED: the wrapper now has relative+z-10, the pencil's hit area was bumped to p-1.5 + h-3 w-3, and type='button' was added. Every action button on the row now wires up to the correct backend endpoint with the correct payload. No critical bugs found.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "Operator > Ops > Vercel deploys (self row)",
+        "issues": [
+          "After a successful PATCH /domain the row only re-renders the new value once the parent refetches (~3-5s observed). Cosmetic — the operator still sees the 'Domain saved' toast immediately and the editor closes — but if E1 wants instant feedback, optimistically updating the row before refetch would be a nicer UX."
+        ]
+      }
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Iter_12 fix is solid: relative+z-10 wrapper + larger hit area + type='button' on the pencil eliminates click absorption by the adjacent <a> tag. Confirmed via Playwright on the live preview URL.",
+    "useProjectActions.runDeploy has correct 503 'Vercel token not configured' handling with a 'Configure now' toast action navigating to /operator?tab=ops — but in this preview the Vercel PAT is CONFIGURED so the 503 path wasn't exercised. Deploy POSTs returned successfully with state 'queued/initializing' and a 'Last deploy: READY' label appears on the row. Recommend exercising the 503 fallback in a separate env where the PAT is intentionally invalid.",
+    "Promote AlertDialog gating works as designed: confirm-btn stays disabled unless the input value exactly matches project.projectName. Cancel button closes the dialog cleanly. AlertDialog content has data-testid='promote-confirm-{id}' as expected.",
+    "Code Review button sets a 20-40s busy state (busy='review') that disables every other action button on the row. This is correct behaviour but worth knowing for E2E test ordering: any test that needs Autopilot/Health/Promote must run BEFORE Code Review (or wait for it to settle). I encountered exactly this artifact in my first pass and split it into two runs."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (frontend-only request)", "frontend": "100% — every flow in the request was exercised and passed"},
+  "test_credentials": "Operator: rac.investments.swe@gmail.com / 123Admin@98 (lands on /setup-2fa after login but direct nav to /operator?tab=ops is allowed because tbc_session cookie is set).",
+  "seed_data_creation": "Saved 'test-domain.tbctools.org' onto the self project then restored 'tbctools.org'. Also triggered live POST /deploy (production) and POST /deploy (preview) — Vercel state went to 'queued' → 'INITIALIZING' → 'READY' during the run. POST /redeploy was also fired against the resulting deployment. The self row now shows 'Last deploy: READY · 6/13/2026 3:00:09 PM' and last_deployment_id is set (Promote button is now enabled).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "1) Login via /login then page.locator(\"input[type='password']\").press('Enter'); after login the app redirects to /setup-2fa — direct nav to /operator?tab=ops is fine because cookie is set. 2) ALWAYS dismiss the OperatorTour first via [data-testid='guide-skip']. 3) When testing Code Review alongside Autopilot/Health/Promote, run Code Review LAST or wait for it to finish — it sets busy='review' for 20-40s which disables every other action on the row. 4) The Promote AlertDialog's typed-confirmation compares against project.projectName, NOT project.id. The placeholder in the input is the actual projectName — read it from the DOM instead of guessing. 5) The Vercel PAT is configured in this env so the 503 'Configure now' fallback in runDeploy was not exercised — verify in a fresh env where the PAT is a placeholder if needed. 6) After PATCH /domain, the row re-renders only after the parent refetches (~3-5s) — give it enough time before asserting visible text on the row.",
+  "detailed_test_results": {
+    "TEST_1_pencil_opens_editor": "PASS — [data-testid='domain-edit-tbctools-self'] click → [data-testid='domain-input-tbctools-self'] becomes visible within ~200ms. Iter_12 blocker RESOLVED.",
+    "TEST_2_save_new_domain": "PASS — typing 'test-domain.tbctools.org' + clicking [domain-save-tbctools-self] produces sonner toast 'Domain saved'. Editor closes. Row re-renders with the new domain after parent refetch.",
+    "TEST_3_restore_original_domain": "PASS — re-opening editor + saving 'tbctools.org' restores the original domain. 'tbctools.org' visible in row.",
+    "TEST_4_empty_validation": "PASS — empty string save produces toast 'Domain required' and NO PATCH /domain call is made (verified via request listener).",
+    "TEST_5_escape_cancels": "PASS — Escape on the input closes the editor (input count goes from 1 to 0) without firing any API call.",
+    "TEST_6_enter_saves": "PASS — Enter on the input fires PATCH /api/operator/deploy/tbctools-self/domain with the typed value.",
+    "TEST_7_deploy_cta_gating": "PASS — Deploy button is ENABLED when project.domain is set. title='Deploy production'.",
+    "TEST_8_deploy_fires_api": "PASS — Click fires POST /api/operator/deploy/tbctools-self/deploy with body {target:'production', bypass_review:false}. No 503 — Vercel PAT is configured in this preview, so the 'Configure now' fallback path was NOT exercised (expected per env).",
+    "TEST_9_preview_fires_api": "PASS — Click fires POST /api/operator/deploy/tbctools-self/deploy with body {target:'preview', bypass_review:false}.",
+    "TEST_10_copy_url": "PASS — sonner toast 'URL copied to clipboard' shown + icon swaps to a green checkmark (svg.text-emerald-400 count=1) for ~1.5s.",
+    "TEST_11_redeploy": "PASS — Click fires POST /api/operator/deploy/tbctools-self/redeploy (no body). title='Redeploy the last deployment exactly'.",
+    "TEST_12_clone_dialog": "PASS — Click on [data-testid='clone-tbctools-self'] opens the Clone dialog (role='dialog' count=1, visible=True).",
+    "TEST_13_code_review_fires": "PASS — Click fires POST /api/operator/deploy/tbctools-self/code-review (no body) + sonner toast 'Running AI code review… this can take 20-40s'. Did not wait for completion as instructed.",
+    "TEST_14_autopilot_dialog": "PASS — [data-testid='autopilot-tbctools-self'] click opens dialog containing 'Autopilot · TBC AI Tools (this app) Runs the full review → ship → watch → react loop on Richiie86/tbc-ai-tools'.",
+    "TEST_15_health_fires": "PASS — Click fires POST /api/operator/deploy/tbctools-self/healthcheck. HealthPill ([data-testid='health-pill-tbctools-self']) appears on the row.",
+    "TEST_16_promote_dialog": "PASS — [data-testid='promote-tbctools-self'] enabled (because last_deployment_id is set after TEST 8/9/11). [data-testid='promote-confirm-tbctools-self'] AlertDialog opens. [data-testid='promote-confirm-btn-tbctools-self'] stays DISABLED while the typed value does not exactly match project.projectName (verified with intentional 'wrong-name' input). [data-testid='promote-cancel-tbctools-self'] closes the dialog cleanly."
+  },
+  "rca_iter12_resolution": "Iter_12 RCA was correct: the iter_12 main agent identified that an adjacent sibling DOM element was intercepting clicks. The fix applied (relative + z-10 on the inline-domain wrapper + bumping the pencil hit area from p-0.5+h-2.5/w-2.5 to p-1.5+h-3/w-3 + type='button' on the pencil button) fully resolves the issue. Pencil click now opens the input within ~200ms in every attempt. No regressions observed on any other row action."
+}
