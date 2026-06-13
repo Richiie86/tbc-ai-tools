@@ -36,7 +36,7 @@ from pathlib import Path
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -455,9 +455,33 @@ async def get_project(project_id: str, _settings: dict = Depends(_require_ai_api
 
 @projects_router.delete('/{project_id}')
 async def delete_project(project_id: str, _settings: dict = Depends(_require_ai_api_key)):
+    """API-key delete path (used by external automation).
+
+    We capture the project's name/repo in the audit row so we can still
+    trace what was removed even after the document is gone.
+    """
+    doc = await db.deploy_projects.find_one({'id': project_id})
+    if not doc:
+        raise HTTPException(404, 'Project not found')
     res = await db.deploy_projects.delete_one({'id': project_id})
     if res.deleted_count == 0:
         raise HTTPException(404, 'Project not found')
+    try:
+        from audit_ext import record_audit
+        await record_audit(
+            actor={'id': 'system', 'email': 'ai-api-key', 'role': 'system'},
+            action='deploy_project.delete',
+            target=doc.get('projectName') or project_id,
+            details={
+                'project_id': project_id,
+                'repo': doc.get('repo'),
+                'domain': doc.get('domain'),
+                'via': 'api_key',
+            },
+        )
+    except Exception:
+        # Audit failure must never block the actual deletion.
+        pass
     return {'ok': True, 'deleted_id': project_id}
 
 
@@ -487,6 +511,44 @@ async def op_get_key_status(_user: dict = Depends(get_current_operator)):
         'has_github_token': bool((settings or {}).get('github_token')),
         'vercel_team_id': (settings or {}).get('vercel_team_id'),
     }
+
+
+@ops_router.delete('/{project_id}')
+async def op_delete_project(
+    project_id: str,
+    request: Request,
+    op: dict = Depends(get_current_operator),
+):
+    """Operator-driven delete with full audit trail.
+
+    Captures the deleted project's name/repo/domain in the audit row so we
+    can answer "where did project X go?" months later. The audit happens
+    *after* a successful Mongo delete to keep the rows trustworthy.
+    """
+    doc = await db.deploy_projects.find_one({'id': project_id})
+    if not doc:
+        raise HTTPException(404, 'Project not found')
+    res = await db.deploy_projects.delete_one({'id': project_id})
+    if res.deleted_count == 0:
+        raise HTTPException(404, 'Project not found')
+    try:
+        from audit_ext import record_audit
+        await record_audit(
+            op,
+            'deploy_project.delete',
+            target=doc.get('projectName') or project_id,
+            details={
+                'project_id': project_id,
+                'repo': doc.get('repo'),
+                'domain': doc.get('domain'),
+                'last_deployment_url': doc.get('last_deployment_url'),
+                'via': 'operator_ui',
+            },
+            request=request,
+        )
+    except Exception:
+        pass
+    return {'ok': True, 'deleted_id': project_id}
 
 
 class KeyUpdate(BaseModel):

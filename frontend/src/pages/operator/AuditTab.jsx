@@ -30,6 +30,8 @@ const ACTION_META = {
   'withdraw.crypto_manual':       { label: 'Crypto payout',      tone: 'emerald' },
   'withdraw.crypto_manual.failed':{ label: 'Crypto payout fail', tone: 'rose'    },
   'withdraw.settings_update':     { label: 'Withdraw settings',  tone: 'sky'     },
+  'deploy_project.delete':        { label: 'Project deleted',    tone: 'rose'    },
+  'deploy_project.create':        { label: 'Project created',    tone: 'emerald' },
 };
 const TONE_CLASSES = {
   amber:   'border-amber-500/30 bg-amber-500/10 text-amber-300',
@@ -181,6 +183,36 @@ export default function AuditTab() {
             Clear
           </Button>
         )}
+
+        {/* Quick filters — one-tap presets for the most common forensic
+            questions ("who deleted that project?"). */}
+        <div className="ml-auto flex items-center gap-1.5">
+          <span className="text-[10px] uppercase tracking-wider text-tbc-200/40">Quick:</span>
+          <button
+            type="button"
+            data-testid="audit-quick-project-deletes"
+            onClick={() => { setSkip(0); setActionFilter('deploy_project.delete'); }}
+            className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider transition ${
+              actionFilter === 'deploy_project.delete'
+                ? 'border-rose-500 bg-rose-500/20 text-rose-200'
+                : 'border-tbc-900/60 bg-ink-950 text-tbc-200/70 hover:border-rose-500/60 hover:text-rose-200'
+            }`}
+          >
+            Project deletions
+          </button>
+          <button
+            type="button"
+            data-testid="audit-quick-user-deletes"
+            onClick={() => { setSkip(0); setActionFilter('user.delete'); }}
+            className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider transition ${
+              actionFilter === 'user.delete'
+                ? 'border-rose-500 bg-rose-500/20 text-rose-200'
+                : 'border-tbc-900/60 bg-ink-950 text-tbc-200/70 hover:border-rose-500/60 hover:text-rose-200'
+            }`}
+          >
+            User deletions
+          </button>
+        </div>
       </div>
 
       {/* TABLE */}
