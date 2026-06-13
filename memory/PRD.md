@@ -12,6 +12,26 @@ gold theme. Domain: **tbctools.org**.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
 ## Implemented
+- ✅ **Deploy submodule split + github_token UI** (Feb 2026):
+  - **Refactor**: `deploy_projects_ext.py` shrunk from **1634 → 1183 lines**
+    by extracting two submodules into `/app/backend/deploy/`:
+    - `code_review.py` — `fetch_repo_snapshot()` + `run_code_review()` +
+      `op_code_review` / `ai_code_review` route handlers
+    - `autopilot.py` — `AutopilotRequest` + `_sse()` + `_autopilot_stream()`
+      + `op_autopilot` / `ai_autopilot` route handlers
+    Parent module imports the submodules from inside `setup_routers()` for
+    decorator side-effects (one-way import, no cycle).
+  - **GitHub token in Operator → Security**: new `github_token` field on
+    `KeyUpdate` model + `has_github_token` flag on the status endpoint.
+    Frontend KeysCard now renders a **3-column grid** with the new card
+    (testids `deploy-key-github-token` + `deploy-key-github-save`). Tooltip
+    explains it lifts the GitHub API limit from 60/hr → 5 000/hr and unlocks
+    private-repo downloads + code reviews. Helper link to GitHub's
+    fine-grained PAT page.
+  - **Tests**: `tests/test_p4_autopilot.py` fixture updated to monkeypatch
+    `deploy.autopilot.run_code_review` (new location). Backend still at
+    **56 passed + 1 skipped**.
+
 - ✅ **Autopilot loop + useInlineDomain hook + chat-scroll constant** (Feb 2026):
   - **Autopilot SSE loop** (`POST /api/operator/deploy/{id}/autopilot` and
     `POST /api/projects/{id}/autopilot`) — runs `review → ship → watch → react`
