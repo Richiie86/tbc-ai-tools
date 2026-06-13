@@ -132,6 +132,37 @@ export function InChatDeployControls({ user }) {
       }
     } catch (e) {
       const detail = e?.response?.data?.detail || `${kind} failed`;
+      const status = e?.response?.status;
+      // Cloudflare 5xx (520-526) returns HTML, not JSON — `data?.detail`
+      // would be undefined. Surface a clear message so the operator
+      // knows it's a backend/network issue, not a "click harder" issue.
+      if (status >= 520 && status <= 526) {
+        toast.error(
+          `Origin server didn't respond cleanly (HTTP ${status}). The deploy may still be running — wait 30s and click Health to confirm.`,
+          { duration: 12000 },
+        );
+        return;
+      }
+      if (status === 504) {
+        toast.error(
+          'Deploy timed out — the build may still finish in the background. Click Health to check status.',
+          { duration: 12000 },
+        );
+        return;
+      }
+      // Backend 412 with structured `repo_not_configured` error → the
+      // operator hasn't set their GitHub repo yet. Surface a sticky
+      // toast with a "Configure now" action that jumps to Settings.
+      if (status === 412 && detail?.error === 'repo_not_configured') {
+        toast.error(detail.message || 'GitHub repo not configured', {
+          duration: 15000,
+          action: {
+            label: 'Configure now',
+            onClick: () => { window.location.href = detail.configure_url || '/operator?tab=settings'; },
+          },
+        });
+        return;
+      }
       // When the deploy fails because the Vercel token isn't set,
       // surface a sticky toast with a "Configure now" action that jumps
       // straight to the Operator Console → Ops tab so the operator can
@@ -145,7 +176,7 @@ export function InChatDeployControls({ user }) {
           },
         });
       } else {
-        toast.error(detail);
+        toast.error(typeof detail === 'string' ? detail : detail?.message || `${kind} failed (${status || 'network'})`);
       }
     } finally {
       setBusy(null);

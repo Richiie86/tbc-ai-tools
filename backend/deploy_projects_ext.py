@@ -762,6 +762,26 @@ async def _trigger_deploy(
     if not project:
         raise HTTPException(404, 'Project not found')
 
+    # Repo is the linchpin of every downstream call (Vercel pulls from git,
+    # Code Review reads from GitHub, ZIP download streams from GitHub).
+    # Surface the precondition with a clear CTA so the operator knows
+    # EXACTLY where to go — the legacy behaviour was a confusing
+    # "Repo 'foo/bar' not found on GitHub" toast from a downstream 404.
+    if not (project.get('repo') or '').strip():
+        raise HTTPException(
+            412,
+            {
+                'error': 'repo_not_configured',
+                'message': (
+                    'No GitHub repo configured for this project. '
+                    'Open Operator Console → Settings → "This app source" and '
+                    'paste your repo in the form `owner/name` (e.g. `myorg/tbc-tools`). '
+                    'Then click Deploy again.'
+                ),
+                'configure_url': '/operator?tab=settings#self-source',
+            },
+        )
+
     # Ship-gate (production deploys only — previews always go through so the
     # operator can sanity-check fixes before re-running the review).
     if target == 'production' and not bypass_review:
@@ -824,12 +844,39 @@ async def op_deploy_project(
     req: DeployRequest,
     user: dict = Depends(get_current_operator),
 ):
+    """Trigger a Vercel deploy. Wrapped in defensive error handling so the
+    response is ALWAYS a proper JSON body — never a half-written stream
+    that Cloudflare surfaces as the dreaded 520 (origin returned invalid
+    or incomplete response).
+
+    Production specifically: when Vercel needs to create a new project on
+    the first deploy, its `/v13/deployments` call can take 30-60s. Our
+    httpx client has a 20s timeout for that exact reason — anything
+    longer surfaces as a 502 with a user-actionable message.
+    """
     settings = await get_settings_doc()
-    return await _trigger_deploy(
-        project_id, settings, req.target, req.git_ref,
-        bypass_review=req.bypass_review,
-        user_id=user.get('sub'),
-    )
+    try:
+        return await _trigger_deploy(
+            project_id, settings, req.target, req.git_ref,
+            bypass_review=req.bypass_review,
+            user_id=user.get('sub'),
+        )
+    except HTTPException:
+        # Re-raise FastAPI-level errors verbatim — already JSON-encodable.
+        raise
+    except (httpx.TimeoutException, asyncio.TimeoutError) as e:
+        logger.warning('Vercel deploy timed out for %s: %s', project_id, e)
+        raise HTTPException(
+            504,
+            'Vercel deploy timed out. The build may still be running — '
+            'check the Vercel dashboard or click Health in a few seconds.',
+        ) from e
+    except Exception as e:
+        logger.exception('Unexpected deploy error for %s', project_id)
+        raise HTTPException(
+            502,
+            f'Deploy failed: {type(e).__name__}: {str(e)[:200]}',
+        ) from e
 
 
 class PromoteRequest(BaseModel):
@@ -1020,40 +1067,56 @@ async def _ensure_self_project() -> Optional[dict]:
     """The `tbctools-self` magic project represents the platform itself.
 
     Always upserts a project row so the Operator Console + Dashboard "No
-    projects" dropdown always has at least ONE entry to deploy. Operator
-    later refines `self_repo`/`self_git_ref`/`self_vercel_project_id` in
-    Settings — and we honour those overrides without clobbering the row's
-    deployment history.
+    projects" dropdown always has at least ONE entry. Fields are split:
 
-    Previously this returned `None` when `self_repo` was unset, which is
-    why production showed an empty dropdown + a disabled Deploy button
-    after a fresh deploy. The seed below is intentionally minimal — it
-    won't actually deploy until the operator pastes their real repo, but
-    it ALWAYS shows up so the UI never feels broken.
+      - `$setOnInsert` for fields the operator may curate (`repo`,
+        `domain`, `vercel_project_id`) — set on first insert only,
+        never clobbered on subsequent list calls.
+      - `$set` for `updated_at` only.
+
+    `repo` defaults to an EMPTY string when no `self_repo` setting is
+    saved. The operator's first Deploy/Review click then surfaces a
+    friendly 412 with a "Configure repo in Settings" CTA, instead of
+    silently failing with a "Repo not found on GitHub" toast (which
+    is what happened when we used a placeholder like
+    `rac-investments/tbc-self-copy`).
     """
     settings = await get_settings_doc()
-    repo = (settings or {}).get('self_repo') or 'rac-investments/tbc-self-copy'
+    repo = (settings or {}).get('self_repo', '')
     git_ref = (settings or {}).get('self_git_ref') or 'main'
+    domain = (settings or {}).get('self_domain') or 'tbctools.org'
     now = datetime.now(timezone.utc)
-    doc = {
+    insert_doc = {
         'id': SELF_PROJECT_ID,
         'projectName': 'TBC AI Tools (this app)',
         'repo': repo,
-        # Default domain mirrors the production custom domain so the
-        # row's "Copy URL" button is useful out of the box. Operator
-        # can override via the inline domain editor on the Ops tab.
-        'domain': (settings or {}).get('self_domain') or 'tbctools.org',
+        'domain': domain,
         'repoType': 'github',
         'gitRef': git_ref,
+        'created_at': now,
         'updated_at': now,
     }
     if (settings or {}).get('self_vercel_project_id'):
-        doc['vercel_project_id'] = settings['self_vercel_project_id']
-    # Upsert without clobbering deployment history fields.
+        insert_doc['vercel_project_id'] = settings['self_vercel_project_id']
     await db.deploy_projects.update_one(
         {'id': SELF_PROJECT_ID},
-        {'$set': doc, '$setOnInsert': {'created_at': now}},
+        {
+            '$set': {'updated_at': now},
+            '$setOnInsert': insert_doc,
+        },
         upsert=True,
+    )
+    # ONE-SHOT REPAIR: an earlier version of this function seeded the
+    # placeholder `rac-investments/tbc-self-copy` via `$set`, which
+    # clobbered the operator's real repo on production. Detect that
+    # exact dead value and clear it back to '' so the operator's next
+    # click surfaces the "Configure repo" CTA instead of "Repo not
+    # found on GitHub". Safe to keep long-term — only matches the
+    # exact known-bad string we wrote ourselves.
+    bad_repo = 'rac-investments/tbc-self-copy'
+    await db.deploy_projects.update_one(
+        {'id': SELF_PROJECT_ID, 'repo': bad_repo},
+        {'$set': {'repo': '', 'updated_at': now}},
     )
     return await db.deploy_projects.find_one({'id': SELF_PROJECT_ID})
 

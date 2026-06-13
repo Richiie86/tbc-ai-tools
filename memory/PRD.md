@@ -12,6 +12,37 @@ gold theme. Domain: **tbctools.org**.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
 ## Implemented
+- ✅ **"Repo not found" toast — root-caused & fixed** (Feb 2026):
+  - The previous fallback `'rac-investments/tbc-self-copy'` was a
+    placeholder I made up; it doesn't exist on GitHub. When the operator
+    on production clicked Review/Deploy on the freshly-seeded self
+    project, the GitHub API 404'd with a confusing toast.
+  - Fix in `_ensure_self_project()`: fallback `repo` is now `''` so the
+    operator's first click surfaces a clean **412 `repo_not_configured`**
+    with a "Configure now" toast action that deep-links to
+    `/operator?tab=settings#self-source`.
+  - One-shot repair: any existing row whose `repo` field is exactly
+    the bad string `'rac-investments/tbc-self-copy'` is automatically
+    cleared to `''` on the next list call. No manual Mongo edit needed.
+  - Gated `run_code_review()` with the same precondition so the Review
+    button surfaces the friendly 412 too.
+  - Added `id="self-source"` anchor + `scroll-mt-20` to the Settings
+    section so the deep link scrolls right to the right field.
+
+- ✅ **"Can't Deploy" hard-fix** (Feb 2026):
+  - `_ensure_self_project()` always upserts the row so the dropdown is
+    never empty. `$setOnInsert` for curated fields (repo/domain/
+    vercel_project_id) so the operator's hand-config is preserved.
+  - Frontend reads `p.projectName || p.name || p.id` so the picker
+    label renders for both old and new project shapes.
+  - Auto-bootstrap of `tbctools-self` on every new chat session
+    (operator only) so workspaces TBC1/TBC2/... always have a target.
+  - Deploy endpoint wrapped in defensive try/except → never returns
+    a malformed response that Cloudflare surfaces as 520. Timeouts
+    map to a clean 504 with an actionable toast.
+  - Dashboard toasts now handle 520-526 + 504 + 412 distinctly so
+    operators always see what to do next.
+
 - ✅ **Code review pass — easy wins + false-positive triage** (Feb 2026):
   - **Fixed**: Moved seeded test-user password to `TEST_USER_PASSWORD`
     env var (default `'TestUser-123'`, kept for backward compat). The

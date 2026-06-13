@@ -392,7 +392,7 @@ export default function SettingsTab() {
           />
         </div>
 
-        <div className="border-t border-tbc-900/60 pt-3">
+        <div id="self-source" className="border-t border-tbc-900/60 pt-3 scroll-mt-20">
           <div className="mb-2 text-[10px] font-bold uppercase tracking-wider text-tbc-200/60">
             &ldquo;Update this app&rdquo; — self-deploy target
           </div>

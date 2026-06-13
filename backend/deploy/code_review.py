@@ -206,6 +206,23 @@ async def run_code_review(project: dict, settings: dict) -> dict:
     still act on it."""
     from emergentintegrations.llm.chat import LlmChat, UserMessage  # local import to avoid top-level cost
 
+    # Repo precondition — surface a clean 412 instead of letting the
+    # downstream `fetch_repo_snapshot` hit GitHub with an empty path
+    # (which used to return a confusing "Repo '' not found on GitHub").
+    if not (project.get('repo') or '').strip():
+        raise HTTPException(
+            412,
+            {
+                'error': 'repo_not_configured',
+                'message': (
+                    "No GitHub repo configured for this project. "
+                    "Open Operator Console → Settings → 'This app source' and "
+                    "paste your repo in the form `owner/name`, then click Review again."
+                ),
+                'configure_url': '/operator?tab=settings#self-source',
+            },
+        )
+
     gh_token = (settings or {}).get('github_token') or os.environ.get('GITHUB_TOKEN')
     snapshot = await fetch_repo_snapshot(project['repo'], project.get('gitRef'), gh_token)
     if not snapshot['files']:
