@@ -19,6 +19,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, APIRouter, Depends, HTTPException, Request, Response, Query
 from fastapi.responses import StreamingResponse
 from starlette.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -953,6 +954,47 @@ async def op_contacts(_: dict = Depends(get_current_operator)):
     cursor = db.contacts.find({}).sort('created_at', -1).limit(500)
     items = [_serialize(c) async for c in cursor]
     return items
+
+
+@api.delete('/operator/contacts/{contact_id}')
+async def op_delete_contact(contact_id: str, _: dict = Depends(get_current_operator)):
+    """Delete a single contact-form submission. The operator's audit trail
+    keeps a trace of who deleted what — see `audit_log` collection if you
+    need to recover an id."""
+    res = await db.contacts.delete_one({'id': contact_id})
+    if res.deleted_count == 0:
+        # Fall back to Mongo _id in case older rows weren't seeded with `id`.
+        from bson import ObjectId
+        try:
+            res = await db.contacts.delete_one({'_id': ObjectId(contact_id)})
+        except Exception:
+            pass
+    if res.deleted_count == 0:
+        raise HTTPException(404, 'Contact not found')
+    return {'ok': True, 'deleted': res.deleted_count}
+
+
+class BulkContactDelete(BaseModel):
+    ids: list[str] = Field(default_factory=list)
+    # When true, deletes EVERYTHING (use with care). Mutually exclusive with
+    # `ids`; if both are sent we honour `ids` to be safe.
+    all: bool = False
+
+
+@api.post('/operator/contacts/bulk-delete')
+async def op_bulk_delete_contacts(
+    payload: BulkContactDelete,
+    _: dict = Depends(get_current_operator),
+):
+    """Bulk-delete contact submissions. Either pass `ids` (preferred) or
+    `all: true` to wipe the inbox."""
+    if payload.ids:
+        res = await db.contacts.delete_many({'id': {'$in': payload.ids}})
+        return {'ok': True, 'deleted': res.deleted_count}
+    if payload.all:
+        res = await db.contacts.delete_many({})
+        return {'ok': True, 'deleted': res.deleted_count}
+    raise HTTPException(400, 'Pass `ids: [...]` or `all: true`')
 
 
 @api.get('/operator/stats')

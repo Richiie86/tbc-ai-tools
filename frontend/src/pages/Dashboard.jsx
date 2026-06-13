@@ -15,6 +15,7 @@ import { EmptyState, MessageBubble } from './dashboard/ChatMessages';
 import { ChatComposer } from './dashboard/ChatComposer';
 import CreditsBadge from '../components/CreditsBadge';
 import { OutOfCreditsDialog } from './dashboard/OutOfCreditsDialog';
+import { DashboardGuideTour, DashboardGuideButton } from './dashboard/DashboardGuideTour';
 
 // Anything within this many pixels from the bottom counts as "still at the
 // end" so a stray scroll-wheel nudge doesn't unstick the stream. Module-level
@@ -51,6 +52,8 @@ export default function Dashboard({ variant = 'tbc1' }) {
   const [models, setModels] = useState({ providers: {} });
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [outOfCreditsOpen, setOutOfCreditsOpen] = useState(false);
+  // Bump to re-launch the first-time tour from the "Guide" button.
+  const [guideKey, setGuideKey] = useState(0);
   // "Stick to bottom" = follow new tokens. Flips OFF the moment the user
   // scrolls up so they can read older messages without the stream yanking
   // them back; flips back ON when they scroll to the bottom themselves or
@@ -277,6 +280,7 @@ export default function Dashboard({ variant = 'tbc1' }) {
             {/* Credits badge sits right next to the model picker so users
                 always see how much budget they have left while chatting. */}
             <CreditsBadge user={user} testid="dashboard-credits-badge" />
+            <DashboardGuideButton onOpen={() => setGuideKey((k) => k + 1)} />
             <Select value={model} onValueChange={setModel}>
               <SelectTrigger className="h-9 w-[230px] border-slate-700 bg-slate-900 text-slate-100">
                 <div className="flex items-center gap-2 text-sm">
@@ -352,6 +356,7 @@ export default function Dashboard({ variant = 'tbc1' }) {
         onOpenChange={setOutOfCreditsOpen}
         user={user}
       />
+      <DashboardGuideTour key={guideKey} forceOpen={guideKey > 0} />
     </div>
   );
 }

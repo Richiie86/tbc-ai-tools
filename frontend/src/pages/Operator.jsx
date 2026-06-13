@@ -29,19 +29,35 @@ import { UsersTable } from './operator/users/UsersTable';
 import CodesBrowser from './operator/CodesBrowser';
 import { ContactsList } from './operator/ContactsList';
 
-function StatCard({ icon: Icon, label, value }) {
+function StatCard({ icon: Icon, label, value, onClick, hint }) {
+  // When `onClick` is provided we render as a button so the operator can
+  // jump directly to the relevant tab (e.g. clicking "Total Messages" goes
+  // to Contacts). Without `onClick` it stays a passive card.
+  const interactive = !!onClick;
+  const Wrap = interactive ? 'button' : 'div';
   return (
-    <Card className="border-tbc-900/60 bg-ink-900/80 p-5">
+    <Wrap
+      type={interactive ? 'button' : undefined}
+      onClick={onClick}
+      data-testid={interactive ? `stat-card-${label.toLowerCase().replace(/[^a-z]+/g, '-')}` : undefined}
+      title={hint}
+      className={`w-full text-left rounded-xl border border-tbc-900/60 bg-ink-900/80 p-5 transition ${
+        interactive ? 'cursor-pointer hover:bg-ink-900 hover:border-tbc-500/60 hover:shadow-[0_0_18px_rgba(212,160,40,0.15)] focus:outline-none focus:ring-2 focus:ring-tbc-500/40' : ''
+      }`}
+    >
       <div className="flex items-center justify-between">
         <div>
           <div className="text-xs uppercase tracking-wider text-tbc-200/60">{label}</div>
           <div className="mt-1 text-2xl font-bold text-tbc-100">{value}</div>
+          {hint && interactive && (
+            <div className="mt-1 text-[10px] text-tbc-200/50">{hint}</div>
+          )}
         </div>
         <div className="grid h-10 w-10 place-items-center rounded-lg bg-tbc-500/15 text-tbc-300">
           <Icon className="h-5 w-5" />
         </div>
       </div>
-    </Card>
+    </Wrap>
   );
 }
 
@@ -229,10 +245,14 @@ export default function Operator() {
         ) : (
           <>
             <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-              <StatCard icon={Users}        label="Total Users"     value={stats?.total_users ?? '–'} />
-              <StatCard icon={CreditCard}   label="Paid Customers"  value={stats?.paid_users ?? '–'} />
-              <StatCard icon={MessageSquare} label="Total Messages" value={stats?.total_messages?.toLocaleString() ?? '–'} />
-              <StatCard icon={DollarSign}   label="Revenue (USD)"   value={`$${(stats?.revenue_usd ?? 0).toLocaleString()}`} />
+              <StatCard icon={Users}        label="Total Users"     value={stats?.total_users ?? '–'}
+                onClick={() => setActiveTab('users')} hint="View user list" />
+              <StatCard icon={CreditCard}   label="Paid Customers"  value={stats?.paid_users ?? '–'}
+                onClick={() => setActiveTab('payments')} hint="See payments" />
+              <StatCard icon={MessageSquare} label="Total Messages" value={stats?.total_messages?.toLocaleString() ?? '–'}
+                onClick={() => setActiveTab('contacts')} hint="Read messages" />
+              <StatCard icon={DollarSign}   label="Revenue (USD)"   value={`$${(stats?.revenue_usd ?? 0).toLocaleString()}`}
+                onClick={() => setActiveTab('money')} hint="Open Money tab" />
             </div>
 
             <Tabs value={activeTab} onValueChange={setActiveTab} className="mt-10">
@@ -311,7 +331,7 @@ export default function Operator() {
               <TabsContent value="settings"  className="mt-5"><SettingsTab /></TabsContent>
               <TabsContent value="ops"       className="mt-5"><OpsTab /></TabsContent>
               <TabsContent value="audit"     className="mt-5"><AuditTab /></TabsContent>
-              <TabsContent value="contacts"  className="mt-5"><ContactsList contacts={contacts} /></TabsContent>
+              <TabsContent value="contacts"  className="mt-5"><ContactsList contacts={contacts} onChanged={loadAll} /></TabsContent>
               <TabsContent value="codes"     className="mt-5"><CodesBrowser /></TabsContent>
             </Tabs>
           </>

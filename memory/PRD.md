@@ -12,6 +12,26 @@ gold theme. Domain: **tbctools.org**.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
 ## Implemented
+- ✅ **Clickable stat cards + delete messages + Dashboard tour** (Feb 2026):
+  - **Clickable stat cards**: Operator Console header stats (Total Users /
+    Paid Customers / Total Messages / Revenue) are now full-width buttons
+    that jump to the relevant tab. Each card shows a tiny hint underneath
+    (e.g. "Read messages") so the affordance is obvious. testid:
+    `stat-card-{label-kebab}`.
+  - **Delete contact messages**: new backend endpoints
+    `DELETE /api/operator/contacts/{id}` (single) +
+    `POST /api/operator/contacts/bulk-delete` (`{ids:[...]}` or `{all:true}`).
+    Frontend ContactsList now renders a per-row trash icon
+    (`contact-delete-{id}`) and a "Delete all" button at the top of the
+    inbox (`contacts-delete-all`). Parent re-fetches stats + contacts on
+    every change so the badge updates immediately.
+  - **Dashboard quick guide**: 4-step `/dashboard` tour (The chat → Model
+    picker → Sessions → Credits & billing) with the same auto-open-once +
+    "Guide" button pattern as the Operator one (separate localStorage key
+    `tbc_dashboard_tour_seen_v1`, separate testids
+    `dashboard-guide-tour`, `dashboard-guide-skip/prev/next`,
+    `open-dashboard-guide`).
+
 - ✅ **Password-overwrite bug fix + Operator quick guide** (Feb 2026):
   - **Bug fix (HIGH)**: pasting any API key (Emergent LLM Universal Key,
     Stripe, NOWPayments, Resend, PayPal, Vercel PAT, GitHub PAT) into the
