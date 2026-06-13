@@ -6,6 +6,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '../../../components/ui/select';
 import { Button } from '../../../components/ui/button';
+import { CreditsAdjuster } from './CreditsAdjuster';
 
 const PLANS = ['free', 'starter', 'pro', 'enterprise'];
 
@@ -101,14 +102,11 @@ export function UsersTable({
               </TableCell>
               <TableCell className="text-right">
                 <div className="flex justify-end gap-1.5">
-                  <Button
-                    size="sm" variant="outline"
-                    data-testid={`op-grant-credits-${u.id}`}
-                    className="border-tbc-900/60 bg-ink-900 text-tbc-100 hover:bg-ink-900/40"
-                    onClick={() => onGrantCredits(u.id, 100)}
-                  >
-                    +100
-                  </Button>
+                  <CreditsAdjuster
+                    userId={u.id}
+                    currentCredits={u.credits}
+                    onGrant={onGrantCredits}
+                  />
                   {u.totp_enabled && (
                     <Button
                       size="sm" variant="outline"

@@ -20,6 +20,8 @@ import Setup2FA from './pages/Setup2FA';
 import Dashboard from './pages/Dashboard';
 import BillingSuccess from './pages/BillingSuccess';
 import Operator from './pages/Operator';
+import ProjectSettings from './pages/ProjectSettings';
+import MarketingBanner from './components/MarketingBanner';
 import './App.css';
 
 function App() {
@@ -27,6 +29,7 @@ function App() {
     <div className="App min-h-screen bg-background text-foreground">
       <AuthProvider>
         <BrowserRouter>
+          <MarketingBanner />
           <Routes>
             <Route path="/" element={<Landing />} />
             <Route path="/about" element={<About />} />
@@ -50,6 +53,7 @@ function App() {
             <Route path="/tbc2/:sessionId" element={<ProtectedRoute><Dashboard variant="tbc2" /></ProtectedRoute>} />
             <Route path="/billing/success" element={<ProtectedRoute><BillingSuccess /></ProtectedRoute>} />
             <Route path="/operator" element={<ProtectedRoute operatorOnly><Operator /></ProtectedRoute>} />
+            <Route path="/operator/projects/:projectId/settings" element={<ProtectedRoute operatorOnly><ProjectSettings /></ProtectedRoute>} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </BrowserRouter>

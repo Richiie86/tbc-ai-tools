@@ -131,6 +131,30 @@ def _project_to_out(doc: dict) -> dict:
     }
 
 
+def _mask_secret(v: Optional[str]) -> Optional[str]:
+    """Mask everything except the last 4 characters for safe display."""
+    if not v:
+        return None
+    if len(v) <= 4:
+        return '••' + v[-1:]
+    return '••••' + v[-4:]
+
+
+def _project_settings_to_out(doc: dict) -> dict:
+    """Operator-only view that exposes presence + masked previews of secrets."""
+    raw_env = doc.get('env_vars') or {}
+    return {
+        'id': doc['id'],
+        'projectName': doc['projectName'],
+        'admin_email': doc.get('admin_email') or '',
+        'admin_password_set': bool(doc.get('admin_password_hash')),
+        'env_vars': [
+            {'key': k, 'masked': _mask_secret(v), 'present': bool(v)}
+            for k, v in raw_env.items()
+        ],
+    }
+
+
 async def _require_ai_api_key(authorization: Optional[str] = Header(None)) -> dict:
     """Validate `Authorization: Bearer <AI_API_KEY>` against the stored token.
 
@@ -514,6 +538,71 @@ async def op_update_keys(
         'ok': True,
         'revealed_ai_api_key': new_key,
     }
+
+
+# -------------------------------------------------------------------
+# Per-project settings (admin email / password / env-var secrets)
+# -------------------------------------------------------------------
+class ProjectSettingsUpdate(BaseModel):
+    """Partial update for the project-level settings page.
+
+    Empty strings on string fields are ignored so the operator can save
+    one field at a time without wiping the others. Pass `env_vars` as a
+    {key: value} dict — keys present here replace existing values; pass
+    an empty string for any value to mark it for deletion.
+    """
+    admin_email: Optional[str] = None
+    admin_password: Optional[str] = None
+    env_vars: Optional[dict] = None
+
+
+@ops_router.get('/{project_id}/settings')
+async def op_get_project_settings(
+    project_id: str,
+    _user: dict = Depends(get_current_operator),
+):
+    doc = await db.deploy_projects.find_one({'id': project_id})
+    if not doc:
+        raise HTTPException(404, 'Project not found')
+    return _project_settings_to_out(doc)
+
+
+@ops_router.put('/{project_id}/settings')
+async def op_update_project_settings(
+    project_id: str,
+    payload: ProjectSettingsUpdate,
+    _user: dict = Depends(get_current_operator),
+):
+    doc = await db.deploy_projects.find_one({'id': project_id})
+    if not doc:
+        raise HTTPException(404, 'Project not found')
+
+    update: dict = {'updated_at': datetime.now(timezone.utc)}
+    if payload.admin_email and payload.admin_email.strip():
+        update['admin_email'] = payload.admin_email.strip()
+    if payload.admin_password and payload.admin_password.strip():
+        # Use bcrypt via passlib so we never store the plaintext password.
+        try:
+            from passlib.hash import bcrypt
+            update['admin_password_hash'] = bcrypt.hash(payload.admin_password)
+        except Exception as e:
+            raise HTTPException(500, f'Password hashing failed: {e}')
+    if payload.env_vars is not None:
+        # Merge — empty string deletes, present values replace.
+        existing_env = dict(doc.get('env_vars') or {})
+        for k, v in payload.env_vars.items():
+            key = (k or '').strip()
+            if not key:
+                continue
+            if v is None or (isinstance(v, str) and v.strip() == ''):
+                existing_env.pop(key, None)
+            else:
+                existing_env[key] = str(v)
+        update['env_vars'] = existing_env
+
+    await db.deploy_projects.update_one({'id': project_id}, {'$set': update})
+    fresh = await db.deploy_projects.find_one({'id': project_id})
+    return _project_settings_to_out(fresh)
 
 
 async def _create_fix_review_chat(project: dict, review: dict, user_id: Optional[str]) -> Optional[str]:

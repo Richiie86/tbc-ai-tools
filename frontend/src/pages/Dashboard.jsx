@@ -16,6 +16,9 @@ import { ChatComposer } from './dashboard/ChatComposer';
 import CreditsBadge from '../components/CreditsBadge';
 import { OutOfCreditsDialog } from './dashboard/OutOfCreditsDialog';
 import { DashboardGuideTour, DashboardGuideButton } from './dashboard/DashboardGuideTour';
+import { InChatDeployControls } from './dashboard/InChatDeployControls';
+import { PostAiDeploySuggestion } from './dashboard/PostAiDeploySuggestion';
+import { NotificationsBell } from './dashboard/NotificationsBell';
 
 // Anything within this many pixels from the bottom counts as "still at the
 // end" so a stray scroll-wheel nudge doesn't unstick the stream. Module-level
@@ -54,6 +57,9 @@ export default function Dashboard({ variant = 'tbc1' }) {
   const [outOfCreditsOpen, setOutOfCreditsOpen] = useState(false);
   // Bump to re-launch the first-time tour from the "Guide" button.
   const [guideKey, setGuideKey] = useState(0);
+  // Show the "AI is done — redeploy?" banner each time the AI finishes
+  // a stream. The operator can dismiss; it re-shows on the next reply.
+  const [showDeploySuggest, setShowDeploySuggest] = useState(false);
   // "Stick to bottom" = follow new tokens. Flips OFF the moment the user
   // scrolls up so they can read older messages without the stream yanking
   // them back; flips back ON when they scroll to the bottom themselves or
@@ -198,6 +204,7 @@ export default function Dashboard({ variant = 'tbc1' }) {
     setInput('');
     setStreaming(true);
     setStreamText('');
+    setShowDeploySuggest(false);
     // Optimistic user message
     const userMsg = { id: 'tmp-' + Date.now(), role: 'user', content: text };
     setMessages((m) => [...m, userMsg]);
@@ -228,6 +235,8 @@ export default function Dashboard({ variant = 'tbc1' }) {
       }
       loadSessions();
       refresh();
+      // Surface the deploy suggestion now that the AI is done.
+      if (user?.role === 'operator') setShowDeploySuggest(true);
     } catch (e) {
       toast.error(e.message || 'Failed');
       setMessages((m) => m.filter((x) => x.id !== userMsg.id));
@@ -277,6 +286,9 @@ export default function Dashboard({ variant = 'tbc1' }) {
             <div className="text-sm font-semibold text-white">{brandTitle}</div>
           </div>
           <div className="flex items-center gap-3">
+            {/* Operator-only deploy controls so we can ship code from inside chat. */}
+            <InChatDeployControls user={user} />
+            <NotificationsBell />
             {/* Credits badge sits right next to the model picker so users
                 always see how much budget they have left while chatting. */}
             <CreditsBadge user={user} testid="dashboard-credits-badge" />
@@ -349,6 +361,11 @@ export default function Dashboard({ variant = 'tbc1' }) {
           streaming={streaming}
           onSend={send}
           taRef={taRef}
+        />
+        <PostAiDeploySuggestion
+          user={user}
+          visible={showDeploySuggest && !streaming}
+          onDismiss={() => setShowDeploySuggest(false)}
         />
       </main>
       <OutOfCreditsDialog

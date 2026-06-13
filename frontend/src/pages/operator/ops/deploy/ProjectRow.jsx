@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 import {
   Rocket, Globe, Loader2, Copy, Check, GitBranch, ExternalLink, RotateCw, Save,
   Sparkles, Activity, AlertCircle, CheckCircle2, GitFork, Pencil, ShieldCheck, Bot,
+  Cog,
 } from 'lucide-react';
 
 import { CodeReviewDialog } from './CodeReviewDialog';
@@ -239,6 +240,15 @@ export function ProjectRow({ project, onDeployed }) {
                   <span className="rounded-full bg-tbc-500 px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-slate-950">this app</span>
                 )}
                 <HealthPill health={health} />
+                <button
+                  type="button"
+                  onClick={() => navigate(`/operator/projects/${project.id}/settings`)}
+                  data-testid={`project-settings-link-${project.id}`}
+                  title="Open project settings"
+                  className="ml-1 grid h-6 w-6 place-items-center rounded text-tbc-200/70 transition-colors hover:bg-tbc-500/20 hover:text-tbc-100"
+                >
+                  <Cog className="h-3.5 w-3.5" />
+                </button>
               </div>
               <div className="flex items-center gap-2 text-[11px] text-tbc-200/60">
                 <span className="font-mono">{project.repo}</span>

@@ -8,9 +8,22 @@ import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger,
 } from '../../components/ui/dialog';
 import { toast } from 'sonner';
-import { Plus, Pencil, Trash2, Loader2, Sparkles, Clock } from 'lucide-react';
+import { Plus, Pencil, Trash2, Loader2, Sparkles, Clock, Percent } from 'lucide-react';
 
 const EMPTY_PLAN = { id: '', name: '', price: 0, regular_price: 0, credits: 0, intro: false, features: [], enabled: true, order: 0, trial_days: 0 };
+
+const computeDiscountPct = (regular, price) => {
+  const r = Number(regular) || 0;
+  const p = Number(price) || 0;
+  if (r <= 0 || p < 0 || p > r) return 0;
+  return Math.round(((r - p) / r) * 100);
+};
+
+const applyDiscountPct = (regular, pct) => {
+  const r = Number(regular) || 0;
+  const p = Math.max(0, Math.min(100, Number(pct) || 0));
+  return Math.round(r * (1 - p / 100) * 100) / 100;
+};
 
 export default function PlansTab() {
   const [plans, setPlans] = useState([]);
@@ -78,9 +91,11 @@ export default function PlansTab() {
 
   return (
     <div>
-      <div className="mb-3 flex items-center justify-between">
+      <div className="mb-3 flex items-center justify-between gap-3">
         <p className="text-sm text-tbc-200/60">Edit pricing, credits, and visibility of subscription plans. Changes apply instantly.</p>
-        <Dialog open={open} onOpenChange={setOpen}>
+        <div className="flex items-center gap-2">
+          <DiscountCampaignButton onDone={load} />
+          <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
             <Button onClick={openCreate} className="bg-tbc-500 text-ink-950 hover:bg-tbc-400 font-semibold"><Plus className="mr-1.5 h-4 w-4" /> New plan</Button>
           </DialogTrigger>
@@ -91,11 +106,59 @@ export default function PlansTab() {
                 <Field label="ID (unique)"><Input className="bg-ink-950 border-tbc-900/60 text-tbc-100" value={form.id} onChange={(e)=>setForm({...form, id:e.target.value})} disabled={!!editing} /></Field>
                 <Field label="Name"><Input className="bg-ink-950 border-tbc-900/60 text-tbc-100" value={form.name} onChange={(e)=>setForm({...form, name:e.target.value})} /></Field>
               </div>
-              <div className="grid grid-cols-3 gap-3">
-                <Field label="Price ($)"><Input type="number" step="0.01" className="bg-ink-950 border-tbc-900/60 text-tbc-100" value={form.price} onChange={(e)=>setForm({...form, price:e.target.value})} /></Field>
-                <Field label="Regular price ($)"><Input type="number" step="0.01" className="bg-ink-950 border-tbc-900/60 text-tbc-100" value={form.regular_price} onChange={(e)=>setForm({...form, regular_price:e.target.value})} /></Field>
+              <div className="grid grid-cols-4 gap-3">
+                <Field label="Regular price ($)">
+                  <Input
+                    type="number"
+                    step="0.01"
+                    data-testid="plans-form-regular-price"
+                    className="bg-ink-950 border-tbc-900/60 text-tbc-100"
+                    value={form.regular_price}
+                    onChange={(e)=>{
+                      const newReg = e.target.value;
+                      const pct = computeDiscountPct(form.regular_price, form.price);
+                      // If price was a clean discount of old regular, recompute price for new regular
+                      const newPrice = pct > 0 ? applyDiscountPct(newReg, pct) : form.price;
+                      setForm({...form, regular_price: newReg, price: newPrice, intro: pct > 0});
+                    }}
+                  />
+                </Field>
+                <Field label="% off">
+                  <div className="relative">
+                    <Input
+                      type="number"
+                      step="1"
+                      min="0"
+                      max="100"
+                      data-testid="plans-form-discount-pct"
+                      className="bg-ink-950 border-tbc-900/60 text-tbc-100 pr-7"
+                      value={computeDiscountPct(form.regular_price, form.price)}
+                      onChange={(e)=>{
+                        const pct = e.target.value;
+                        const newPrice = applyDiscountPct(form.regular_price, pct);
+                        setForm({...form, price: newPrice, intro: Number(pct) > 0});
+                      }}
+                    />
+                    <Percent className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-tbc-300/60" />
+                  </div>
+                </Field>
+                <Field label="Price ($)">
+                  <Input
+                    type="number"
+                    step="0.01"
+                    data-testid="plans-form-price"
+                    className="bg-ink-950 border-tbc-900/60 text-tbc-100"
+                    value={form.price}
+                    onChange={(e)=>setForm({...form, price:e.target.value})}
+                  />
+                </Field>
                 <Field label="Credits"><Input type="number" className="bg-ink-950 border-tbc-900/60 text-tbc-100" value={form.credits} onChange={(e)=>setForm({...form, credits:e.target.value})} /></Field>
               </div>
+              {Number(form.regular_price) > 0 && Number(form.price) >= 0 && Number(form.price) < Number(form.regular_price) && (
+                <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200" data-testid="plans-form-discount-summary">
+                  Customers save <span className="font-bold">${(Number(form.regular_price) - Number(form.price)).toFixed(2)}</span> ({computeDiscountPct(form.regular_price, form.price)}% off) — first month at <span className="font-bold">${Number(form.price).toFixed(2)}</span>, then <span className="font-bold">${Number(form.regular_price).toFixed(2)}/mo</span>.
+                </div>
+              )}
               <Field label="Features (one per line)">
                 <Textarea rows={4} className="bg-ink-950 border-tbc-900/60 text-tbc-100" value={featuresText} onChange={(e)=>setFeaturesText(e.target.value)} />
               </Field>
@@ -121,6 +184,7 @@ export default function PlansTab() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+        </div>
       </div>
 
       <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
@@ -151,7 +215,12 @@ export default function PlansTab() {
               <span className="text-3xl font-bold text-tbc-50">${p.price}</span>
               <span className="text-xs text-tbc-200/60">/mo</span>
               {p.intro && p.regular_price > p.price && (
-                <span className="ml-2 text-xs text-tbc-300">then ${p.regular_price}/mo</span>
+                <>
+                  <span className="ml-2 text-xs text-tbc-300">then ${p.regular_price}/mo</span>
+                  <span className="ml-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase text-emerald-300" data-testid={`plan-discount-badge-${p.id}`}>
+                    -{computeDiscountPct(p.regular_price, p.price)}%
+                  </span>
+                </>
               )}
             </div>
             <div className="text-xs text-tbc-300">{p.credits.toLocaleString()} credits</div>
@@ -172,5 +241,84 @@ function Field({ label, children }) {
       <label className="text-xs font-semibold uppercase tracking-wider text-tbc-200/60">{label}</label>
       <div className="mt-1.5">{children}</div>
     </div>
+  );
+}
+
+function DiscountCampaignButton({ onDone }) {
+  const [open, setOpen] = useState(false);
+  const [percent, setPercent] = useState(20);
+  const [busy, setBusy] = useState(false);
+
+  const apply = async (clear) => {
+    setBusy(true);
+    try {
+      const { data } = await api.post('/operator/plans/discount-campaign', {
+        percent: Number(percent) || 0,
+        clear,
+      });
+      toast.success(clear ? `Cleared discounts on ${data.updated} plans` : `Applied ${percent}% off to ${data.updated} plans`);
+      setOpen(false);
+      onDone?.();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Campaign failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button
+          variant="outline"
+          className="border-emerald-500/40 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/20"
+          data-testid="plans-campaign-open-btn"
+        >
+          <Percent className="mr-1.5 h-4 w-4" /> Discount campaign
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="border-tbc-900/60 bg-ink-900 text-tbc-100">
+        <DialogHeader>
+          <DialogTitle>Apply a global discount campaign</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          <p className="text-xs text-tbc-200/60">
+            Sets each plan&apos;s first-month price to its regular price minus this percentage. The original price is preserved
+            as <span className="font-semibold text-tbc-100">regular_price</span> so customers see the savings on the pricing page.
+          </p>
+          <Field label="% off (0-100)">
+            <Input
+              type="number"
+              min="0"
+              max="100"
+              data-testid="plans-campaign-pct-input"
+              className="bg-ink-950 border-tbc-900/60 text-tbc-100"
+              value={percent}
+              onChange={(e) => setPercent(e.target.value)}
+            />
+          </Field>
+        </div>
+        <DialogFooter className="flex-col gap-2 sm:flex-row">
+          <Button
+            variant="outline"
+            onClick={() => apply(true)}
+            disabled={busy}
+            className="border-tbc-900/60 bg-ink-900 text-tbc-100 hover:bg-ink-950"
+            data-testid="plans-campaign-clear-btn"
+          >
+            Clear all discounts
+          </Button>
+          <Button
+            onClick={() => apply(false)}
+            disabled={busy || !percent}
+            className="bg-emerald-500 text-ink-950 hover:bg-emerald-400 font-semibold"
+            data-testid="plans-campaign-apply-btn"
+          >
+            {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+            Apply {percent}% off to all plans
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

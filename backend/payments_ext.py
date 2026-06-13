@@ -7,7 +7,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from fastapi.responses import StreamingResponse, Response
 import segno
 from reportlab.lib.pagesizes import A4
@@ -420,6 +420,111 @@ async def op_delete_plan(plan_id: str, _: dict = Depends(get_current_operator)):
     return {'success': True}
 
 
+@router.post('/operator/plans/discount-campaign')
+async def op_discount_campaign(
+    payload: dict = Body(...),
+    _: dict = Depends(get_current_operator),
+):
+    """Apply a global % discount across selected (or all) plans.
+
+    Body: {"percent": 20, "plan_ids": ["starter", "pro"] | null, "clear": false}
+    - When clear=true, restores price = regular_price and intro=false for the selected scope.
+    - Otherwise, sets price = round(regular_price * (1 - percent/100), 2) and intro=true.
+    """
+    db = await get_db()
+    clear = bool(payload.get('clear'))
+    plan_ids = payload.get('plan_ids') or None
+    query = {}
+    if plan_ids:
+        query['id'] = {'$in': list(plan_ids)}
+    updated = 0
+    async for doc in db.plans.find(query):
+        regular = float(doc.get('regular_price') or doc.get('price') or 0)
+        if regular <= 0:
+            continue
+        if clear:
+            new_price = regular
+            intro = False
+        else:
+            pct = max(0.0, min(100.0, float(payload.get('percent') or 0)))
+            new_price = round(regular * (1 - pct / 100.0), 2)
+            intro = pct > 0
+        await db.plans.update_one(
+            {'id': doc['id']},
+            {'$set': {'price': new_price, 'regular_price': regular, 'intro': intro}},
+        )
+        updated += 1
+    return {'success': True, 'updated': updated, 'clear': clear}
+
+
+# ===================================================================
+# MARKETING BANNER (scrolling ticker)
+# ===================================================================
+@router.get('/marketing/banner')
+async def get_marketing_banner():
+    """Public — fetch the current scrolling marketing banner config.
+
+    Returns the messages list (each: {text, href?}), the enabled flag, the
+    speed in seconds, and the optional start/end dates so the banner can
+    auto-hide outside the campaign window.
+    """
+    db = await get_db()
+    doc = await db.settings.find_one({'_id': 'marketing_banner'}) or {}
+    return {
+        'enabled': bool(doc.get('enabled', False)),
+        'messages': doc.get('messages') or [],
+        'speed_seconds': float(doc.get('speed_seconds') or 30),
+        'starts_at': doc.get('starts_at'),
+        'ends_at': doc.get('ends_at'),
+    }
+
+
+@router.put('/operator/marketing/banner')
+async def update_marketing_banner(
+    payload: dict = Body(...),
+    _: dict = Depends(get_current_operator),
+):
+    """Operator — replace the marketing banner config.
+
+    Body shape:
+        {
+          "enabled": true,
+          "messages": [{"text": "20% off PRO this week!", "href": "/pricing"}],
+          "speed_seconds": 30,
+          "starts_at": "2026-02-01T00:00:00Z" | null,
+          "ends_at":   "2026-02-08T00:00:00Z" | null
+        }
+    """
+    db = await get_db()
+    # Defensive normalisation — accept str messages too.
+    raw_msgs = payload.get('messages') or []
+    clean_msgs = []
+    for m in raw_msgs:
+        if isinstance(m, str):
+            t = m.strip()
+            if t:
+                clean_msgs.append({'text': t})
+        elif isinstance(m, dict):
+            t = (m.get('text') or '').strip()
+            if not t:
+                continue
+            item = {'text': t}
+            href = (m.get('href') or '').strip()
+            if href:
+                item['href'] = href
+            clean_msgs.append(item)
+    doc = {
+        '_id': 'marketing_banner',
+        'enabled': bool(payload.get('enabled', False)),
+        'messages': clean_msgs,
+        'speed_seconds': max(5.0, min(300.0, float(payload.get('speed_seconds') or 30))),
+        'starts_at': payload.get('starts_at') or None,
+        'ends_at': payload.get('ends_at') or None,
+    }
+    await db.settings.update_one({'_id': 'marketing_banner'}, {'$set': doc}, upsert=True)
+    return {'success': True, 'messages_count': len(clean_msgs)}
+
+
 # ===================================================================
 # OPERATOR: TREASURY CRUD
 # ===================================================================
@@ -514,6 +619,10 @@ async def op_get_settings(_: dict = Depends(get_current_operator)):
         'self_repo': doc.get('self_repo') or '',
         'self_git_ref': doc.get('self_git_ref') or 'main',
         'self_vercel_project_id': doc.get('self_vercel_project_id') or '',
+        # GitHub Contents API token used by code-review (private repos) and
+        # auto-fix (committing patches back).
+        'github_token_set': bool(doc.get('github_token')),
+        'github_token_masked': _mask_key(doc.get('github_token')),
     }
 
 
@@ -532,6 +641,7 @@ async def op_update_settings(payload: dict, _: dict = Depends(get_current_operat
         'vercel_token', 'vercel_team_id', 'ai_api_key',
         'deploy_webhook_url', 'deploy_webhook_secret',
         'self_repo', 'self_git_ref', 'self_vercel_project_id',
+        'github_token',
     }
     updates = {}
     for k, v in payload.items():
@@ -548,7 +658,7 @@ async def op_update_settings(payload: dict, _: dict = Depends(get_current_operat
 @router.post('/operator/settings/clear')
 async def op_clear_secret(key: str = Query(...), _: dict = Depends(get_current_operator)):
     db = await get_db()
-    if key not in {'stripe_secret_key', 'nowpayments_api_key', 'nowpayments_ipn_secret', 'paypal_client_id', 'paypal_client_secret', 'emergent_llm_key', 'resend_api_key'}:
+    if key not in {'stripe_secret_key', 'nowpayments_api_key', 'nowpayments_ipn_secret', 'paypal_client_id', 'paypal_client_secret', 'emergent_llm_key', 'resend_api_key', 'vercel_token', 'ai_api_key', 'github_token'}:
         raise HTTPException(400, 'Cannot clear this key')
     await db.settings.update_one({'_id': 'payment_settings'}, {'$set': {key: None}})
     return {'success': True}

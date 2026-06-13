@@ -8,7 +8,7 @@ import { toast } from 'sonner';
 import {
   Users, CreditCard, MessageSquare, DollarSign, Loader2, ShieldCheck, Mail,
   Code2, Search, Sparkles, Wallet, KeyRound, Settings as SettingsIcon, Coins,
-  FolderKanban, Activity, ScrollText,
+  FolderKanban, Activity, ScrollText, Megaphone, MessageCircle,
 } from 'lucide-react';
 
 import PlansTab     from './operator/PlansTab';
@@ -21,6 +21,8 @@ import ProjectsTab  from './operator/ProjectsTab';
 import OpsTab       from './operator/OpsTab';
 import MoneyTab     from './operator/MoneyTab';
 import AuditTab     from './operator/AuditTab';
+import MarketingTab from './operator/MarketingTab';
+import MessagingTab from './operator/MessagingTab';
 
 import { OperatorGuideTour, OperatorGuideButton } from './OperatorGuideTour';
 
@@ -252,9 +254,10 @@ export default function Operator() {
   const grantCredits = async (userId, amount) => {
     try {
       await api.post(`/operator/users/${userId}/credits?amount=${amount}`);
-      toast.success(`Granted ${amount} credits`);
+      const verb = amount >= 0 ? 'Granted' : 'Removed';
+      toast.success(`${verb} ${Math.abs(amount).toLocaleString()} credit${Math.abs(amount) === 1 ? '' : 's'}`);
       loadAll();
-    } catch { toast.error('Could not grant credits'); }
+    } catch { toast.error('Could not adjust credits'); }
   };
   const setPlan = async (userId, plan) => {
     try {
@@ -350,6 +353,8 @@ export default function Operator() {
                 <TabTrigger value="audit"     icon={ScrollText}>Audit</TabTrigger>
                 <TabTrigger value="contacts"  icon={Mail}>Contacts</TabTrigger>
                 <TabTrigger value="codes"     icon={Code2}>Codes</TabTrigger>
+                <TabTrigger value="marketing" icon={Megaphone}>Marketing</TabTrigger>
+                <TabTrigger value="messaging" icon={MessageCircle}>Messaging</TabTrigger>
               </TabsList>
 
               <TabsContent value="users" className="mt-5">
@@ -413,6 +418,8 @@ export default function Operator() {
               <TabsContent value="audit"     className="mt-5"><AuditTab /></TabsContent>
               <TabsContent value="contacts"  className="mt-5"><ContactsList contacts={contacts} onChanged={loadAll} /></TabsContent>
               <TabsContent value="codes"     className="mt-5"><CodesBrowser /></TabsContent>
+              <TabsContent value="marketing" className="mt-5"><MarketingTab /></TabsContent>
+              <TabsContent value="messaging" className="mt-5"><MessagingTab users={users} /></TabsContent>
             </Tabs>
           </>
         )}

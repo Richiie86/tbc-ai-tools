@@ -30,6 +30,7 @@ export default function SettingsTab() {
     self_repo: '',
     self_git_ref: '',
     self_vercel_project_id: '',
+    github_token: '',
   });
   const [reveal, setReveal] = useState({});
 
@@ -319,6 +320,20 @@ export default function SettingsTab() {
           onSave={() => save({ vercel_token: form.vercel_token })}
           onClear={() => clearKey('vercel_token')}
           placeholder="Paste your Vercel PAT (vercel.com/account/tokens)"
+        />
+
+        <KeyRow
+          label="GitHub Personal Access Token"
+          fieldKey="github_token"
+          isSet={settings.github_token_set}
+          masked={settings.github_token_masked}
+          value={form.github_token}
+          reveal={reveal.github_token}
+          onReveal={() => toggleReveal('github_token')}
+          onChange={(v) => setForm({ ...form, github_token: v })}
+          onSave={() => save({ github_token: form.github_token })}
+          onClear={() => clearKey('github_token')}
+          placeholder="Paste your GitHub PAT — needs Contents: Write for auto-fix"
         />
 
         <div className="flex items-center gap-3">
