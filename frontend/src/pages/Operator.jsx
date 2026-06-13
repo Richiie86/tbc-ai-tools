@@ -148,7 +148,10 @@ export default function Operator() {
               </div>
             </div>
           </div>
-          <OperatorGuideButton onOpen={() => setGuideKey((k) => k + 1)} />
+          <div className="flex items-center gap-2">
+            <EmergencyLockdownPill />
+            <OperatorGuideButton onOpen={() => setGuideKey((k) => k + 1)} />
+          </div>
         </div>
 
         {/* Test-user banner lives OUTSIDE the loading guard so QA can
