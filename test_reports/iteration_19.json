@@ -1,0 +1,45 @@
+{
+  "summary": "iter19 — Backend 12/12 PASS (announcement, operator app-settings GET/PATCH partial+empty+banner_text fallback+max_length=2000, login lockdown 503 for non-operator, operator still 200, invalid creds 401 not 503, register 503, runtime_error_pages throttle-row-FIRST iter18 fix VERIFIED). PersonalUseBanner anonymous frontend flow PASS — banner renders with pointer-events:none on the wash, the 'Get started' CTA clicks through the banner and routes to /register, dismiss button writes sessionStorage 'tbc_personal_use_banner_dismissed=1' and survives reload. CRITICAL FRONTEND BLOCKER: /operator route crashes with 'Something broke on this page' due to `ReferenceError: EmergencyLockdownPill is not defined` at Operator.jsx:152. The component file exists at /app/frontend/src/components/EmergencyLockdownPill.jsx but the import statement was never added to Operator.jsx. As a result the entire Operator console is unreachable — settings tab + AppSettingsCard + emergency pill are all unverifiable from the UI. Backend endpoints they call are fine.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "Operator.jsx",
+        "issue": "ReferenceError: EmergencyLockdownPill is not defined — used at line 152 but never imported at the top of the file. Causes the entire Operator console to crash to the error boundary ('Something broke on this page'). Settings tab + AppSettingsCard + Emergency pill are all blocked behind this crash.",
+        "selector": "Operator.jsx:152 <EmergencyLockdownPill />",
+        "priority": "CRITICAL"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter19_app_settings_lockdown.py",
+    "/app/test_reports/pytest/iter19.xml"
+  ],
+  "action_items": [
+    "Add the missing import to /app/frontend/src/pages/Operator.jsx — somewhere with the other component imports, add: `import EmergencyLockdownPill from '../components/EmergencyLockdownPill';`. This is a one-line fix. After it lands, re-test: /operator?tab=settings should render AppSettingsCard at top of settings list, app-settings-banner-toggle / app-settings-banner-text / app-settings-banner-save / app-settings-banner-preview-toggle / app-settings-lockdown-toggle should all be present, and the emergency-lockdown-pill should appear next to OperatorGuideButton in the header."
+  ],
+  "critical_code_review_comments": [
+    "Operator.jsx is missing the EmergencyLockdownPill import — straight ReferenceError on first render. Catastrophic for an operator-facing surface; needs lint guardrails. Strongly recommend enabling `no-undef` in the React ESLint config so this never ships again.",
+    "PersonalUseBanner.jsx looks solid — best-effort fetch, silent failure, sessionStorage dismiss, pointer-events:none on wash, pointer-events:auto on the inner card. Re-paint every 60s without polling when document.hidden — good citizen behaviour. One nit: the `if (!r.ok) return;` swallows non-2xx responses; not a problem for the banner endpoint but if you later switch to a feature-flag CDN you may want to log.",
+    "app_settings_ext.py is clean — two routers (public + operator), pydantic-validated PATCH, atomic upsert, sensible default fallback for banner_text. Good info-leak hygiene (announcement endpoint hides login_lockdown_enabled).",
+    "runtime_errors_ext.py:_maybe_page_operator iter18 fix verified — throttle row is now inserted BEFORE send_email; an email failure logs but no longer disables the throttle. Confirmed end-to-end via test_throttle_row_inserted_even_when_email_fails (TEST_iter19 marker)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter19_app_settings_lockdown.py"
+  ],
+  "success_rate": {
+    "backend": "100% (12/12 PASS)",
+    "frontend": "50% — anonymous banner overlay flow fully verified (banner visibility, text, pointer-events:none, click-through CTA, dismiss + sessionStorage + reload). Operator console (settings card + emergency pill) UNVERIFIABLE due to Operator.jsx import crash."
+  },
+  "test_credentials": "Operator: rac.investments.swe@gmail.com / 123Admin@98 — login OK, redirects to /setup-2fa then /operator which currently crashes due to the missing import. The backend operator-only PATCH/GET endpoints used by curl still work fine for setup/teardown.",
+  "seed_data_creation": "Module-scoped fixture seeds + deletes one non-operator user (email matches `test_iter19_user_<hex>@example.com`) directly via pymongo + passlib-equivalent bcrypt for the lockdown gate test. Throttle test inserts and then deletes its own rows in runtime_error_pages + runtime_errors (signature contains 'TEST_iter19'). Each test pre/post-resets app_settings via the operator PATCH so the global state is always {banner_enabled:false, login_lockdown_enabled:false} at the end.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "1) Backend tests at /app/backend/tests/test_iter19_app_settings_lockdown.py — `cd /app/backend && pytest tests/test_iter19_app_settings_lockdown.py -v`. 2) Once the EmergencyLockdownPill import is added to Operator.jsx, the remaining frontend assertions to make are: (a) visit /operator?tab=settings (after skipping the Quick Tour with `get_by_role('button', name='Skip tour').click(force=True)`), confirm `[data-testid=\"app-settings-card\"]` is present + at the top of the settings list; (b) toggle `[data-testid=\"app-settings-banner-toggle\"]` ON, confirm a sonner toast + `GET /api/operator/app-settings` shows banner_enabled=true; (c) click `[data-testid=\"emergency-lockdown-pill\"]`, accept the window.confirm via `page.on('dialog', lambda d: d.accept())`, confirm both flags flip to true; click again to release. 3) End-of-run, always PATCH banner_enabled:false + login_lockdown_enabled:false (no test should leave the app private). 4) The banner overlay frontend is already fully verified — don't re-run that section unless code changes.",
+  "rca_of_the_issue": "Operator.jsx renders <EmergencyLockdownPill /> at line 152 inside the header next to OperatorGuideButton, but the file's import block (lines 1-40) never imports it. At parse time the JSX compiles to React.createElement(EmergencyLockdownPill, ...) which becomes a ReferenceError at the first render of Operator. The ErrorBoundary catches it and shows the 'Something broke on this page' fallback, masking the actual cause. The component file itself exists at /app/frontend/src/components/EmergencyLockdownPill.jsx and is well-implemented — only the import wiring is missing in Operator.jsx. Fix: add `import EmergencyLockdownPill from '../components/EmergencyLockdownPill';` near the other component imports."
+}
