@@ -1576,13 +1576,42 @@ app.include_router(alerts_router)
 app.include_router(secrets_router)
 app.include_router(deploy_access_router)
 # app.include_router(marketplace_router)  # Marketplace deferred — skipped per user.
-app.add_middleware(
-    CORSMiddleware,
-    # Cookies require an explicit Allow-Origin (browsers reject `*` with credentials).
-    # Match the production custom domain + the preview/Emergent subdomain via regex.
-    allow_origin_regex=r'^https://([a-z0-9-]+\.)?(preview\.emergentagent\.com|tbctools\.org)(:\d+)?$',
-    allow_credentials=True,
-    allow_methods=['*'],
-    allow_headers=['*'],
-    expose_headers=['*'],
-)
+# CORS — read from env so production redeploys land on whatever host the
+# user pointed the app at (Emergent-managed `*.emergent.host`, custom
+# domain, etc.). `CORS_ORIGINS` formats:
+#   '*'                          → wide-open (no cookies — browsers reject `*` w/ credentials)
+#   'https://a.com,https://b.io' → explicit allow-list (cookies enabled)
+#   <unset>                      → falls back to the historical
+#                                  preview/tbctools.org regex so the
+#                                  current deployment doesn't break.
+_cors_env = (os.environ.get('CORS_ORIGINS') or '').strip()
+if _cors_env == '*':
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=['*'],
+        allow_credentials=False,  # spec: cannot mix `*` with credentials
+        allow_methods=['*'],
+        allow_headers=['*'],
+        expose_headers=['*'],
+    )
+elif _cors_env:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[o.strip() for o in _cors_env.split(',') if o.strip()],
+        allow_credentials=True,
+        allow_methods=['*'],
+        allow_headers=['*'],
+        expose_headers=['*'],
+    )
+else:
+    # Historical default — match production custom domain + preview/Emergent
+    # subdomains. Kept so the current deployment doesn't break if the
+    # operator hasn't set CORS_ORIGINS yet.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origin_regex=r'^https://([a-z0-9-]+\.)?(preview\.emergentagent\.com|tbctools\.org|emergent\.host)(:\d+)?$',
+        allow_credentials=True,
+        allow_methods=['*'],
+        allow_headers=['*'],
+        expose_headers=['*'],
+    )
