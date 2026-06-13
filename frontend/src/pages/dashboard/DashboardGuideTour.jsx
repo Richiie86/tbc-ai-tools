@@ -55,12 +55,20 @@ export function DashboardGuideTour({ forceOpen, onClose }) {
         setStep(0);
         setOpen(true);
       }
-    } catch { /* incognito or strict mode — no-op */ }
+    } catch (e) {
+      // Incognito / strict-mode browsers throw on localStorage access — the
+      // tour just won't auto-open then. Log for dev visibility.
+      console.debug('[DashboardGuideTour] localStorage read failed:', e?.message);
+    }
   }, [forceOpen]);
 
   const close = (markSeen = true) => {
     if (markSeen) {
-      try { localStorage.setItem(STORAGE_KEY, '1'); } catch { /* noop */ }
+      try {
+        localStorage.setItem(STORAGE_KEY, '1');
+      } catch (e) {
+        console.debug('[DashboardGuideTour] localStorage write failed:', e?.message);
+      }
     }
     setOpen(false);
     onClose?.();

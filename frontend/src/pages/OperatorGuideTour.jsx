@@ -106,14 +106,21 @@ export function OperatorGuideTour({ forceOpen, onClose, onJumpToTab }) {
         setStep(0);
         setOpen(true);
       }
-    } catch {
-      // localStorage may be blocked (incognito + strict mode) — silently no-op.
+    } catch (e) {
+      // Incognito or strict-mode browsers throw on localStorage access; the
+      // tour just won't auto-open then, which is a graceful degradation.
+      // Log so we can still see it in dev tools if needed.
+      console.debug('[OperatorGuideTour] localStorage read failed:', e?.message);
     }
   }, [forceOpen]);
 
   const close = (markSeen = true) => {
     if (markSeen) {
-      try { localStorage.setItem(STORAGE_KEY, '1'); } catch {/* noop */}
+      try {
+        localStorage.setItem(STORAGE_KEY, '1');
+      } catch (e) {
+        console.debug('[OperatorGuideTour] localStorage write failed:', e?.message);
+      }
     }
     setOpen(false);
     onClose?.();
