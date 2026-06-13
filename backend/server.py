@@ -609,7 +609,15 @@ async def reset_password(req: ResetPasswordRequest):
         },
     )
     logger.info('Password reset completed for %s', user['email'])
-    token = create_jwt(user['id'], user['email'], user.get('role', 'user'), pending_2fa=False)
+    # Carry forward the operator's current `token_version` so the new JWT
+    # passes the `tv >= stored_tv` check in `get_current_user`. Forgetting
+    # this used to mint a tv=0 token and bounce the user straight back to
+    # /login on the next request whenever their stored tv was bumped by a
+    # past "sign out everywhere".
+    fresh = await db.users.find_one({'id': user['id']}, {'token_version': 1})
+    tv = int((fresh or {}).get('token_version') or 0)
+    token = create_jwt(user['id'], user['email'], user.get('role', 'user'),
+                       pending_2fa=False, token_version=tv)
     return AuthResponse(
         token=token,
         pending_2fa=False,
@@ -669,7 +677,16 @@ async def verify_2fa(req: Verify2FARequest, request: Request, response: Response
                 logger.info('Operator 2FA-login purge for %s: %s', db_user.get('email'), purged)
         except Exception:
             logger.exception('Operator-2FA test purge failed (non-fatal)')
-    new_token = create_jwt(db_user['id'], db_user['email'], db_user.get('role', 'user'), pending_2fa=False)
+    new_token = create_jwt(
+        db_user['id'], db_user['email'], db_user.get('role', 'user'),
+        pending_2fa=False,
+        # CRITICAL: carry forward the user's `token_version` so the new
+        # JWT survives `get_current_user`'s tv-monotonicity check. Missing
+        # this used to mint tv=0 and bounce the operator back to /login
+        # immediately after a successful 2FA verify whenever their stored
+        # tv was bumped by a past "sign out everywhere" action.
+        token_version=int(db_user.get('token_version') or 0),
+    )
     set_session_cookie(response, new_token, pending_2fa=False)
     return AuthResponse(token=new_token, pending_2fa=False, user=_public_user(db_user))
 

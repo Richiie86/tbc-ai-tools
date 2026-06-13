@@ -12,6 +12,21 @@ gold theme. Domain: **tbctools.org**.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
 ## Implemented
+- ✅ **Login-after-2FA bounce — REAL root cause fixed** (Feb 2026):
+  - `/api/auth/2fa/verify` and the password-reset endpoint were minting
+    new JWTs WITHOUT passing `token_version`. The default `tv=0` lost
+    against the user's stored `token_version` (bumped by any prior
+    "Sign out everywhere"), so `get_current_user`'s monotonicity check
+    raised 401 immediately, bouncing the operator straight back to /login.
+  - Both call sites now carry forward the operator's current
+    `token_version` (re-fetched in the password-reset path, taken from
+    the already-loaded `db_user` doc in 2FA verify).
+  - Verified end-to-end with a fresh user seeded `tv=3 + totp_enabled`:
+    login → 2FA verify → `/auth/me` HTTP 200. Was bouncing pre-fix.
+  - The earlier CORS revert was *also* necessary (different bug — wrong
+    response headers), but the **actual** loop trigger was this `tv=0`
+    issue. Both fixes need to be live in production.
+
 - ✅ **Code review pass 2 — actionable items applied** (Feb 2026):
   - Centralised operator/test credentials in `/app/backend/tests/_creds.py`
     reading from `TEST_OPERATOR_EMAIL` / `TEST_OPERATOR_PASSWORD` env
