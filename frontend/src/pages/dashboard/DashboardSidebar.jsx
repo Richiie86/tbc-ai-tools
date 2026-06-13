@@ -136,7 +136,12 @@ export function DashboardSidebar({
           data-testid="sidebar-sign-out-everywhere"
           onClick={async () => {
             if (!window.confirm('Sign out of every device including this one?\n\nAny token currently in use elsewhere will stop working immediately. You will need to sign in again.')) return;
-            try { await api.post('/auth/sign-out-everywhere'); } catch { /* server already cleared us; navigate regardless */ }
+            try { await api.post('/auth/sign-out-everywhere'); } catch (e) {
+              // Server-side may have already invalidated us — that's fine, we
+              // still want to clear local state below. Log so an unexpected
+              // 5xx doesn't disappear silently.
+              console.warn('sign-out-everywhere returned an error (ignored)', e?.message);
+            }
             logout();
             navigate('/');
           }}

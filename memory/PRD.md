@@ -12,6 +12,17 @@ gold theme. Domain: **tbctools.org**.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
 ## Implemented
+- ✅ **AI-surface deploy endpoints** (Feb 2026): Closed the AI→ship loop.
+  Refactored the deploy logic into `_trigger_deploy` / `_trigger_redeploy`
+  shared helpers and exposed them on both the operator (cookie auth) and the
+  AI-agent (Bearer auth) surfaces:
+  - `POST /api/projects/{id}/deploy`  body: `{"target": "production"|"preview", "git_ref"?}`
+  - `POST /api/projects/{id}/redeploy`
+  Same JSON shape as the operator endpoints. Verified end-to-end:
+  401 (no bearer), 401 (bad bearer), 400 (bad target), 404 (unknown project),
+  400 (redeploy without prior deploy), 503 (Vercel token not configured).
+  Five new regression tests in `TestAIDeployEndpoints`. **Suite 28/28 passing.**
+
 - ✅ **Vercel Deploy integration + Projects API for AI agents** (Feb 2026):
   - **`/api/projects` (AI surface, Bearer-token auth):** full CRUD matching the
     documented contract — `POST` create-or-update, `GET` list / get-one, `DELETE`

@@ -351,35 +351,31 @@ async def op_update_keys(
     }
 
 
-@ops_router.post('/{project_id}/deploy')
-async def op_deploy_project(
-    project_id: str,
-    req: DeployRequest,
-    _user: dict = Depends(get_current_operator),
-):
-    settings = await get_settings_doc()
+async def _trigger_deploy(project_id: str, settings: dict, target: str, git_ref: Optional[str]) -> dict:
+    """Shared deploy implementation. Used by both the operator (cookie auth)
+    and AI-agent (Bearer auth) surfaces so the contract stays identical.
+    Raises 404 if the project isn't known, 400 if `target` is invalid.
+    """
+    if target not in ('production', 'preview'):
+        raise HTTPException(400, 'target must be "production" or "preview"')
     project = await db.deploy_projects.find_one({'id': project_id})
     if not project:
         raise HTTPException(404, 'Project not found')
-    if req.target not in ('production', 'preview'):
-        raise HTTPException(400, 'target must be "production" or "preview"')
-    res = await _vercel_create_deployment(settings, project, req.target, req.git_ref)
+    res = await _vercel_create_deployment(settings, project, target, git_ref)
     await _record_deployment(project_id, res)
     return {
         'deployment_id': res.get('id') or res.get('uid'),
         'url': res.get('url'),
         'state': res.get('readyState') or res.get('state'),
-        'target': res.get('target'),
+        'target': res.get('target') or target,
         'project_id': project_id,
     }
 
 
-@ops_router.post('/{project_id}/redeploy')
-async def op_redeploy_project(
-    project_id: str,
-    _user: dict = Depends(get_current_operator),
-):
-    settings = await get_settings_doc()
+async def _trigger_redeploy(project_id: str, settings: dict) -> dict:
+    """Shared redeploy implementation — replays the last deployment of the
+    project. Raises 400 if no prior deploy exists, 404 if the project doesn't.
+    """
     project = await db.deploy_projects.find_one({'id': project_id})
     if not project:
         raise HTTPException(404, 'Project not found')
@@ -397,6 +393,54 @@ async def op_redeploy_project(
         'state': res.get('readyState') or res.get('state'),
         'project_id': project_id,
     }
+
+
+@ops_router.post('/{project_id}/deploy')
+async def op_deploy_project(
+    project_id: str,
+    req: DeployRequest,
+    _user: dict = Depends(get_current_operator),
+):
+    settings = await get_settings_doc()
+    return await _trigger_deploy(project_id, settings, req.target, req.git_ref)
+
+
+@ops_router.post('/{project_id}/redeploy')
+async def op_redeploy_project(
+    project_id: str,
+    _user: dict = Depends(get_current_operator),
+):
+    settings = await get_settings_doc()
+    return await _trigger_redeploy(project_id, settings)
+
+
+# ----- AI-agent deploy actions (Bearer-token auth) ---------------------
+@projects_router.post('/{project_id}/deploy')
+async def ai_deploy_project(
+    project_id: str,
+    req: DeployRequest,
+    settings: dict = Depends(_require_ai_api_key),
+):
+    """Kick off a deployment for a project the agent owns.
+
+    Combined with the create-or-update `POST /api/projects` endpoint, this
+    closes the AI→ship loop: the agent can register a brand-new project and
+    immediately ship it without anyone clicking in the operator console.
+
+    Body matches the operator endpoint:
+      {"target": "production" | "preview", "git_ref": "main"}
+    """
+    return await _trigger_deploy(project_id, settings, req.target, req.git_ref)
+
+
+@projects_router.post('/{project_id}/redeploy')
+async def ai_redeploy_project(
+    project_id: str,
+    settings: dict = Depends(_require_ai_api_key),
+):
+    """Replay the project's last deployment. Useful for "ship the same code
+    again after a config change" without recomputing the source bundle."""
+    return await _trigger_redeploy(project_id, settings)
 
 
 def setup_routers(app):

@@ -32,8 +32,11 @@ export default function ReferBanner() {
       navigator.clipboard.writeText(url);
       setCopied(true);
       setTimeout(() => setCopied(false), 1400);
-    } catch {
-      /* clipboard blocked — no-op */
+    } catch (e) {
+      // Clipboard API can be blocked (insecure context, permissions). Log so
+      // we notice in dev tools but stay non-fatal — the share link is still
+      // visible in the DOM for manual copy.
+      console.warn('ReferBanner: clipboard write blocked', e?.message);
     }
   };
 

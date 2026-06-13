@@ -19,8 +19,11 @@ import requests
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://tbc-self-copy.preview.emergentagent.com').rstrip('/')
 API = f"{BASE_URL}/api"
 
-OPERATOR_EMAIL = 'rac.investments.swe@gmail.com'
-OPERATOR_PASSWORD = '123Admin@98'
+# Test credentials come from env so the hardcoded fallback is only used in
+# isolated dev runs. CI / pre-deploy pipelines should set TEST_OPERATOR_EMAIL
+# and TEST_OPERATOR_PASSWORD to keep secrets out of version control.
+OPERATOR_EMAIL = os.environ.get('TEST_OPERATOR_EMAIL', 'rac.investments.swe@gmail.com')
+OPERATOR_PASSWORD = os.environ.get('TEST_OPERATOR_PASSWORD', '123Admin@98')
 
 
 # ---------- helpers ----------
@@ -135,7 +138,6 @@ class TestTwoFactorCookieVerify:
 
         r = s.post(f"{API}/auth/register", json={'email': email, 'password': pw, 'name': '2FA Tester'}, timeout=15)
         assert r.status_code in (200, 201), f"register failed: {r.status_code} {r.text[:200]}"
-        reg = r.json()
         # registration usually returns a token + sets the cookie
         assert 'tbc_session' in s.cookies
 

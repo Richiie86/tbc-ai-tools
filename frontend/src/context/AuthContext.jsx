@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useState, useCallback } from 'react';
 import api from '../lib/api';
 
 const AuthCtx = createContext(null);
@@ -44,12 +44,12 @@ export function AuthProvider({ children }) {
   // Called by Login/Register/Verify2FA after a successful auth response.
   // `t` is the JWT — kept in memory only for legacy reads via useAuth().token.
   // The cookie is the source of truth.
-  const saveToken = (t) => {
+  const saveToken = useCallback((t) => {
     setToken(t || null);
     if (!t) setUser(null);
-  };
+  }, []);
 
-  const logout = async () => {
+  const logout = useCallback(async () => {
     try { await api.post('/auth/logout'); } catch (e) {
       // Idempotent: server may have already invalidated the session. Log only
       // so a true 5xx isn't completely silent in dev tools.
@@ -57,10 +57,17 @@ export function AuthProvider({ children }) {
     }
     setToken(null);
     setUser(null);
-  };
+  }, []);
+
+  // Stable reference for the provider value so consumers (every page!) don't
+  // re-render whenever a sibling state change touches AuthProvider.
+  const value = useMemo(
+    () => ({ user, token, loading, setUser, saveToken, refresh, logout }),
+    [user, token, loading, saveToken, refresh, logout],
+  );
 
   return (
-    <AuthCtx.Provider value={{ user, token, loading, setUser, saveToken, refresh, logout }}>
+    <AuthCtx.Provider value={value}>
       {children}
     </AuthCtx.Provider>
   );

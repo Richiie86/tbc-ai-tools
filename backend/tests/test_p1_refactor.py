@@ -29,8 +29,11 @@ if not _BACKEND:
 BASE_URL = (_BACKEND or '').rstrip('/')
 API = f"{BASE_URL}/api"
 
-OPERATOR_EMAIL = 'rac.investments.swe@gmail.com'
-OPERATOR_PASSWORD = '123Admin@98'
+# Test credentials come from env so the hardcoded fallback is only used in
+# isolated dev runs. CI / pre-deploy pipelines should set TEST_OPERATOR_EMAIL
+# and TEST_OPERATOR_PASSWORD to keep secrets out of version control.
+OPERATOR_EMAIL = os.environ.get('TEST_OPERATOR_EMAIL', 'rac.investments.swe@gmail.com')
+OPERATOR_PASSWORD = os.environ.get('TEST_OPERATOR_PASSWORD', '123Admin@98')
 
 
 @pytest.fixture(scope='module')
@@ -283,3 +286,81 @@ class TestDeployProjectsAPI:
             assert forbidden not in body, f"secret '{forbidden}' leaked from /key status"
 
 
+
+
+# ---------- AI-surface deploy endpoints ----------
+class TestAIDeployEndpoints:
+    """`POST /api/projects/{id}/(re)deploy` — Bearer-auth one-shot deploys.
+
+    We can't trigger a real Vercel deploy from CI (no token), but we *can*
+    verify the full auth + project-lookup + validation chain runs and reports
+    the documented status codes.
+    """
+
+    def _fresh_key(self, op_session):
+        r = op_session.post(f"{API}/operator/deploy/key",
+                            json={'regenerate_ai_api_key': True}, timeout=10)
+        assert r.status_code == 200
+        return r.json()['revealed_ai_api_key']
+
+    def _create_project(self, key):
+        H = {'Authorization': f'Bearer {key}', 'Content-Type': 'application/json'}
+        r = requests.post(f"{API}/projects", headers=H, timeout=10, json={
+            'projectName': 'AI Deploy Lifecycle',
+            'repo': 'tbctools/ai-deploy-lifecycle',
+            'domain': 'ai-deploy-lifecycle.tbctools.test',
+            'gitRef': 'main',
+        })
+        assert r.status_code == 201
+        return r.json()['project']['id']
+
+    def test_deploy_requires_bearer(self):
+        r = requests.post(f"{API}/projects/anything/deploy",
+                          json={'target': 'production'}, timeout=10)
+        assert r.status_code == 401
+
+    def test_deploy_rejects_invalid_bearer(self):
+        r = requests.post(f"{API}/projects/anything/deploy",
+                          headers={'Authorization': 'Bearer wrong'},
+                          json={'target': 'production'}, timeout=10)
+        assert r.status_code == 401
+
+    def test_deploy_validates_target(self, operator_session):
+        key = self._fresh_key(operator_session)
+        pid = self._create_project(key)
+        try:
+            r = requests.post(
+                f"{API}/projects/{pid}/deploy",
+                headers={'Authorization': f'Bearer {key}',
+                         'Content-Type': 'application/json'},
+                json={'target': 'staging'}, timeout=10,
+            )
+            assert r.status_code == 400
+            assert 'target must be' in r.json()['detail']
+        finally:
+            requests.delete(f"{API}/projects/{pid}",
+                            headers={'Authorization': f'Bearer {key}'}, timeout=10)
+
+    def test_deploy_404_for_unknown_project(self, operator_session):
+        key = self._fresh_key(operator_session)
+        r = requests.post(
+            f"{API}/projects/does-not-exist-xyz/deploy",
+            headers={'Authorization': f'Bearer {key}',
+                     'Content-Type': 'application/json'},
+            json={'target': 'production'}, timeout=10,
+        )
+        assert r.status_code == 404
+
+    def test_redeploy_400_without_prior_deploy(self, operator_session):
+        key = self._fresh_key(operator_session)
+        pid = self._create_project(key)
+        try:
+            r = requests.post(
+                f"{API}/projects/{pid}/redeploy",
+                headers={'Authorization': f'Bearer {key}'}, timeout=10,
+            )
+            assert r.status_code == 400
+            assert 'No prior deployment' in r.json()['detail']
+        finally:
+            requests.delete(f"{API}/projects/{pid}",
+                            headers={'Authorization': f'Bearer {key}'}, timeout=10)
