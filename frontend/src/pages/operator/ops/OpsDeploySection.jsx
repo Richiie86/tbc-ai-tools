@@ -6,7 +6,7 @@ import { Card } from '../../../components/ui/card';
 import { toast } from 'sonner';
 import {
   Rocket, Globe, Loader2, KeyRound, RefreshCw, Eye, EyeOff, Copy, Check,
-  GitBranch, ExternalLink, RotateCw, Save, Sparkles,
+  GitBranch, ExternalLink, RotateCw, Save, Sparkles, Activity, AlertCircle, CheckCircle2,
 } from 'lucide-react';
 
 // ---------- Keys card ---------------------------------------------------
@@ -221,8 +221,30 @@ function KeysCard({ keysStatus, onSaved }) {
 
 
 // ---------- Project row -------------------------------------------------
+const SELF_PROJECT_ID = 'tbctools-self';
+
+function HealthPill({ health }) {
+  if (!health) return null;
+  const tone = health.ok
+    ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+    : 'border-rose-500/40 bg-rose-500/10 text-rose-300';
+  const Icon = health.ok ? CheckCircle2 : AlertCircle;
+  return (
+    <span
+      data-testid={`health-pill-${health.project_id}`}
+      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-wider ${tone}`}
+      title={health.error || `HTTP ${health.http_status} · Vercel ${health.vercel_state || '—'}`}
+    >
+      <Icon className="h-3 w-3" />
+      {health.ok ? 'healthy' : 'down'} · {health.http_status ?? 'no-resp'}
+    </span>
+  );
+}
+
 function ProjectRow({ project, onDeployed }) {
-  const [busy, setBusy] = useState(null); // 'deploy' | 'preview' | 'redeploy'
+  const [busy, setBusy] = useState(null); // 'deploy' | 'preview' | 'redeploy' | 'health'
+  const [health, setHealth] = useState(null);
+  const isSelf = project.id === SELF_PROJECT_ID;
 
   const trigger = async (kind) => {
     setBusy(kind);
@@ -230,6 +252,12 @@ function ProjectRow({ project, onDeployed }) {
       if (kind === 'redeploy') {
         const { data } = await api.post(`/operator/deploy/${project.id}/redeploy`);
         toast.success(`Redeploy started · ${data.state || 'queued'}`);
+      } else if (kind === 'health') {
+        const { data } = await api.post(`/operator/deploy/${project.id}/healthcheck`);
+        setHealth(data);
+        if (data.ok) toast.success(`${project.projectName}: healthy (${data.http_status} · ${data.latency_ms}ms)`);
+        else toast.error(`${project.projectName}: ${data.error || `HTTP ${data.http_status ?? '—'}`}`);
+        return; // skip onDeployed
       } else {
         const target = kind === 'preview' ? 'preview' : 'production';
         const { data } = await api.post(`/operator/deploy/${project.id}/deploy`, {
@@ -245,19 +273,35 @@ function ProjectRow({ project, onDeployed }) {
     }
   };
 
+  const previewUrl = project.last_deployment_url
+    ? (project.last_deployment_url.startsWith('http') ? project.last_deployment_url : `https://${project.last_deployment_url}`)
+    : null;
+
   return (
     <div
       data-testid={`deploy-project-${project.id}`}
-      className="rounded-xl border border-tbc-900/60 bg-ink-900/60 p-4"
+      className={`rounded-xl border p-4 ${
+        isSelf
+          ? 'border-tbc-500/40 bg-gradient-to-br from-tbc-500/10 via-ink-900/60 to-ink-900/60'
+          : 'border-tbc-900/60 bg-ink-900/60'
+      }`}
     >
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <span className="grid h-8 w-8 place-items-center rounded-lg bg-tbc-500/15 text-tbc-300">
+            <span className={`grid h-8 w-8 place-items-center rounded-lg ${
+              isSelf ? 'bg-tbc-500/30 text-tbc-100 ring-1 ring-tbc-300/40' : 'bg-tbc-500/15 text-tbc-300'
+            }`}>
               <Rocket className="h-4 w-4" />
             </span>
             <div className="min-w-0">
-              <div className="truncate text-sm font-bold text-tbc-100">{project.projectName}</div>
+              <div className="flex items-center gap-2 truncate">
+                <span className="truncate text-sm font-bold text-tbc-100">{project.projectName}</span>
+                {isSelf && (
+                  <span className="rounded-full bg-tbc-500 px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-slate-950">this app</span>
+                )}
+                <HealthPill health={health} />
+              </div>
               <div className="flex items-center gap-2 text-[11px] text-tbc-200/60">
                 <span className="font-mono">{project.repo}</span>
                 {project.gitRef && (
@@ -269,7 +313,7 @@ function ProjectRow({ project, onDeployed }) {
               </div>
             </div>
           </div>
-          <div className="mt-2 flex items-center gap-3 text-[11px]">
+          <div className="mt-2 flex flex-wrap items-center gap-3 text-[11px]">
             <a
               href={project.domain.startsWith('http') ? project.domain : `https://${project.domain}`}
               target="_blank"
@@ -278,6 +322,17 @@ function ProjectRow({ project, onDeployed }) {
             >
               <Globe className="h-3 w-3" /> {project.domain}
             </a>
+            {previewUrl && (
+              <a
+                data-testid={`view-preview-${project.id}`}
+                href={previewUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 text-tbc-300 hover:text-tbc-200"
+              >
+                <ExternalLink className="h-3 w-3" /> View last preview
+              </a>
+            )}
             {project.last_deployed_at && (
               <span className="text-tbc-200/50">
                 Last deploy: <span className="text-tbc-200/80">{project.last_deployment_state || '—'}</span>
@@ -297,7 +352,18 @@ function ProjectRow({ project, onDeployed }) {
             className="bg-tbc-500 text-ink-950 hover:bg-tbc-400 font-semibold"
           >
             {busy === 'deploy' ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : <Rocket className="mr-1.5 h-3 w-3" />}
-            Deploy
+            {isSelf ? 'Deploy this app' : 'Deploy'}
+          </Button>
+          <Button
+            size="sm"
+            data-testid={`preview-${project.id}`}
+            onClick={() => trigger('preview')}
+            disabled={busy !== null}
+            variant="outline"
+            className="border-tbc-900/60 bg-ink-900 text-tbc-100 hover:bg-ink-950"
+          >
+            {busy === 'preview' ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : <Sparkles className="mr-1.5 h-3 w-3" />}
+            Preview
           </Button>
           <Button
             size="sm"
@@ -313,14 +379,14 @@ function ProjectRow({ project, onDeployed }) {
           </Button>
           <Button
             size="sm"
-            data-testid={`preview-${project.id}`}
-            onClick={() => trigger('preview')}
+            data-testid={`health-${project.id}`}
+            onClick={() => trigger('health')}
             disabled={busy !== null}
             variant="outline"
-            className="border-tbc-900/60 bg-ink-900 text-tbc-100 hover:bg-ink-950"
+            className="border-emerald-500/40 bg-ink-900 text-emerald-300 hover:bg-emerald-500/10"
           >
-            {busy === 'preview' ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : <Sparkles className="mr-1.5 h-3 w-3" />}
-            Preview
+            {busy === 'health' ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : <Activity className="mr-1.5 h-3 w-3" />}
+            Health
           </Button>
         </div>
       </div>

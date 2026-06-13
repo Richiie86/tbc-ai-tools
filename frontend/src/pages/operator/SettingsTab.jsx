@@ -7,7 +7,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '../../components/ui/select';
 import { toast } from 'sonner';
-import { Loader2, KeyRound, Save, Lock, Eye, EyeOff, Plug, Mail, Sparkles, UserPlus } from 'lucide-react';
+import { Loader2, KeyRound, Save, Lock, Eye, EyeOff, Plug, Mail, Sparkles, UserPlus, Rocket } from 'lucide-react';
 
 export default function SettingsTab() {
   const [settings, setSettings] = useState(null);
@@ -22,6 +22,14 @@ export default function SettingsTab() {
     emergent_llm_key: '',
     resend_api_key: '',
     sender_email: '',
+    vercel_token: '',
+    vercel_team_id: '',
+    ai_api_key: '',
+    deploy_webhook_url: '',
+    deploy_webhook_secret: '',
+    self_repo: '',
+    self_git_ref: '',
+    self_vercel_project_id: '',
   });
   const [reveal, setReveal] = useState({});
 
@@ -288,6 +296,159 @@ export default function SettingsTab() {
               <Switch checked={!!settings[o.k]} onCheckedChange={(v) => save({ [o.k]: v })} />
             </div>
           ))}
+        </div>
+      </Section>
+
+      <Section icon={Rocket} title="Vercel deploy & AI integration">
+        <p className="text-xs text-tbc-200/60">
+          Pasting these here is identical to pasting them in the Ops tab —
+          settings live in one place. They power the Deploy / Redeploy /
+          Preview buttons, the per-project Health Check, and the Bearer-token
+          authenticated <code className="rounded bg-ink-950 px-1 text-tbc-300">/api/projects</code> surface.
+        </p>
+
+        <KeyRow
+          label="Vercel Personal Access Token"
+          fieldKey="vercel_token"
+          isSet={settings.vercel_token_set}
+          masked={settings.vercel_token_masked}
+          value={form.vercel_token}
+          reveal={reveal.vercel_token}
+          onReveal={() => toggleReveal('vercel_token')}
+          onChange={(v) => setForm({ ...form, vercel_token: v })}
+          onSave={() => save({ vercel_token: form.vercel_token })}
+          onClear={() => clearKey('vercel_token')}
+          placeholder="Paste your Vercel PAT (vercel.com/account/tokens)"
+        />
+
+        <div className="flex items-center gap-3">
+          <span className="w-32 text-xs text-tbc-200/60">Team ID</span>
+          <Input
+            data-testid="settings-vercel-team-id"
+            className="flex-1 border-tbc-900/60 bg-ink-950 text-tbc-100"
+            value={form.vercel_team_id || settings.vercel_team_id || ''}
+            placeholder="team_... (optional)"
+            onChange={(e) => setForm({ ...form, vercel_team_id: e.target.value })}
+          />
+          <Button
+            disabled={!form.vercel_team_id}
+            onClick={() => save({ vercel_team_id: form.vercel_team_id })}
+            className="bg-tbc-500 font-semibold text-ink-950 hover:bg-tbc-400"
+          >
+            <Save className="mr-1.5 h-3.5 w-3.5" /> Save
+          </Button>
+        </div>
+
+        <KeyRow
+          label="AI API Key (for /api/projects Bearer auth)"
+          fieldKey="ai_api_key"
+          isSet={settings.ai_api_key_set}
+          masked={settings.ai_api_key_masked}
+          value={form.ai_api_key}
+          reveal={reveal.ai_api_key}
+          onReveal={() => toggleReveal('ai_api_key')}
+          onChange={(v) => setForm({ ...form, ai_api_key: v })}
+          onSave={() => save({ ai_api_key: form.ai_api_key })}
+          onClear={() => clearKey('ai_api_key')}
+          placeholder="tbc_... — paste your own or generate one in Ops tab"
+        />
+
+        <div className="border-t border-tbc-900/60 pt-3">
+          <div className="mb-2 text-[10px] font-bold uppercase tracking-wider text-tbc-200/60">
+            Outbound webhook · ship-and-watch events
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="w-32 text-xs text-tbc-200/60">Webhook URL</span>
+            <Input
+              data-testid="settings-webhook-url"
+              className="flex-1 border-tbc-900/60 bg-ink-950 text-tbc-100"
+              value={form.deploy_webhook_url || settings.deploy_webhook_url || ''}
+              placeholder="https://your-agent.example/hooks/deploy"
+              onChange={(e) => setForm({ ...form, deploy_webhook_url: e.target.value })}
+            />
+            <Button
+              disabled={!form.deploy_webhook_url}
+              onClick={() => save({ deploy_webhook_url: form.deploy_webhook_url })}
+              className="bg-tbc-500 font-semibold text-ink-950 hover:bg-tbc-400"
+            >
+              <Save className="mr-1.5 h-3.5 w-3.5" /> Save
+            </Button>
+          </div>
+          <p className="mt-1 text-[10px] text-tbc-200/50">
+            Fires <code>deployment.triggered</code>, <code>deployment.state_changed</code>,
+            <code> deployment.succeeded</code>, <code>deployment.failed</code>. Body is
+            HMAC-SHA256 signed with the secret below in the
+            <code> X-TBC-Signature</code> header.
+          </p>
+          <KeyRow
+            label="Webhook secret (HMAC-SHA256)"
+            fieldKey="deploy_webhook_secret"
+            isSet={settings.deploy_webhook_secret_set}
+            masked={settings.deploy_webhook_secret_masked}
+            value={form.deploy_webhook_secret}
+            reveal={reveal.deploy_webhook_secret}
+            onReveal={() => toggleReveal('deploy_webhook_secret')}
+            onChange={(v) => setForm({ ...form, deploy_webhook_secret: v })}
+            onSave={() => save({ deploy_webhook_secret: form.deploy_webhook_secret })}
+            onClear={() => clearKey('deploy_webhook_secret')}
+            placeholder="Random shared secret — verify signatures with it"
+          />
+        </div>
+
+        <div className="border-t border-tbc-900/60 pt-3">
+          <div className="mb-2 text-[10px] font-bold uppercase tracking-wider text-tbc-200/60">
+            &ldquo;Update this app&rdquo; — self-deploy target
+          </div>
+          <p className="mb-2 text-[11px] text-tbc-200/50">
+            Once set, the <strong>Deploy this app</strong> button in the Ops
+            tab (and the matching AI-surface endpoint <code>POST /api/projects/self/deploy</code>)
+            will ship this repository to Vercel.
+          </p>
+          <div className="grid gap-2 sm:grid-cols-3">
+            <div>
+              <label className="text-[10px] font-semibold uppercase tracking-wider text-tbc-200/60">Repo</label>
+              <Input
+                data-testid="settings-self-repo"
+                className="mt-1 border-tbc-900/60 bg-ink-950 font-mono text-xs text-tbc-100"
+                value={form.self_repo || settings.self_repo || ''}
+                placeholder="owner/repo"
+                onChange={(e) => setForm({ ...form, self_repo: e.target.value })}
+              />
+            </div>
+            <div>
+              <label className="text-[10px] font-semibold uppercase tracking-wider text-tbc-200/60">Branch</label>
+              <Input
+                data-testid="settings-self-ref"
+                className="mt-1 border-tbc-900/60 bg-ink-950 text-xs text-tbc-100"
+                value={form.self_git_ref || settings.self_git_ref || 'main'}
+                placeholder="main"
+                onChange={(e) => setForm({ ...form, self_git_ref: e.target.value })}
+              />
+            </div>
+            <div>
+              <label className="text-[10px] font-semibold uppercase tracking-wider text-tbc-200/60">Vercel project id (optional)</label>
+              <Input
+                data-testid="settings-self-vercel-id"
+                className="mt-1 border-tbc-900/60 bg-ink-950 font-mono text-xs text-tbc-100"
+                value={form.self_vercel_project_id || settings.self_vercel_project_id || ''}
+                placeholder="prj_..."
+                onChange={(e) => setForm({ ...form, self_vercel_project_id: e.target.value })}
+              />
+            </div>
+          </div>
+          <div className="mt-2 flex justify-end">
+            <Button
+              data-testid="settings-self-save"
+              onClick={() => save({
+                self_repo: form.self_repo,
+                self_git_ref: form.self_git_ref,
+                self_vercel_project_id: form.self_vercel_project_id,
+              })}
+              className="bg-tbc-500 font-semibold text-ink-950 hover:bg-tbc-400"
+            >
+              <Save className="mr-1.5 h-3.5 w-3.5" /> Save self-deploy target
+            </Button>
+          </div>
         </div>
       </Section>
     </div>

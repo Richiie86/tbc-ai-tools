@@ -498,6 +498,22 @@ async def op_get_settings(_: dict = Depends(get_current_operator)):
         'resend_api_key_masked': _mask_key(doc.get('resend_api_key')),
         'sender_email': doc.get('sender_email') or os.environ.get('SENDER_EMAIL', ''),
         'default_plan_id': doc.get('default_plan_id') or 'starter',
+        # Deploy & AI surface (presence + masking only, never echo plaintext).
+        'vercel_token_set': bool(doc.get('vercel_token')),
+        'vercel_token_masked': _mask_key(doc.get('vercel_token')),
+        'vercel_team_id': doc.get('vercel_team_id') or '',
+        'ai_api_key_set': bool(doc.get('ai_api_key')),
+        'ai_api_key_masked': _mask_key(doc.get('ai_api_key')),
+        # Outbound webhook for ship-and-watch events.
+        'deploy_webhook_url': doc.get('deploy_webhook_url') or '',
+        'deploy_webhook_secret_set': bool(doc.get('deploy_webhook_secret')),
+        'deploy_webhook_secret_masked': _mask_key(doc.get('deploy_webhook_secret')),
+        # Self-update: the project the operator wants to deploy when they hit
+        # "Update this app". Two fields = repo (owner/name) + optional Vercel
+        # project id once the first deploy succeeds.
+        'self_repo': doc.get('self_repo') or '',
+        'self_git_ref': doc.get('self_git_ref') or 'main',
+        'self_vercel_project_id': doc.get('self_vercel_project_id') or '',
     }
 
 
@@ -512,6 +528,10 @@ async def op_update_settings(payload: dict, _: dict = Depends(get_current_operat
         'enable_card', 'enable_paypal', 'enable_crypto_auto', 'enable_crypto_manual', 'enable_bank',
         'emergent_llm_key', 'resend_api_key', 'sender_email',
         'default_plan_id',
+        # Deploy & AI surface — same gate as the rest of the settings doc.
+        'vercel_token', 'vercel_team_id', 'ai_api_key',
+        'deploy_webhook_url', 'deploy_webhook_secret',
+        'self_repo', 'self_git_ref', 'self_vercel_project_id',
     }
     updates = {}
     for k, v in payload.items():

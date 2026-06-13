@@ -243,6 +243,16 @@ class PaymentSettings(BaseModel):
     # Bearer token external AI programs use to POST projects to
     # `/api/projects`. Generate-once, store-once, never exposed back to UI.
     ai_api_key: Optional[str] = None
+    # Outbound webhook fired on every deploy state change. Body is signed with
+    # `deploy_webhook_secret` via HMAC-SHA256 in the `X-TBC-Signature` header
+    # so the receiver can verify the call came from us.
+    deploy_webhook_url: Optional[str] = None
+    deploy_webhook_secret: Optional[str] = None
+    # Self-update: which repo + ref the operator's "Update this app" button
+    # should deploy. Set once and the button just works.
+    self_repo: Optional[str] = None
+    self_git_ref: Optional[str] = 'main'
+    self_vercel_project_id: Optional[str] = None
 
 
 class CheckoutMethod(str):

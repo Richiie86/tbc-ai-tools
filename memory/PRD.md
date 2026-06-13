@@ -12,6 +12,37 @@ gold theme. Domain: **tbctools.org**.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
 ## Implemented
+- ✅ **Webhooks + ship-and-watch + self-deploy + per-project health** (Feb 2026):
+  - **Outbound webhooks** — operator-configurable URL + HMAC-SHA256 secret in
+    Security tab. Fires `deployment.triggered` / `deployment.state_changed` /
+    `deployment.succeeded` / `deployment.failed`. Signed via `X-TBC-Signature: sha256=…`.
+  - **Ship-and-watch** — every deploy spawns a 10-minute background poller
+    (`_watch_deployment`) that polls Vercel every 10s, updates the persisted
+    project state, and fires a webhook on each transition + a terminal event.
+    Best-effort + bounded so a stuck deploy can never leak the asyncio task.
+  - **Self-deploy** — magic project id `tbctools-self` auto-upserts from the
+    new `self_repo` / `self_git_ref` / `self_vercel_project_id` Settings
+    fields. Endpoints: `POST /api/operator/deploy/self/deploy` (cookie) and
+    `POST /api/projects/self/deploy` (Bearer-auth). Literal routes are
+    registered before the parameterised `/{project_id}/deploy` so they don't
+    get shadowed. Ops tab "Deploy this app" button just works after one paste
+    in Security.
+  - **Per-project health check** — `POST /api/operator/deploy/{id}/healthcheck`
+    + AI-surface mirror at `POST /api/projects/{id}/healthcheck`. HTTP-pings
+    the project's public domain, overlays the latest Vercel deployment
+    state, and updates the persisted `last_deployment_state` as a side effect.
+    Returns `{ok, http_status, latency_ms, vercel_state, error}`. New
+    "Health" button per project row + a coloured pill that lights green for
+    `ok` or rose for `down`.
+  - **Security tab keys** — Vercel PAT, Team ID, AI API key, webhook URL,
+    webhook secret, self_repo / self_git_ref / self_vercel_project_id all
+    editable from the existing Security UI (same `/operator/settings` PUT
+    used by other keys; presence + masked echo only — plaintext never leaves
+    the server after first save).
+  - **"View last preview"** link on each project row jumps to the most recent
+    Vercel deployment URL the watcher recorded.
+  - All 28 backend regression tests still passing.
+
 - ✅ **AI-surface deploy endpoints** (Feb 2026): Closed the AI→ship loop.
   Refactored the deploy logic into `_trigger_deploy` / `_trigger_redeploy`
   shared helpers and exposed them on both the operator (cookie auth) and the

@@ -11,11 +11,20 @@ Two surfaces:
    create, list, update, and delete deploy projects programmatically — the
    exact contract documented for tbctools.org/api/projects.
 
-Tokens (Vercel PAT, ai_api_key) live in `payment_settings` (Mongo) and are
-*never* returned to the browser. The Vercel REST API is called directly with
-`httpx.AsyncClient` (no Vercel SDK), following the same pattern as our Stripe
-/ NOWPayments integrations.
+Plus a `ship_and_watch` background poller and outbound webhook on every
+deploy state change so callers can be event-driven rather than poll-based.
+A magic project id `tbctools-self` lets the operator deploy this platform
+itself with a single button or a single API call.
+
+Tokens (Vercel PAT, ai_api_key, webhook secret) live in `payment_settings`
+(Mongo) and are *never* returned to the browser. The Vercel REST API is
+called directly with `httpx.AsyncClient` (no Vercel SDK), following the same
+pattern as our Stripe / NOWPayments integrations.
 """
+import asyncio
+import hashlib
+import hmac
+import json
 import logging
 import re
 import secrets
@@ -33,6 +42,10 @@ from payments_ext import get_settings_doc
 logger = logging.getLogger('tbc')
 
 VERCEL_API = 'https://api.vercel.com'
+SELF_PROJECT_ID = 'tbctools-self'
+
+# Terminal Vercel readyStates — when the poller sees one of these it stops.
+TERMINAL_STATES = {'READY', 'ERROR', 'CANCELED'}
 
 # ===================================================================
 # Models
@@ -202,14 +215,138 @@ async def _vercel_redeploy(settings: dict, deployment_id: str) -> dict:
     return r.json()
 
 
+async def _vercel_get_deployment(settings: dict, deployment_id: str) -> dict:
+    """Fetch a deployment by id — used by the watcher and the per-project
+    Health Check button. Raises 502 on Vercel-side error, 503 if no token."""
+    token = (settings or {}).get('vercel_token')
+    if not token:
+        raise HTTPException(503, 'Vercel token not configured.')
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        r = await client.get(
+            f'{VERCEL_API}/v13/deployments/{deployment_id}',
+            params=_vercel_team_qs(settings),
+            headers={'Authorization': f'Bearer {token}'},
+        )
+    if r.status_code >= 400:
+        try:
+            err = r.json().get('error', {})
+        except Exception:
+            err = {'message': r.text[:300]}
+        raise HTTPException(502, f"Vercel get-deployment: {err.get('message') or err.get('code')}")
+    return r.json()
+
+
+# ---------- Outbound webhook ------------------------------------------
+async def _fire_webhook(event: str, payload: dict, settings: Optional[dict] = None) -> None:
+    """POST to the operator-configured webhook URL on every deploy state change.
+
+    Body is JSON: `{"event": "...", "ts": "...", "data": {...}}`.
+    We sign it with HMAC-SHA256(secret, raw_body) and put the hex in the
+    `X-TBC-Signature` header so the receiver can verify authenticity.
+
+    Failures are logged but never raise — webhooks are best-effort and must
+    not block a deploy response. Timeout is short (5s) for the same reason.
+    """
+    if settings is None:
+        settings = await get_settings_doc()
+    url = (settings or {}).get('deploy_webhook_url')
+    if not url:
+        return  # not configured — silent no-op
+    body = json.dumps({
+        'event': event,
+        'ts': datetime.now(timezone.utc).isoformat(),
+        'data': payload,
+    }, default=str).encode('utf-8')
+    headers = {'Content-Type': 'application/json'}
+    secret = (settings or {}).get('deploy_webhook_secret')
+    if secret:
+        sig = hmac.new(secret.encode('utf-8'), body, hashlib.sha256).hexdigest()
+        headers['X-TBC-Signature'] = f'sha256={sig}'
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            r = await client.post(url, content=body, headers=headers)
+        if r.status_code >= 400:
+            logger.warning('Webhook %s → %s returned %s', event, url, r.status_code)
+    except Exception as e:
+        logger.warning('Webhook %s → %s failed: %s', event, url, str(e)[:200])
+
+
+# ---------- Ship-and-watch poller -------------------------------------
+async def _watch_deployment(project_id: str, deployment_id: str) -> None:
+    """Poll Vercel until `deployment_id` reaches a terminal state.
+
+    Fires a webhook on every state change and a final webhook on terminal.
+    Persists the final state onto the project doc so the Ops tab refresh
+    picks it up without an extra round-trip.
+
+    Designed to run as a background `asyncio.create_task` — no exceptions
+    leak. Bounded to ~10 minutes (60 polls × 10s) so a stuck deploy doesn't
+    leak the task forever.
+    """
+    last_state: Optional[str] = None
+    for _ in range(60):  # ~10 minutes
+        await asyncio.sleep(10.0)
+        try:
+            settings = await get_settings_doc()
+            res = await _vercel_get_deployment(settings, deployment_id)
+        except Exception as e:
+            logger.warning('Watch %s: poll failed: %s', deployment_id, str(e)[:120])
+            continue
+        state = res.get('readyState') or res.get('state')
+        if state != last_state:
+            await db.deploy_projects.update_one(
+                {'id': project_id},
+                {'$set': {
+                    'last_deployment_state': state,
+                    'last_deployment_url': res.get('url'),
+                    'updated_at': datetime.now(timezone.utc),
+                }},
+            )
+            await _fire_webhook('deployment.state_changed', {
+                'project_id': project_id,
+                'deployment_id': deployment_id,
+                'state': state,
+                'previous_state': last_state,
+                'url': res.get('url'),
+            }, settings)
+            last_state = state
+        if state in TERMINAL_STATES:
+            await _fire_webhook(
+                'deployment.succeeded' if state == 'READY' else 'deployment.failed',
+                {
+                    'project_id': project_id,
+                    'deployment_id': deployment_id,
+                    'state': state,
+                    'url': res.get('url'),
+                },
+                settings,
+            )
+            return
+    # Timed out — log and let Ops tab show the last known state.
+    logger.warning('Watch %s: timed out after 10 minutes', deployment_id)
+
+
+def _start_watch(project_id: str, deployment_id: Optional[str]) -> None:
+    """Fire-and-forget background watcher. Never awaited."""
+    if not deployment_id:
+        return
+    try:
+        asyncio.get_event_loop().create_task(_watch_deployment(project_id, deployment_id))
+    except RuntimeError:
+        # No running loop — happens in some sync test contexts. Skip silently.
+        pass
+
+
 async def _record_deployment(project_id: str, vercel_res: dict) -> None:
     """Persist last-deployment fields onto the project doc so the Ops tab can
     render "Last deployed: 5 min ago · sha · state" without re-querying Vercel.
+    Also fires a `deployment.triggered` webhook and kicks off the watcher.
     """
     proj_vercel_id = vercel_res.get('projectId') or vercel_res.get('project', {}).get('id')
+    deployment_id = vercel_res.get('id') or vercel_res.get('uid')
     update = {
         '$set': {
-            'last_deployment_id': vercel_res.get('id') or vercel_res.get('uid'),
+            'last_deployment_id': deployment_id,
             'last_deployment_url': vercel_res.get('url'),
             'last_deployment_state': vercel_res.get('readyState') or vercel_res.get('state'),
             'last_deployed_at': datetime.now(timezone.utc),
@@ -219,6 +356,15 @@ async def _record_deployment(project_id: str, vercel_res: dict) -> None:
     if proj_vercel_id:
         update['$set']['vercel_project_id'] = proj_vercel_id
     await db.deploy_projects.update_one({'id': project_id}, update)
+
+    await _fire_webhook('deployment.triggered', {
+        'project_id': project_id,
+        'deployment_id': deployment_id,
+        'url': vercel_res.get('url'),
+        'target': vercel_res.get('target'),
+        'state': vercel_res.get('readyState') or vercel_res.get('state'),
+    })
+    _start_watch(project_id, deployment_id)
 
 
 # ===================================================================
@@ -290,6 +436,9 @@ ops_router = APIRouter(prefix='/api/operator/deploy', tags=['deploy'])
 
 @ops_router.get('/projects')
 async def op_list_projects(_user: dict = Depends(get_current_operator)):
+    # Lazily upsert the self project so the Ops tab always shows it after the
+    # operator pastes self_repo in Settings — no second click needed.
+    await _ensure_self_project()
     cursor = db.deploy_projects.find({}).sort('updated_at', -1)
     return [_project_to_out(d) async for d in cursor]
 
@@ -355,10 +504,16 @@ async def _trigger_deploy(project_id: str, settings: dict, target: str, git_ref:
     """Shared deploy implementation. Used by both the operator (cookie auth)
     and AI-agent (Bearer auth) surfaces so the contract stays identical.
     Raises 404 if the project isn't known, 400 if `target` is invalid.
+
+    Special case: `tbctools-self` is lazy-upserted from settings so a freshly
+    configured operator can "Deploy this app" in one click without manually
+    creating a project row first.
     """
     if target not in ('production', 'preview'):
         raise HTTPException(400, 'target must be "production" or "preview"')
     project = await db.deploy_projects.find_one({'id': project_id})
+    if not project and project_id == SELF_PROJECT_ID:
+        project = await _ensure_self_project()
     if not project:
         raise HTTPException(404, 'Project not found')
     res = await _vercel_create_deployment(settings, project, target, git_ref)
@@ -443,7 +598,177 @@ async def ai_redeploy_project(
     return await _trigger_redeploy(project_id, settings)
 
 
+async def _ensure_self_project() -> Optional[dict]:
+    """The `tbctools-self` magic project represents the platform itself.
+
+    Operator sets `self_repo`/`self_git_ref`/`self_vercel_project_id` in
+    Settings, and this function lazily upserts a corresponding project row so
+    every existing endpoint (Deploy/Redeploy/Health/AI surface) works on it
+    without any special-casing in the handlers.
+    """
+    settings = await get_settings_doc()
+    repo = (settings or {}).get('self_repo')
+    if not repo:
+        return None
+    git_ref = (settings or {}).get('self_git_ref') or 'main'
+    now = datetime.now(timezone.utc)
+    doc = {
+        'id': SELF_PROJECT_ID,
+        'projectName': 'TBC AI Tools (this app)',
+        'repo': repo,
+        'domain': 'tbctools.org',
+        'repoType': 'github',
+        'gitRef': git_ref,
+        'updated_at': now,
+    }
+    if (settings or {}).get('self_vercel_project_id'):
+        doc['vercel_project_id'] = settings['self_vercel_project_id']
+    # Upsert without clobbering deployment history fields.
+    await db.deploy_projects.update_one(
+        {'id': SELF_PROJECT_ID},
+        {'$set': doc, '$setOnInsert': {'created_at': now}},
+        upsert=True,
+    )
+    return await db.deploy_projects.find_one({'id': SELF_PROJECT_ID})
+
+
+# ---------- Health check helpers --------------------------------------
+async def _project_health(project: dict, settings: dict) -> dict:
+    """Health snapshot for a single project: HTTP-ping the public domain +
+    overlay the last known Vercel deployment state. Used by both the operator
+    Health buttons and the AI surface so an autonomous agent can decide
+    whether to re-deploy after a failure.
+    """
+    domain = project.get('domain') or ''
+    url = domain if domain.startswith('http') else f'https://{domain}'
+    started = datetime.now(timezone.utc)
+    http_status: Optional[int] = None
+    error: Optional[str] = None
+    try:
+        async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
+            r = await client.get(url)
+        http_status = r.status_code
+    except Exception as e:
+        error = str(e)[:200]
+    latency_ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
+
+    # Best-effort overlay the latest deployment state from Vercel — silent on
+    # error so the HTTP ping result still surfaces.
+    vercel_state: Optional[str] = project.get('last_deployment_state')
+    last_id = project.get('last_deployment_id')
+    if last_id and (settings or {}).get('vercel_token'):
+        try:
+            res = await _vercel_get_deployment(settings, last_id)
+            vercel_state = res.get('readyState') or res.get('state') or vercel_state
+            await db.deploy_projects.update_one(
+                {'id': project['id']},
+                {'$set': {'last_deployment_state': vercel_state}},
+            )
+        except Exception as e:
+            logger.info('health: vercel state refresh failed for %s: %s', project['id'], str(e)[:120])
+
+    ok = (
+        http_status is not None and 200 <= http_status < 400
+        and (vercel_state in (None, 'READY'))
+    )
+    return {
+        'project_id': project['id'],
+        'domain': project.get('domain'),
+        'ok': ok,
+        'http_status': http_status,
+        'latency_ms': latency_ms,
+        'vercel_state': vercel_state,
+        'error': error,
+        'checked_at': datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@ops_router.post('/{project_id}/healthcheck')
+async def op_project_health(
+    project_id: str,
+    _user: dict = Depends(get_current_operator),
+):
+    """Operator-visible health check for a single deploy project.
+
+    Returns: ok, http_status, latency_ms, vercel_state, error. Updates the
+    persisted `last_deployment_state` as a side-effect so the Ops tab stays
+    in sync with Vercel without a separate refresh.
+    """
+    settings = await get_settings_doc()
+    project = await db.deploy_projects.find_one({'id': project_id})
+    if not project:
+        # The self project is lazy — make sure it exists before bailing.
+        if project_id == SELF_PROJECT_ID:
+            project = await _ensure_self_project()
+        if not project:
+            raise HTTPException(404, 'Project not found')
+    return await _project_health(project, settings)
+
+
+@projects_router.post('/{project_id}/healthcheck')
+async def ai_project_health(
+    project_id: str,
+    settings: dict = Depends(_require_ai_api_key),
+):
+    """Same as the operator health check but on the Bearer-auth surface so an
+    AI agent can decide whether to redeploy after a failure (ship-and-watch
+    + react-and-fix loop)."""
+    project = await db.deploy_projects.find_one({'id': project_id})
+    if not project and project_id == SELF_PROJECT_ID:
+        project = await _ensure_self_project()
+    if not project:
+        raise HTTPException(404, 'Project not found')
+    return await _project_health(project, settings)
+
+
+# ---------- "Deploy this app" shortcut --------------------------------
+# These literal routes must register *before* the parameterized
+# `/{project_id}/deploy` routes so FastAPI doesn't treat `self` as a project
+# id. We re-declare the routers here in a self-contained block so registration
+# order is explicit, then re-attach below.
+self_ops_router = APIRouter(prefix='/api/operator/deploy', tags=['deploy'])
+self_ai_router = APIRouter(prefix='/api/projects', tags=['projects'])
+
+
+@self_ops_router.post('/self/deploy')
+async def op_self_deploy(
+    req: DeployRequest,
+    _user: dict = Depends(get_current_operator),
+):
+    """One-tap "Deploy this app" — operator button in the Ops tab.
+
+    Lazily creates the self project from `self_repo` in Settings if it doesn't
+    yet exist, then triggers a Vercel deploy. Failure modes:
+      - 503 "Vercel token not configured"
+      - 503 "self_repo not configured" (operator must paste it in Security)
+    """
+    project = await _ensure_self_project()
+    if not project:
+        raise HTTPException(
+            503,
+            'self_repo not configured. Set it in Operator → Security (e.g. "tbctools/platform").',
+        )
+    settings = await get_settings_doc()
+    return await _trigger_deploy(SELF_PROJECT_ID, settings, req.target, req.git_ref)
+
+
+@self_ai_router.post('/self/deploy')
+async def ai_self_deploy(
+    req: DeployRequest,
+    settings: dict = Depends(_require_ai_api_key),
+):
+    """Same as op_self_deploy but on the AI surface — lets the agent push its
+    own improvements end-to-end ("self-grow")."""
+    project = await _ensure_self_project()
+    if not project:
+        raise HTTPException(503, 'self_repo not configured.')
+    return await _trigger_deploy(SELF_PROJECT_ID, settings, req.target, req.git_ref)
+
+
 def setup_routers(app):
-    """Attach both routers to the FastAPI app."""
+    """Attach all routers. Literal-path routers are added *first* so they take
+    precedence over the parameterized `/{project_id}/...` matches."""
+    app.include_router(self_ai_router)
+    app.include_router(self_ops_router)
     app.include_router(projects_router)
     app.include_router(ops_router)
