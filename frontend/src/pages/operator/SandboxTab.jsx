@@ -49,6 +49,14 @@ export default function SandboxTab() {
       const { data } = await api.get('/operator/self/tree', { params: { path } });
       setTree(data.entries || []);
       setCwd(data.path || '');
+      if ((data.entries || []).length === 0) {
+        // Surface this proactively so the operator knows whether their
+        // `self_repo` / `self_git_ref` setting is wrong vs. the dir really
+        // being empty.
+        toast.message(`No files at /${data.path || ''} on this branch`, {
+          description: 'Check Operator → Security → Self repo / branch.',
+        });
+      }
     } catch (e) {
       toast.error(e?.response?.data?.detail || 'Failed to load tree');
     } finally {
@@ -216,6 +224,16 @@ export default function SandboxTab() {
         you want a staging-style workflow before shipping.
       </div>
 
+      {/* AI panel — always visible so the affordance is discoverable
+          even before the operator opens a file. Internally guards on
+          `openFile` and shows a friendly banner until then. */}
+      <SandboxAIPanel
+        openFile={openFile}
+        draft={draft}
+        branch={info?.branch}
+        onApplyToEditor={(content) => setDraft(content)}
+      />
+
       <div className="grid gap-4 lg:grid-cols-[260px_1fr]">
         {/* Tree */}
         <div className="rounded-lg border border-tbc-900/60 bg-ink-900/60 p-2" data-testid="sandbox-tree">
@@ -303,12 +321,6 @@ export default function SandboxTab() {
                   </a>
                 )}
               </div>
-              <SandboxAIPanel
-                openFile={openFile}
-                draft={draft}
-                branch={info?.branch}
-                onApplyToEditor={(content) => setDraft(content)}
-              />
               <Textarea
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}

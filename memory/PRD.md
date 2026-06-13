@@ -11,6 +11,28 @@ gold theme. Domain: **tbctools.org**.
 - **End user (member)** — Chats with the AI builder, manages plan, copies referral link.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
+## Implemented — Feb 2026 (latest session)
+- ✅ **AI Self-Learning loop + Operator UI** (Feb 2026):
+  - `ai_learnings_auto.py` extracts patterns from chat (sampled 20%) via a small Gemini Flash call,
+    persists them with `enabled=false` + `auto_proposed=true` — operator approval required.
+  - New **AI Learnings** tab in the Operator Console (`AILearningsTab.jsx`) lets the operator
+    add / edit / toggle / approve / delete shared learnings. All enabled entries are
+    auto-injected into the chat `SYSTEM_PROMPT` (server.py:870-885), so Claude, GPT, and Gemini
+    share the same accumulated knowledge with zero redeploys.
+  - Endpoints: `GET/POST/PATCH/DELETE /api/operator/ai-learnings`. Operator-only.
+
+- ✅ **AI in Sandbox — "Ask AI to code this for me"** (Feb 2026):
+  - `sandbox_ai_ext.py` wired (was orphaned before this session): `/api/operator/sandbox/ai/models`,
+    `/api/operator/sandbox/ai/propose`, `/api/operator/sandbox/ai/sessions`, and
+    `/api/operator/deploy/{id}/ai-edit-mode`.
+  - `SandboxAIPanel.jsx` lives above the file tree (always discoverable, not gated on file-open).
+    Operator picks model, types instruction, gets a JSON proposal with file diffs, can either
+    "Load into editor" or "Apply & commit" (which reuses `PUT /operator/self/file` → webhook auto-deploy).
+  - Hard-validated: single-file mode enforced, model whitelist, 503 on missing EMERGENT_LLM_KEY,
+    502 on LLM/JSON failures, every proposal logged to `sandbox_ai_sessions` for replay.
+  - Backend test suite: 12/12 PASS (`/app/backend/tests/test_sandbox_ai_learnings.py`).
+
+
 ## Implemented
 - ✅ **Login-after-2FA bounce — REAL root cause fixed** (Feb 2026):
   - `/api/auth/2fa/verify` and the password-reset endpoint were minting
