@@ -12,6 +12,24 @@ gold theme. Domain: **tbctools.org**.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
 ## Implemented
+- ✅ **Dynamic CORS — any domain you attach auto-connects** (Feb 2026):
+  - New `DynamicCORSMiddleware` in `/app/backend/cors_dynamic_ext.py`
+    reads the allow-list at request-time from FOUR sources, cached 60s:
+      1. `CORS_ORIGINS` env (`'*'` = wildcard, else comma-list)
+      2. Every `deploy_projects.domain` (auto-attached when operator
+         sets a domain via Ops tab inline editor)
+      3. Operator-managed `cors_settings.extra_origins` collection
+      4. Always-allowed regex (preview / emergent.host / tbctools.org)
+  - PATCH /domain and POST /cors-origins/add both call
+    `invalidate_cors_cache()` so a newly-attached domain is honoured
+    immediately — no redeploy, no env-var edit.
+  - New audit + edit endpoints under `/api/operator/cors-origins`
+    (GET full breakdown, PUT replace extras, POST `/add` append one).
+  - **Note on preview:** the Kubernetes preview ingress force-sets
+    `ACAO: *` on every response so the dynamic logic is effectively
+    overridden in preview. It WILL engage in production where the
+    ingress isn't overriding.
+
 - ✅ **Live online/offline dot per user** (Feb 2026):
   - `auth_utils.get_current_user` fires a fire-and-forget `last_seen_at`
     write on every authenticated request. Bookkeeping; never blocks the
