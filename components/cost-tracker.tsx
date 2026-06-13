@@ -68,6 +68,24 @@ export function CostTracker() {
           <Row label="Other services" value={cost.extras} />
         </div>
 
+        {/* Prominent grand total for running everything */}
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-primary/30 bg-primary/5 px-4 py-3">
+          <div className="flex flex-col">
+            <span className="text-sm font-semibold text-foreground">
+              Charging cost in total for running
+            </span>
+            <span className="text-xs text-muted-foreground">
+              {"All services combined, billed monthly"}
+            </span>
+          </div>
+          <div className="flex flex-col items-end">
+            <span className="text-2xl font-bold text-foreground">{formatUSD(cost.total)}</span>
+            <span className="text-xs text-muted-foreground">
+              {`${formatUSD(cost.total * 12)}/yr`}
+            </span>
+          </div>
+        </div>
+
         {cost.total === 0 && (
           <p className="text-xs text-muted-foreground">
             {"You're fully on free plans right now — nothing to pay. Adjust the assumptions below if you upgrade."}
