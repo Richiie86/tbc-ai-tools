@@ -393,7 +393,7 @@ async def create_or_update_project(
         if not existing:
             # Caller asked us to update a non-existent id — create it with that
             # id so the AI program can use deterministic IDs (their choice).
-            doc = payload.dict()
+            doc = payload.model_dump()
             doc['created_at'] = now
             doc['updated_at'] = now
             await db.deploy_projects.insert_one(doc)
@@ -406,7 +406,7 @@ async def create_or_update_project(
 
     # Create with a generated id
     pid = _gen_project_id(payload.projectName)
-    doc = payload.dict()
+    doc = payload.model_dump()
     doc['id'] = pid
     doc['created_at'] = now
     doc['updated_at'] = now

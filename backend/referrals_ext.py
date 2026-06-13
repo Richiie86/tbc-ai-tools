@@ -16,7 +16,7 @@ from models import (
 
 router = APIRouter(prefix='/api')
 
-DEFAULT_BRAND = BrandSettings().dict()
+DEFAULT_BRAND = BrandSettings().model_dump()
 
 
 async def get_db():
@@ -123,7 +123,7 @@ async def referral_track(req: TrackClickRequest, request: Request):
         user_agent=request.headers.get('user-agent'),
         referrer=req.referrer,
     )
-    await db.referral_clicks.insert_one(click.dict())
+    await db.referral_clicks.insert_one(click.model_dump())
     return {'ok': True}
 
 
@@ -313,15 +313,15 @@ async def op_list_projects(user: dict = Depends(get_current_operator)):
 @router.post('/operator/projects')
 async def op_create_project(req: ProjectUpsertRequest, user: dict = Depends(get_current_operator)):
     db = await get_db()
-    p = Project(owner_id=user['sub'], **req.dict())
-    await db.projects.insert_one(p.dict())
-    return _serialize(p.dict())
+    p = Project(owner_id=user['sub'], **req.model_dump())
+    await db.projects.insert_one(p.model_dump())
+    return _serialize(p.model_dump())
 
 
 @router.put('/operator/projects/{pid}')
 async def op_update_project(pid: str, req: ProjectUpsertRequest, user: dict = Depends(get_current_operator)):
     db = await get_db()
-    updates = {**req.dict(), 'updated_at': datetime.now(timezone.utc)}
+    updates = {**req.model_dump(), 'updated_at': datetime.now(timezone.utc)}
     res = await db.projects.update_one({'id': pid, 'owner_id': user['sub']}, {'$set': updates})
     if res.matched_count == 0:
         raise HTTPException(404, 'Project not found')
@@ -382,12 +382,12 @@ async def op_launch_project_chat(pid: str, user: dict = Depends(get_current_oper
         model='gpt-4o-mini',
         variant='tbc1',
     )
-    sd = s.dict()
+    sd = s.model_dump()
     sd['project_id'] = p['id']
     await db.chat_sessions.insert_one(sd)
 
     msg = ChatMessage(session_id=s.id, user_id=user['sub'], role='user', content=primer)
-    await db.chat_messages.insert_one(msg.dict())
+    await db.chat_messages.insert_one(msg.model_dump())
 
     # Cross-link: store session_id back on the project for quick reopen later.
     await db.projects.update_one(
@@ -440,4 +440,4 @@ async def record_referral_earning(transaction_id: str, paid_user_id: str, paid_u
         commission_amount=commission,
         currency=currency,
     )
-    await db.referral_earnings.insert_one(earn.dict())
+    await db.referral_earnings.insert_one(earn.model_dump())

@@ -109,7 +109,7 @@ async def marketplace_checkout(req: CheckoutRequest, request: Request):
         price_paid_usd=price,
         stripe_session_id=session.session_id,
     )
-    await db.marketplace_purchases.insert_one(purchase.dict())
+    await db.marketplace_purchases.insert_one(purchase.model_dump())
     return {'session_id': session.session_id, 'url': session.url}
 
 

@@ -34,6 +34,10 @@ const ICONS = {
   health_check: Activity,
   loop_complete: CheckCircle2,
   loop_error: AlertTriangle,
+  auto_fix_start: Bot,
+  auto_fix_patches: Bot,
+  auto_fix_committed: CheckCircle2,
+  auto_fix_error: AlertTriangle,
 };
 const TONES = {
   loop_start: 'text-tbc-300',
@@ -47,6 +51,10 @@ const TONES = {
   health_check: 'text-emerald-300',
   loop_complete: 'text-emerald-300',
   loop_error: 'text-rose-300',
+  auto_fix_start: 'text-amber-300',
+  auto_fix_patches: 'text-amber-300',
+  auto_fix_committed: 'text-emerald-300',
+  auto_fix_error: 'text-rose-300',
 };
 
 function EventCard({ event }) {
@@ -64,7 +72,61 @@ function EventCard({ event }) {
           <p className="mt-1 text-xs text-tbc-100">
             Verdict: <span className="font-semibold">{event.data.verdict}</span>{' '}
             · {event.data.findings_count} finding{event.data.findings_count === 1 ? '' : 's'}
+            {typeof event.data.iteration === 'number' && event.data.iteration > 0 && (
+              <span className="ml-2 rounded bg-amber-500/10 px-1 text-[10px] text-amber-300">
+                after fix iteration {event.data.iteration}
+              </span>
+            )}
             {event.data.summary && <span className="block text-tbc-200/70 mt-1">{event.data.summary}</span>}
+          </p>
+        )}
+        {event.type === 'auto_fix_start' && (
+          <p className="mt-1 text-xs text-amber-200">
+            Iteration <span className="font-semibold">{event.data.iteration}</span> /
+            {' '}{event.data.max_iterations} · asking LLM to patch{' '}
+            {event.data.findings_to_fix} finding{event.data.findings_to_fix === 1 ? '' : 's'}…
+          </p>
+        )}
+        {event.type === 'auto_fix_patches' && (
+          <div className="mt-1 text-xs text-tbc-100">
+            <p className="text-amber-200">
+              {event.data.patch_count} patch{event.data.patch_count === 1 ? '' : 'es'} drafted ·
+              {' '}<code className="rounded bg-ink-950 px-1 font-mono text-[10px]">{event.data.commit_message}</code>
+            </p>
+            {Array.isArray(event.data.paths) && event.data.paths.length > 0 && (
+              <ul className="mt-1 list-disc pl-5 text-[10px] text-tbc-200/70">
+                {event.data.paths.map((p, i) => (
+                  <li key={i}><code className="font-mono">{p}</code></li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+        {event.type === 'auto_fix_committed' && (
+          <div className="mt-1 text-xs text-emerald-200">
+            ✅ Committed {(event.data.commits || []).length} patch{(event.data.commits || []).length === 1 ? '' : 'es'} (iteration {event.data.iteration})
+            {Array.isArray(event.data.commits) && (
+              <ul className="mt-1 list-none pl-3 text-[10px] text-emerald-100/80">
+                {event.data.commits.map((c, i) => (
+                  <li key={i}>
+                    <code className="font-mono">{c.path}</code>
+                    {c.commit_url && (
+                      <>
+                        {' '}→{' '}
+                        <a href={c.commit_url} target="_blank" rel="noreferrer" className="underline-offset-2 hover:underline">
+                          {(c.commit_sha || '').slice(0, 7)}
+                        </a>
+                      </>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+        {event.type === 'auto_fix_error' && (
+          <p className="mt-1 text-xs text-rose-200">
+            Auto-fix failed at <span className="font-mono">{event.data.stage}</span>: {event.data.message}
           </p>
         )}
         {event.type === 'gate_blocked' && (
@@ -110,7 +172,7 @@ function EventCard({ event }) {
           </p>
         )}
         {/* Fallback for unknown event types only. */}
-        {!(['review_done','gate_blocked','deploy_state','deploy_started','deploy_ready','health_check','loop_complete','loop_error'].includes(event.type)) && (
+        {!(['review_done','gate_blocked','deploy_state','deploy_started','deploy_ready','health_check','loop_complete','loop_error','auto_fix_start','auto_fix_patches','auto_fix_committed','auto_fix_error'].includes(event.type)) && (
           <pre className="mt-1 whitespace-pre-wrap break-words font-mono text-[10px] text-tbc-200/70">
             {JSON.stringify(event.data, null, 2)}
           </pre>
@@ -149,6 +211,9 @@ export function AutopilotDialog({ open, onOpenChange, project }) {
   const [running, setRunning] = useState(false);
   const [target, setTarget] = useState('preview');
   const [bypass, setBypass] = useState(false);
+  // Default 0 = manual mode (gate stops the loop). Bump to 1-5 to let the
+  // autopilot ask the LLM for patches, commit them via GitHub, and retry.
+  const [autoFixIters, setAutoFixIters] = useState(0);
   const abortRef = useRef(null);
   const navigate = useNavigate();
 
@@ -178,7 +243,12 @@ export function AutopilotDialog({ open, onOpenChange, project }) {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ target, bypass_review: bypass, watch_timeout_s: 90 }),
+        body: JSON.stringify({
+          target,
+          bypass_review: bypass,
+          watch_timeout_s: 90,
+          auto_fix_max_iterations: Number(autoFixIters) || 0,
+        }),
         signal: controller.signal,
       });
       if (!resp.ok || !resp.body) {
@@ -268,6 +338,23 @@ export function AutopilotDialog({ open, onOpenChange, project }) {
               className="accent-tbc-400"
             />
             <span>Bypass review gate</span>
+          </label>
+          <label className="inline-flex items-center gap-1 text-xs text-tbc-200/80">
+            <span>Auto-fix iterations</span>
+            <select
+              data-testid={`autopilot-autofix-${project.id}`}
+              value={autoFixIters}
+              onChange={(e) => setAutoFixIters(Number(e.target.value))}
+              disabled={running || bypass}
+              title={bypass ? 'Disabled while bypassing the gate' : 'How many fix → commit → re-review cycles to run before giving up. Needs github_token with Contents:Write.'}
+              className="rounded border border-tbc-900/60 bg-ink-900 px-2 py-1 text-xs text-tbc-100 disabled:opacity-40"
+            >
+              <option value="0">0 (manual)</option>
+              <option value="1">1</option>
+              <option value="2">2</option>
+              <option value="3">3</option>
+              <option value="5">5</option>
+            </select>
           </label>
           {!running ? (
             <Button

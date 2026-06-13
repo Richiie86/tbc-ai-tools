@@ -187,7 +187,7 @@ async def startup():
                 plan='enterprise',
                 credits=999999,
             )
-            await db.users.insert_one(op.dict())
+            await db.users.insert_one(op.model_dump())
             logger.warning('RESET_OPERATOR_PASSWORD: operator did not exist, created fresh for %s', OPERATOR_EMAIL)
         else:
             logger.warning('RESET_OPERATOR_PASSWORD flag honoured: password reset + 2FA cleared for %s', OPERATOR_EMAIL)
@@ -203,7 +203,7 @@ async def startup():
             plan='enterprise',
             credits=999999,
         )
-        await db.users.insert_one(op.dict())
+        await db.users.insert_one(op.model_dump())
         logger.info(f'Seeded operator user: {OPERATOR_EMAIL}')
     else:
         # ensure role is operator
@@ -351,10 +351,10 @@ async def register(req: RegisterRequest, response: Response):
         plan_started_at=now_dt,
         plan_expires_at=now_dt + timedelta(days=trial_days) if trial_days > 0 else None,
     )
-    await db.users.insert_one(user.dict())
+    await db.users.insert_one(user.model_dump())
     # Auto-generate referral code for the new user
     try:
-        await get_or_create_referral_code(user.dict())
+        await get_or_create_referral_code(user.model_dump())
     except Exception:
         pass
     # If they came via a referral code, record it
@@ -366,7 +366,7 @@ async def register(req: RegisterRequest, response: Response):
     # Issue token requiring 2FA setup
     token = create_jwt(user.id, user.email, user.role, pending_2fa=False, token_version=user.token_version)
     set_session_cookie(response, token, pending_2fa=False)
-    return AuthResponse(token=token, pending_2fa=False, requires_2fa_setup=True, user=_public_user(user.dict()))
+    return AuthResponse(token=token, pending_2fa=False, requires_2fa_setup=True, user=_public_user(user.model_dump()))
 
 
 @api.post('/auth/login', response_model=AuthResponse)
@@ -559,8 +559,8 @@ async def create_session(req: CreateSessionRequest, user: dict = Depends(get_cur
         model=req.model or DEFAULT_MODEL,
         variant=req.variant or 'tbc1',
     )
-    await db.chat_sessions.insert_one(s.dict())
-    return _serialize(s.dict())
+    await db.chat_sessions.insert_one(s.model_dump())
+    return _serialize(s.model_dump())
 
 
 @api.get('/chat/sessions/{session_id}/messages')
@@ -625,7 +625,7 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
             model=req.model or DEFAULT_MODEL,
             variant=req.variant or 'tbc1',
         )
-        await db.chat_sessions.insert_one(s.dict())
+        await db.chat_sessions.insert_one(s.model_dump())
         session_id = s.id
     else:
         sess = await db.chat_sessions.find_one({'id': session_id, 'user_id': user['sub']})
@@ -634,7 +634,7 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
 
     # Save user message
     user_msg = ChatMessage(session_id=session_id, user_id=user['sub'], role='user', content=req.message)
-    await db.chat_messages.insert_one(user_msg.dict())
+    await db.chat_messages.insert_one(user_msg.model_dump())
 
     # Build chat with prior history
     history_cursor = db.chat_messages.find(
@@ -686,7 +686,7 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
         # Save assistant message
         if full_response.strip():
             asst_msg = ChatMessage(session_id=session_id, user_id=user['sub'], role='assistant', content=full_response)
-            await db.chat_messages.insert_one(asst_msg.dict())
+            await db.chat_messages.insert_one(asst_msg.model_dump())
         # Update session
         await db.chat_sessions.update_one(
             {'id': session_id},
@@ -809,7 +809,7 @@ async def create_checkout(req: CheckoutRequest, http_request: Request, user: dic
         payment_status='pending',
         metadata=metadata,
     )
-    await db.payment_transactions.insert_one(tx.dict())
+    await db.payment_transactions.insert_one(tx.model_dump())
 
     return {'url': session.url, 'session_id': session.session_id}
 
@@ -909,8 +909,8 @@ async def stripe_webhook(request: Request):
 # ===== CONTACT =====
 @api.post('/contact')
 async def submit_contact(req: ContactRequest):
-    sub = ContactSubmission(**req.dict())
-    await db.contacts.insert_one(sub.dict())
+    sub = ContactSubmission(**req.model_dump())
+    await db.contacts.insert_one(sub.model_dump())
     # Fire-and-forget operator notification — don't fail the form if email send breaks
     try:
         op_email = os.environ.get('OPERATOR_EMAIL', '').strip()

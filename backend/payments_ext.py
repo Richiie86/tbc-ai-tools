@@ -114,7 +114,7 @@ async def seed_defaults():
             await db.plans.insert_one(pack)
             logger.info('Seeded credit pack %s', pack['id'])
     if await db.settings.count_documents({'_id': 'payment_settings'}) == 0:
-        defaults = PaymentSettings().dict()
+        defaults = PaymentSettings().model_dump()
         defaults['_id'] = 'payment_settings'
         await db.settings.insert_one(defaults)
         logger.info('Seeded payment settings')
@@ -124,7 +124,7 @@ async def get_settings_doc() -> dict:
     db = await get_db()
     doc = await db.settings.find_one({'_id': 'payment_settings'})
     if not doc:
-        defaults = PaymentSettings().dict()
+        defaults = PaymentSettings().model_dump()
         defaults['_id'] = 'payment_settings'
         await db.settings.insert_one(defaults)
         return defaults
@@ -271,7 +271,7 @@ async def paypal_create_order(req: PayPalCreateReq, user: dict = Depends(get_cur
         payment_status='pending',
         metadata={'method': 'paypal', 'paypal_mode': settings.get('paypal_mode', 'sandbox')},
     )
-    await db.payment_transactions.insert_one(tx.dict())
+    await db.payment_transactions.insert_one(tx.model_dump())
     return {'order_id': data['id'], 'approval_url': approval}
 
 
@@ -343,7 +343,7 @@ async def submit_manual_payment(req: ManualPaymentRequest, user: dict = Depends(
             'note': req.note or '',
         },
     )
-    await db.payment_transactions.insert_one(tx.dict())
+    await db.payment_transactions.insert_one(tx.model_dump())
     return {'success': True, 'transaction_id': tx.id, 'status': 'pending_review'}
 
 
@@ -434,14 +434,14 @@ async def op_list_treasury(_: dict = Depends(get_current_operator)):
 async def op_create_treasury(req: TreasuryUpsertRequest, _: dict = Depends(get_current_operator)):
     db = await get_db()
     dest = TreasuryDestination(**req.dict(exclude_none=True))
-    await db.treasury.insert_one(dest.dict())
-    return _serialize(dest.dict())
+    await db.treasury.insert_one(dest.model_dump())
+    return _serialize(dest.model_dump())
 
 
 @router.put('/operator/treasury/{dest_id}')
 async def op_update_treasury(dest_id: str, req: TreasuryUpsertRequest, _: dict = Depends(get_current_operator)):
     db = await get_db()
-    updates = {k: v for k, v in req.dict().items() if v is not None}
+    updates = {k: v for k, v in req.model_dump().items() if v is not None}
     res = await db.treasury.update_one({'id': dest_id}, {'$set': updates})
     if res.matched_count == 0:
         raise HTTPException(404, 'Destination not found')
@@ -879,15 +879,15 @@ async def op_list_licenses(_: dict = Depends(get_current_operator)):
 @router.post('/operator/licenses')
 async def op_create_license(req: LicenseUpsertRequest, _: dict = Depends(get_current_operator)):
     db = await get_db()
-    lic = License(key=_gen_license_key(), **req.dict())
-    await db.licenses.insert_one(lic.dict())
-    return _serialize(lic.dict())
+    lic = License(key=_gen_license_key(), **req.model_dump())
+    await db.licenses.insert_one(lic.model_dump())
+    return _serialize(lic.model_dump())
 
 
 @router.put('/operator/licenses/{lic_id}')
 async def op_update_license(lic_id: str, req: LicenseUpsertRequest, _: dict = Depends(get_current_operator)):
     db = await get_db()
-    res = await db.licenses.update_one({'id': lic_id}, {'$set': req.dict()})
+    res = await db.licenses.update_one({'id': lic_id}, {'$set': req.model_dump()})
     if res.matched_count == 0:
         raise HTTPException(404, 'License not found')
     doc = await db.licenses.find_one({'id': lic_id})
@@ -957,7 +957,7 @@ async def license_report_earnings(req: EarningsReportRequest):
         status='owed',
         occurred_at=occurred_at,
     )
-    await db.royalties.insert_one(rec.dict())
+    await db.royalties.insert_one(rec.model_dump())
     await db.licenses.update_one({'id': lic['id']}, {'$set': {'last_report_at': datetime.now(timezone.utc)}})
     return {'royalty_id': rec.id, 'royalty_amount': royalty_amount, 'pct': pct}
 

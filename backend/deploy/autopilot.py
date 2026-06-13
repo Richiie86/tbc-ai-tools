@@ -51,6 +51,10 @@ class AutopilotRequest(BaseModel):
     bypass_review: bool = False
     # How long to poll Vercel before giving up (seconds). 0 disables watch.
     watch_timeout_s: int = 90
+    # If > 0, when the review verdict is `do_not_ship` the loop will ask the
+    # LLM for patches, commit them via GitHub Contents API, then re-run the
+    # whole loop on the new HEAD. Hard-capped at 5 to prevent runaway.
+    auto_fix_max_iterations: int = 0
 
 
 def _sse(event: str, data: dict) -> str:
@@ -68,7 +72,20 @@ async def _autopilot_stream(
 ):
     """Drive the AI ship-and-watch loop end-to-end. See module docstring for
     the event taxonomy. Synchronously yields SSE frames until the loop
-    terminates (success or error)."""
+    terminates (success or error).
+
+    When `req.auto_fix_max_iterations > 0` and a verdict is `do_not_ship`,
+    the loop:
+      1. Emits `auto_fix_start` + `auto_fix_patches` + `auto_fix_committed`
+         (or `auto_fix_error` on any failure).
+      2. Re-runs review on the new HEAD, up to N times total.
+      3. Emits `auto_fix_exhausted` if the verdict never crosses to ship.
+    """
+    from deploy.auto_fix import commit_patches, request_patches
+
+    MAX_ALLOWED = 5  # absolute hard cap; ignore caller values above this.
+    max_iters = max(0, min(int(req.auto_fix_max_iterations or 0), MAX_ALLOWED))
+
     try:
         project = await db.deploy_projects.find_one({'id': project_id})
         if not project and project_id == SELF_PROJECT_ID:
@@ -84,33 +101,100 @@ async def _autopilot_stream(
             'ref': req.git_ref or project.get('gitRef'),
             'target': req.target,
             'bypass_review': req.bypass_review,
+            'auto_fix_max_iterations': max_iters,
         })
 
-        # ---- Step 1: review ----------------------------------------------
-        yield _sse('review_start', {'project_id': project_id})
-        try:
-            review = await run_code_review(project, settings)
-        except HTTPException as he:
-            yield _sse('loop_error', {'stage': 'review', 'status': he.status_code, 'message': str(he.detail)})
-            return
-        yield _sse('review_done', {
-            'verdict': review.get('verdict'),
-            'summary': (review.get('summary') or '')[:600],
-            'findings_count': len(review.get('findings') or []),
-            'findings': (review.get('findings') or [])[:10],
-        })
-
-        # ---- Step 2: gate ------------------------------------------------
-        if review.get('verdict') == 'do_not_ship' and not req.bypass_review:
-            fix_session_id = await _create_fix_review_chat(project, review, user_id)
-            yield _sse('gate_blocked', {
+        # Outer loop: review (+ maybe auto-fix + re-review) up to N times,
+        # then exactly one deploy/watch/health cycle on whatever HEAD we end
+        # up at.
+        iteration = 0
+        review: Optional[dict] = None
+        while True:
+            yield _sse('review_start', {'project_id': project_id, 'iteration': iteration})
+            try:
+                review = await run_code_review(project, settings)
+            except HTTPException as he:
+                yield _sse('loop_error', {'stage': 'review', 'status': he.status_code, 'message': str(he.detail)})
+                return
+            yield _sse('review_done', {
                 'verdict': review.get('verdict'),
-                'fix_chat_session_id': fix_session_id,
-                'next_action': 'Open the fix chat or rerun autopilot with bypass_review=true',
+                'summary': (review.get('summary') or '')[:600],
+                'findings_count': len(review.get('findings') or []),
+                'findings': (review.get('findings') or [])[:10],
+                'iteration': iteration,
             })
-            return
 
-        # ---- Step 3: deploy ----------------------------------------------
+            if review.get('verdict') != 'do_not_ship' or req.bypass_review:
+                break  # ship / ship_with_fixes / explicit override → proceed to deploy
+
+            # ---- gate fired -----------------------------------------------
+            if iteration >= max_iters:
+                # No auto-fix budget left (or it was disabled) — emit the
+                # gate_blocked event and stop.
+                fix_session_id = await _create_fix_review_chat(project, review, user_id)
+                yield _sse('gate_blocked', {
+                    'verdict': review.get('verdict'),
+                    'fix_chat_session_id': fix_session_id,
+                    'iteration': iteration,
+                    'next_action': (
+                        'Auto-fix exhausted — open the fix chat or rerun autopilot with bypass_review=true'
+                        if max_iters > 0
+                        else 'Open the fix chat or rerun autopilot with bypass_review=true / auto_fix_max_iterations>0'
+                    ),
+                })
+                return
+
+            # ---- auto-fix attempt -----------------------------------------
+            iteration += 1
+            yield _sse('auto_fix_start', {
+                'iteration': iteration,
+                'max_iterations': max_iters,
+                'findings_to_fix': len(review.get('findings') or []),
+            })
+            try:
+                patch_set = await request_patches(project, review, settings)
+            except HTTPException as he:
+                yield _sse('auto_fix_error', {
+                    'iteration': iteration, 'stage': 'request_patches',
+                    'status': he.status_code, 'message': str(he.detail),
+                })
+                return
+            yield _sse('auto_fix_patches', {
+                'iteration': iteration,
+                'commit_message': patch_set.get('commit_message'),
+                'patch_count': len(patch_set.get('patches') or []),
+                'paths': [p.get('path') for p in (patch_set.get('patches') or [])],
+            })
+            if not patch_set.get('patches'):
+                yield _sse('auto_fix_error', {
+                    'iteration': iteration, 'stage': 'request_patches',
+                    'message': 'LLM returned zero patches.',
+                })
+                return
+
+            try:
+                commits = await commit_patches(
+                    project,
+                    patch_set['patches'],
+                    patch_set['commit_message'],
+                    patch_set['fetched_files'],
+                    settings,
+                )
+            except HTTPException as he:
+                yield _sse('auto_fix_error', {
+                    'iteration': iteration, 'stage': 'commit_patches',
+                    'status': he.status_code, 'message': str(he.detail),
+                })
+                return
+            yield _sse('auto_fix_committed', {
+                'iteration': iteration,
+                'commits': commits,
+            })
+            # Refresh the project doc so next iteration sees the audit trail.
+            project = await db.deploy_projects.find_one({'id': project_id}) or project
+            # Fall through — next while-loop pass re-runs review on the new HEAD.
+
+        # ---- Step 3 onward: deploy on the (possibly auto-fixed) HEAD -----
         yield _sse('deploy_start', {'target': req.target, 'ref': req.git_ref or project.get('gitRef')})
         try:
             deploy_res = await _vercel_create_deployment(settings, project, req.target, req.git_ref)
@@ -161,6 +245,7 @@ async def _autopilot_stream(
                 'ok': health.get('ok'),
                 'state': terminal_state,
                 'url': deployment_url,
+                'iterations_run': iteration,
             })
         else:
             yield _sse('loop_complete', {
@@ -168,6 +253,7 @@ async def _autopilot_stream(
                 'state': terminal_state or 'WATCH_TIMEOUT',
                 'url': deployment_url,
                 'message': 'Deploy did not reach READY within the watch window.',
+                'iterations_run': iteration,
             })
 
     except Exception as e:  # absolute last-resort safety net

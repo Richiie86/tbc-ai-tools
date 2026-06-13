@@ -20,7 +20,7 @@ import pymongo
 import pytest
 import pytest_asyncio
 
-pytestmark = pytest.mark.asyncio(loop_scope='module')
+pytestmark = pytest.mark.asyncio(loop_scope='session')
 
 sys.path.insert(0, '/app/backend')
 import deploy_projects_ext  # noqa: E402
@@ -143,7 +143,7 @@ def _seed_projects_and_patch(mongo_db):
         mongo_db.chat_sessions.delete_one({'id': s['id']})
 
 
-@pytest_asyncio.fixture(loop_scope="module")
+@pytest_asyncio.fixture(loop_scope='session')
 async def client():
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url='http://testserver') as c:
@@ -151,7 +151,7 @@ async def client():
 
 
 # ---------- (1) do_not_ship → gate_blocked ----------
-@pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.asyncio(loop_scope='session')
 async def test_do_not_ship_emits_gate_blocked(client):
     r = await client.post(
         f'/api/operator/deploy/{SEED_BLOCKED_ID}/autopilot',
@@ -174,7 +174,7 @@ async def test_do_not_ship_emits_gate_blocked(client):
 
 
 # ---------- (2) bypass_review skips gate ----------
-@pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.asyncio(loop_scope='session')
 async def test_bypass_review_skips_gate(client):
     r = await client.post(
         f'/api/operator/deploy/{SEED_BLOCKED_ID}/autopilot',
@@ -191,7 +191,7 @@ async def test_bypass_review_skips_gate(client):
 
 
 # ---------- (3) unknown project → single loop_error ----------
-@pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.asyncio(loop_scope='session')
 async def test_unknown_project_emits_single_loop_error(client):
     r = await client.post(
         '/api/operator/deploy/no-such-id/autopilot',
@@ -206,7 +206,7 @@ async def test_unknown_project_emits_single_loop_error(client):
 
 
 # ---------- (4) ship verdict skips gate ----------
-@pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.asyncio(loop_scope='session')
 async def test_ship_verdict_skips_gate(client):
     r = await client.post(
         f'/api/operator/deploy/{SEED_SHIP_ID}/autopilot',
@@ -223,7 +223,7 @@ async def test_ship_verdict_skips_gate(client):
 
 
 # ---------- (5) AI surface ----------
-@pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.asyncio(loop_scope='session')
 async def test_ai_surface_unauth_returns_401(client):
     r = await client.post(
         f'/api/projects/{SEED_BLOCKED_ID}/autopilot',
@@ -234,7 +234,7 @@ async def test_ai_surface_unauth_returns_401(client):
     assert 'text/event-stream' not in r.headers.get('content-type', '')
 
 
-@pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.asyncio(loop_scope='session')
 async def test_ai_surface_bearer_same_sse_shape(client, _seed_projects_and_patch):
     ai_key = _seed_projects_and_patch['ai_key']
     r = await client.post(

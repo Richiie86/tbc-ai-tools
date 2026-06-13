@@ -12,6 +12,35 @@ gold theme. Domain: **tbctools.org**.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
 ## Implemented
+- ✅ **Auto-fix until ship** (Feb 2026):
+  - New `deploy/auto_fix.py` module: `request_patches()` asks the LLM for a
+    strict JSON patch set (`[{path, content, rationale}]` + commit message),
+    fetching current file contents via the GitHub Contents API as context.
+    `commit_patches()` PUTs each patched file back to the project's tracked
+    branch (one commit per file with shared message + rationale suffix).
+    Caps: 80 KB per patched file, 60 KB total LLM context, ≤5 iterations.
+  - Autopilot loop now accepts `auto_fix_max_iterations: int = 0`. When
+    > 0 and a verdict is `do_not_ship`, the loop emits new events
+    `auto_fix_start → auto_fix_patches → auto_fix_committed`, re-runs the
+    review on the new HEAD, and repeats until verdict crosses to ship or
+    iterations run out (then `gate_blocked` fires with the seeded fix
+    chat). Hard-capped at 5 server-side so a runaway caller value (e.g.
+    999) is silently clamped.
+  - AutopilotDialog: new "Auto-fix iterations" select
+    (`autopilot-autofix-{id}`) with 0/1/2/3/5 options. Disabled while
+    "Bypass review gate" is checked. Auto-fix events rendered with
+    severity-coded entries listing the patched paths + clickable commit
+    hashes.
+  - **Audit trail**: every successful auto-fix run is appended to
+    `deploy_projects.auto_fix_history` (capped at 20 entries) so the
+    operator can review past fix attempts even after the dialog closes.
+  - **Tests**: new `tests/test_p5_auto_fix.py` (4 tests):
+    `test_disabled_autofix_still_blocks`, `test_autofix_converges_to_ship`,
+    `test_autofix_exhausted_emits_gate_blocked`,
+    `test_autofix_max_iterations_hard_capped`. Bumped p4 + p5 to
+    `loop_scope='session'` so motor mongo client shares one loop. Backend
+    now at **60 passed + 1 skipped**.
+
 - ✅ **Deploy submodule split + github_token UI** (Feb 2026):
   - **Refactor**: `deploy_projects_ext.py` shrunk from **1634 → 1183 lines**
     by extracting two submodules into `/app/backend/deploy/`:
