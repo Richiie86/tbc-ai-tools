@@ -11,6 +11,35 @@ gold theme. Domain: **tbctools.org**.
 - **End user (member)** — Chats with the AI builder, manages plan, copies referral link.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
+## Implemented — Feb 2026 (latest session, batch 3)
+- ✅ **Runtime error capture + RCA pipeline** (`runtime_errors_ext.py` + `errorCapture.jsx`):
+  - Global FastAPI exception handler captures every backend 500 into `runtime_errors` (skips HTTPException).
+  - `window.onerror`, `unhandledrejection`, and a React `RuntimeErrorBoundary` POST frontend errors to `/api/runtime-errors`.
+  - Public ingest endpoint rate-limited at 30 reports/min/IP. Same-signature errors within 24h merge with a count increment.
+  - **Operator → Errors** tab lists, expands stacks, runs **Claude Sonnet RCA** (suggested file + one-line change + confidence), dismisses, or deletes. RCA persists on the doc; delete uses shadcn AlertDialog. Parse-fallback gets a yellow warning badge.
+- ✅ **GitHub PR Preview widget** (`PreviewWidget.jsx` + `deploy_previews_ext.py`):
+  - Lives above the tab bar on Operator dashboard. Polls `/api/operator/deploy/previews` every 30s (only while tab is foregrounded — saves Vercel quota).
+  - Groups Vercel deployments by `meta.githubCommitRef`, keeps newest READY per branch.
+  - One-click **Promote to prod** reuses `/api/operator/deploy/{id}/promote`. Widget hides entirely when no previews exist.
+- ✅ **Weekly insight digest** (`/api/operator/ai-learnings/digest`):
+  - Gemini Flash summary of every learning added in the last N weeks. Falls back to a deterministic bullet list when the LLM is unreachable so the endpoint never 500s in CI.
+  - "Weekly digest" button on AI Learnings tab → renders inline panel with close button.
+- ✅ **tv-preservation regression test** (`tests/test_p6_15_tv_preservation.py`):
+  - 3 assertions, runs in <1s. Locks in: login JWT carries `tv`; first authed call doesn't 401; `/auth/2fa/verify` never 500s.
+  - **Currently green: 3/3 PASS.**
+- ✅ **Nightly AI Test Bench cron + drift alert** (in `ai_test_bench_ext.py` + `server.py` scheduler):
+  - APScheduler runs `_nightly_drift_alert()` every 24h. Compares each model's pass/fail + avg-latency to yesterday.
+  - Emails the operator (via `email_utils.send_email`) when any model flips PASS → FAIL or latency degrades >50%. Idempotent per UTC date.
+  - Manual trigger via `POST /api/operator/ai-tests/cron/run-now` for testing.
+
+## Backlog — what's left
+- Skill-tree as a true graph (react-flow) — deferred again.
+- `Dashboard.jsx` & `_autopilot_stream()` complexity refactor — still deferred.
+- Multi-pod Redis-backed rate-limiting for `/api/runtime-errors` (current in-memory bucket fine for single-pod preview).
+- Surface `parse_fallback:true` RCA differently (done — yellow badge added).
+- Configurable RCA model (currently hard-coded to `claude-sonnet-4-6`).
+
+
 ## Implemented — Feb 2026 (latest session, continued)
 - ✅ **AI Brain tab** (`AIBrainTab.jsx` + `ai_brain_ext.py`):
   - Maturity cards per model (Claude/GPT/Gemini/Other/All) — total enabled, pending proposals, 7-day delta, approval-rate bar.

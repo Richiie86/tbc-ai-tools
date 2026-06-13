@@ -206,17 +206,23 @@ async def run_rca(error_id: str, _op: dict = Depends(get_current_operator)):
         raise HTTPException(502, f'LLM RCA failed: {e}')
 
     # Parse the JSON envelope. Lenient — if the model adds a code-fence
-    # we strip it before json.loads.
-    import json, re
+    # we strip it before json.loads. When the envelope is malformed we
+    # still surface the raw text but tag `parse_fallback:true` so the UI
+    # can render a "raw output" warning instead of pretending we got a
+    # structured response.
+    import json
+    import re
     cleaned = re.sub(r'^```(?:json)?\s*|\s*```$', '', full.strip(), flags=re.MULTILINE)
     try:
         rca = json.loads(cleaned)
+        rca['parse_fallback'] = False
     except Exception:
         rca = {
             'root_cause': full.strip()[:600],
             'suggested_file': None,
             'suggested_change': '',
             'confidence': 'low',
+            'parse_fallback': True,
         }
     rca['generated_at'] = datetime.now(timezone.utc).isoformat()
     await db.runtime_errors.update_one(

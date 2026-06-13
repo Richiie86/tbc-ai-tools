@@ -1,6 +1,10 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import api from '../../lib/api';
 import { Button } from '../../components/ui/button';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '../../components/ui/alert-dialog';
 import { toast } from 'sonner';
 import {
   AlertOctagon, Loader2, RefreshCw, Trash2, EyeOff, Wand2, Code2,
@@ -24,6 +28,7 @@ export default function ErrorsTab() {
   const [expanded, setExpanded] = useState({}); // id -> bool
   const [running, setRunning] = useState(null); // id of error currently running RCA
   const [includeDismissed, setIncludeDismissed] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(null); // error pending delete
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -66,13 +71,14 @@ export default function ErrorsTab() {
   };
 
   const remove = async (err) => {
-    if (!window.confirm('Permanently delete this error?')) return;
     try {
       await api.delete(`/operator/runtime-errors/${err.id}`);
       setErrors((cur) => cur.filter((e) => e.id !== err.id));
       toast.success('Deleted');
     } catch (e) {
       toast.error(e?.response?.data?.detail || 'Delete failed');
+    } finally {
+      setConfirmDelete(null);
     }
   };
 
@@ -138,12 +144,50 @@ export default function ErrorsTab() {
               running={running === err.id}
               onRunRCA={() => runRCA(err)}
               onDismiss={() => dismiss(err)}
-              onDelete={() => remove(err)}
+              onDelete={() => setConfirmDelete(err)}
               onOpenInSandbox={() => openInSandbox(err)}
             />
           ))}
         </ul>
       )}
+
+      <AlertDialog
+        open={!!confirmDelete}
+        onOpenChange={(o) => { if (!o) setConfirmDelete(null); }}
+      >
+        <AlertDialogContent
+          data-testid="error-delete-dialog"
+          className="bg-ink-900 border-tbc-900/60 text-tbc-100"
+        >
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this error permanently?</AlertDialogTitle>
+            <AlertDialogDescription className="text-tbc-200/70">
+              This drops it from the database, including any cached RCA. Use <strong>Dismiss</strong> instead
+              if you just want to hide it from the default view.
+              {confirmDelete && (
+                <span className="mt-2 block rounded bg-ink-950 p-2 font-mono text-[11px] text-tbc-100">
+                  {confirmDelete.message?.slice(0, 200)}
+                </span>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              data-testid="error-delete-cancel"
+              className="border-tbc-900/60 bg-ink-900 text-tbc-100 hover:bg-ink-950"
+            >
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              data-testid="error-delete-confirm"
+              onClick={() => confirmDelete && remove(confirmDelete)}
+              className="bg-red-500 text-white hover:bg-red-600 font-bold"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -198,8 +242,13 @@ function ErrorRow({ err, expanded, onToggle, running, onRunRCA, onDismiss, onDel
 
           {err.rca && (
             <div data-testid={`error-rca-${err.id}`} className="rounded border border-tbc-500/40 bg-tbc-500/[0.04] p-2.5">
-              <div className="text-[10px] uppercase tracking-wider text-tbc-300">
-                RCA · confidence: {err.rca.confidence || '—'}
+              <div className="flex items-center justify-between text-[10px] uppercase tracking-wider text-tbc-300">
+                <span>RCA · confidence: {err.rca.confidence || '—'}</span>
+                {err.rca.parse_fallback && (
+                  <span className="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[9px] text-amber-300">
+                    ⚠️ raw output — LLM didn't return valid JSON
+                  </span>
+                )}
               </div>
               <div className="mt-1 text-sm text-tbc-100">{err.rca.root_cause}</div>
               {err.rca.suggested_file && (
