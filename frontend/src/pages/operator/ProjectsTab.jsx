@@ -8,6 +8,17 @@ import { STAGES, stageOf, EMPTY_PROJECT } from './projects/stages';
 import { ProjectStageNav } from './projects/ProjectStageNav';
 import { ProjectCard, ProjectEmptyState } from './projects/ProjectCard';
 import { ProjectFormDialog } from './projects/ProjectFormDialog';
+import { WorkspaceSwitcher } from './projects/WorkspaceSwitcher';
+
+// Helper that pulls a project's workspace tags (lowercase slugs in `tags`
+// that match the workspace regex and aren't the generic 'bootstrap' marker).
+// Used both for filtering and to render the workspace pill on each card.
+const _WORKSPACE_RE = /^[a-z0-9][a-z0-9_-]{0,30}$/;
+const _NON_WORKSPACE_TAGS = new Set(['bootstrap']);
+const workspaceTagsOf = (p) => (p.tags || []).filter(
+  (t) => typeof t === 'string' && _WORKSPACE_RE.test(t) && !_NON_WORKSPACE_TAGS.has(t),
+);
+const _WS_KEY = 'tbc_projects_workspace_v1';
 
 export default function ProjectsTab() {
   const [items, setItems] = useState([]);
@@ -19,6 +30,14 @@ export default function ProjectsTab() {
   const [tagsText, setTagsText] = useState('');
   const [saving, setSaving] = useState(false);
   const [cloningAll, setCloningAll] = useState(false);
+  // Workspace filter persisted across reloads so an operator working in
+  // tbc1 doesn't get bumped back to 'all' every page refresh.
+  const [workspace, setWorkspace] = useState(() => {
+    try { return localStorage.getItem(_WS_KEY) || 'all'; } catch { return 'all'; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem(_WS_KEY, workspace); } catch { /* ignore */ }
+  }, [workspace]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -34,15 +53,25 @@ export default function ProjectsTab() {
   }, []);
   useEffect(() => { load(); }, [load]);
 
+  // Filter by workspace BEFORE filtering by stage so the stage counts
+  // reflect only what the operator can actually see.
+  const inWorkspace = useMemo(() => {
+    if (workspace === 'all') return items;
+    if (workspace === 'default') {
+      return items.filter((p) => workspaceTagsOf(p).length === 0);
+    }
+    return items.filter((p) => workspaceTagsOf(p).includes(workspace));
+  }, [items, workspace]);
+
   const counts = useMemo(() => {
     const c = Object.fromEntries(STAGES.map((s) => [s.v, 0]));
-    for (const p of items) c[p.status] = (c[p.status] || 0) + 1;
+    for (const p of inWorkspace) c[p.status] = (c[p.status] || 0) + 1;
     return c;
-  }, [items]);
+  }, [inWorkspace]);
 
   const visible = useMemo(
-    () => items.filter((p) => (p.status || 'idea') === active),
-    [items, active],
+    () => inWorkspace.filter((p) => (p.status || 'idea') === active),
+    [inWorkspace, active],
   );
 
   const openCreate = (preset) => {
@@ -112,23 +141,27 @@ export default function ProjectsTab() {
   };
 
   const cloneAllToWorkspace = async () => {
-    const workspace = 'tbc1';
+    // Default target: the currently-selected workspace if it isn't a
+    // virtual one ('all'/'default'), otherwise the historical 'tbc1'.
+    const target = (workspace !== 'all' && workspace !== 'default') ? workspace : 'tbc1';
     if (!window.confirm(
-      `Clone every project into the "${workspace}" workspace?\n\n` +
-      `• Each project gets a "-${workspace}" suffix and a "${workspace}" tag.\n` +
+      `Clone every project into the "${target}" workspace?\n\n` +
+      `• Each project gets a "-${target}" suffix and a "${target}" tag.\n` +
       `• Cloned items get a fresh chat session so you can continue work.\n` +
       `• "crypto-forex-tax" is bootstrapped if missing.\n` +
       `• Re-running is safe (already-cloned projects are skipped).`,
     )) return;
     setCloningAll(true);
     try {
-      const { data } = await api.post('/operator/projects/clone-all', { workspace });
+      const { data } = await api.post('/operator/projects/clone-all', { workspace: target });
       const c = data?.cloned_count || 0;
       const b = data?.bootstrapped_count || 0;
       const s = data?.skipped_count || 0;
       toast.success(
-        `${c} cloned${b ? ` · ${b} bootstrapped` : ''}${s ? ` · ${s} skipped` : ''} → ${workspace}`,
+        `${c} cloned${b ? ` · ${b} bootstrapped` : ''}${s ? ` · ${s} skipped` : ''} → ${target}`,
       );
+      // Hop to the target workspace so the operator immediately sees the result.
+      setWorkspace(target);
       load();
     } catch (e) {
       toast.error(e?.response?.data?.detail || 'Clone-all failed');
@@ -149,6 +182,11 @@ export default function ProjectsTab() {
 
   return (
     <div data-testid="projects-tab">
+      <WorkspaceSwitcher
+        selected={workspace}
+        onSelect={setWorkspace}
+        onAfterChange={load}
+      />
       <ProjectStageNav active={active} counts={counts} onSelect={setActive} />
 
       {/* Header for current section */}
@@ -159,7 +197,14 @@ export default function ProjectsTab() {
           </span>
           <div>
             <h3 className="text-lg font-bold text-tbc-100">{activeStage.label}</h3>
-            <p className="text-xs text-tbc-200/60">{activeStage.desc}</p>
+            <p className="text-xs text-tbc-200/60">
+              {activeStage.desc}
+              {workspace !== 'all' && (
+                <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-tbc-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-tbc-300">
+                  {workspace === 'default' ? 'Default workspace' : `Workspace · ${workspace}`}
+                </span>
+              )}
+            </p>
           </div>
         </div>
         {/* DialogTrigger lives outside the Dialog body so it can sit in the
@@ -171,11 +216,13 @@ export default function ProjectsTab() {
             onClick={cloneAllToWorkspace}
             disabled={cloningAll}
             variant="outline"
-            title="Copy every project into the tbc1 workspace so you can continue work there"
+            title={(workspace !== 'all' && workspace !== 'default')
+              ? `Copy every project into ${workspace}`
+              : 'Copy every project into the tbc1 workspace so you can continue work there'}
             className="border-tbc-500/40 bg-ink-900 text-tbc-100 hover:bg-tbc-500/10"
           >
             {cloningAll ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Copy className="mr-1.5 h-4 w-4" />}
-            Clone all to tbc1
+            Clone all to {(workspace !== 'all' && workspace !== 'default') ? workspace : 'tbc1'}
           </Button>
           <Button
             data-testid="projects-new-btn"

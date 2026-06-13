@@ -76,11 +76,26 @@ export function ProjectCard({ project: p, onEdit, onDelete, onMove, onLaunchChat
 
       {(p.tags || []).length > 0 && (
         <div className="mt-3 flex flex-wrap gap-1">
-          {p.tags.map((t) => (
-            <span key={t} className="inline-flex items-center gap-1 rounded-full bg-ink-950 px-2 py-0.5 text-[10px] text-tbc-200/80">
-              <Tag className="h-2.5 w-2.5" />{t}
-            </span>
-          ))}
+          {p.tags.map((t) => {
+            // Workspace tags (lowercase slug, not 'bootstrap') get a
+            // gold-tinted pill so the operator can scan parallel workstreams.
+            const isWorkspace = typeof t === 'string'
+              && /^[a-z0-9][a-z0-9_-]{0,30}$/.test(t)
+              && t !== 'bootstrap';
+            return (
+              <span
+                key={t}
+                data-testid={isWorkspace ? `project-workspace-tag-${p.id}-${t}` : undefined}
+                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] ${
+                  isWorkspace
+                    ? 'bg-tbc-500/15 text-tbc-200 ring-1 ring-tbc-500/30 font-semibold'
+                    : 'bg-ink-950 text-tbc-200/80'
+                }`}
+              >
+                <Tag className="h-2.5 w-2.5" />{t}
+              </span>
+            );
+          })}
         </div>
       )}
 

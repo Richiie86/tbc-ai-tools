@@ -40,6 +40,30 @@ DEFAULT_EDITABLE_PREFIXES = (
     '', 'src/', 'public/', 'app/',
 )
 
+# A HARD denylist — even when the operator has whitelisted a prefix that
+# would otherwise contain these files, the sandbox refuses to read or
+# write them. This is the safety net that stops a compromised operator
+# session (or an LLM with sandbox access) from leaking the production
+# Vercel/GitHub/Stripe tokens that live in `.env`. Patterns match against
+# the *final* path component as well as the full slug.
+import re  # noqa: E402 — kept near the constant it powers
+_FORBIDDEN_PATH_PATTERNS = (
+    # .env, .env.local, .env.production, ...
+    re.compile(r'(^|/)\.env(\.[^/]+)?$', re.IGNORECASE),
+    # SSH / TLS private keys
+    re.compile(r'(^|/)id_rsa(\..+)?$', re.IGNORECASE),
+    re.compile(r'(^|/)[^/]+\.pem$', re.IGNORECASE),
+    re.compile(r'(^|/)[^/]+\.key$', re.IGNORECASE),
+    re.compile(r'(^|/)[^/]+\.p12$', re.IGNORECASE),
+    # Common secret bundles
+    re.compile(r'(^|/)secrets?(\.[^/]+)?$', re.IGNORECASE),
+    re.compile(r'(^|/)credentials?(\.[^/]+)?$', re.IGNORECASE),
+    # Cloud-provider config that often holds long-lived creds
+    re.compile(r'(^|/)\.aws/'),
+    re.compile(r'(^|/)\.netrc$'),
+    re.compile(r'(^|/)\.npmrc$'),
+)
+
 
 async def _get_settings() -> dict:
     return await db.settings.find_one({'_id': 'payment_settings'}) or {}
@@ -62,10 +86,22 @@ async def _require_self_repo() -> dict:
 
 
 def _check_path(path: str, prefixes: tuple) -> None:
-    """Reject path traversal + force the path inside an editable prefix."""
+    """Reject path traversal + force the path inside an editable prefix.
+    Also enforces the global secrets denylist so .env / *.pem / etc.
+    are unreadable and unwritable through the sandbox no matter what
+    prefix the operator allowed."""
     p = (path or '').lstrip('/')
     if '..' in p.split('/'):
         raise HTTPException(400, 'Path traversal not allowed')
+    # SECRET-FILE GUARD — applies even to empty `p` to be safe.
+    for pat in _FORBIDDEN_PATH_PATTERNS:
+        if pat.search('/' + p):
+            raise HTTPException(
+                403,
+                'Refusing to access secrets path. .env / *.pem / *.key and similar '
+                'files are blocked by the sandbox — even the operator must use '
+                '/api/operator/secrets/reveal to read these values.',
+            )
     if not p:
         return  # listing the root is always fine
     # "" prefix means "all roots accepted" — useful for tiny repos.

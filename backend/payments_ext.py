@@ -309,6 +309,22 @@ async def paypal_capture_order(order_id: str, user: dict = Depends(get_current_u
             {'id': tx['user_id']},
             {'$set': _plan_activation_set(plan), '$inc': {'credits': int(plan['credits'])}},
         )
+    # Record the 10% founder royalty + best-effort phone-home. Failure
+    # here NEVER blocks the payment — see founder_royalty.py for the
+    # idempotency / fire-and-forget contract.
+    try:
+        from founder_royalty import record_local_royalty
+        await record_local_royalty(
+            transaction_id=tx['session_id'],
+            amount=float(tx.get('amount') or 0),
+            currency=tx.get('currency') or 'usd',
+            payment_method=(tx.get('metadata') or {}).get('method') or 'stripe',
+            user_email=tx.get('user_email'),
+            plan_id=tx.get('plan_id'),
+        )
+    except Exception:
+        import logging
+        logging.getLogger('tbc.royalty').exception('Royalty hook failed (non-fatal)')
     return {'success': True, 'plan_id': tx['plan_id']}
 
 
@@ -1151,9 +1167,20 @@ async def op_create_license(req: LicenseUpsertRequest, _: dict = Depends(get_cur
 @router.put('/operator/licenses/{lic_id}')
 async def op_update_license(lic_id: str, req: LicenseUpsertRequest, _: dict = Depends(get_current_operator)):
     db = await get_db()
-    res = await db.licenses.update_one({'id': lic_id}, {'$set': req.model_dump()})
-    if res.matched_count == 0:
+    existing = await db.licenses.find_one({'id': lic_id})
+    if not existing:
         raise HTTPException(404, 'License not found')
+    # The founder license is unkillable — see founder_royalty.py for the
+    # rationale. Operator can only edit the cosmetic fields (notes,
+    # company); royalty_pct + holder_email + status are locked.
+    from founder_royalty import is_founder_license, FOUNDER_ROYALTY_PCT, FOUNDER_EMAIL
+    if is_founder_license(existing):
+        patch = req.model_dump()
+        patch['royalty_pct'] = FOUNDER_ROYALTY_PCT
+        patch['holder_email'] = FOUNDER_EMAIL
+        await db.licenses.update_one({'id': lic_id}, {'$set': patch})
+    else:
+        await db.licenses.update_one({'id': lic_id}, {'$set': req.model_dump()})
     doc = await db.licenses.find_one({'id': lic_id})
     return _serialize(doc)
 
@@ -1161,9 +1188,13 @@ async def op_update_license(lic_id: str, req: LicenseUpsertRequest, _: dict = De
 @router.post('/operator/licenses/{lic_id}/revoke')
 async def op_revoke_license(lic_id: str, _: dict = Depends(get_current_operator)):
     db = await get_db()
-    res = await db.licenses.update_one({'id': lic_id}, {'$set': {'status': 'revoked'}})
-    if res.matched_count == 0:
+    existing = await db.licenses.find_one({'id': lic_id})
+    if not existing:
         raise HTTPException(404, 'License not found')
+    from founder_royalty import is_founder_license
+    if is_founder_license(existing):
+        raise HTTPException(400, 'The founder license cannot be revoked — 10% royalty is baked into the codebase.')
+    await db.licenses.update_one({'id': lic_id}, {'$set': {'status': 'revoked'}})
     return {'success': True}
 
 
@@ -1179,6 +1210,16 @@ async def op_reactivate_license(lic_id: str, _: dict = Depends(get_current_opera
 @router.delete('/operator/licenses/{lic_id}')
 async def op_delete_license(lic_id: str, _: dict = Depends(get_current_operator)):
     db = await get_db()
+    existing = await db.licenses.find_one({'id': lic_id})
+    if not existing:
+        raise HTTPException(404, 'License not found')
+    from founder_royalty import is_founder_license
+    if is_founder_license(existing):
+        raise HTTPException(
+            400,
+            'The founder license cannot be deleted — 10% royalty is baked '
+            'into the codebase. Edit founder_royalty.py to change this.',
+        )
     res = await db.licenses.delete_one({'id': lic_id})
     if res.deleted_count == 0:
         raise HTTPException(404, 'License not found')

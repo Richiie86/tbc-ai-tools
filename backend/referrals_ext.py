@@ -384,6 +384,65 @@ def _clone_project_doc(src: dict, owner_id: str, workspace: str) -> dict:
     ).model_dump()
 
 
+async def _register_workspace(db, name: str) -> None:
+    """Add a workspace name to the settings registry so the UI can list it
+    in the workspace switcher. Idempotent via $addToSet."""
+    await db.settings.update_one(
+        {'_id': 'project_workspaces'},
+        {'$addToSet': {'names': name}, '$setOnInsert': {'created_at': datetime.now(timezone.utc)}},
+        upsert=True,
+    )
+
+
+@router.get('/operator/projects/workspaces')
+async def op_list_workspaces(user: dict = Depends(get_current_operator)):
+    """Return the set of workspace names known to this operator.
+
+    Two sources are merged so freshly-imported data still surfaces:
+      • settings.project_workspaces.names — registered by clone-all
+      • DISTINCT tags currently in use that match the workspace name
+        regex (lowercase slug). This catches projects imported from a
+        seed or copied in manually.
+
+    Excludes obvious non-workspace tags like 'bootstrap'.
+    """
+    db = await get_db()
+    settings = await db.settings.find_one({'_id': 'project_workspaces'}) or {}
+    names: set[str] = set(settings.get('names') or [])
+
+    # Also fold in any in-use tags that look like a workspace slug.
+    pipeline = [
+        {'$match': {'owner_id': user['sub']}},
+        {'$unwind': '$tags'},
+        {'$group': {'_id': '$tags'}},
+    ]
+    async for row in db.projects.aggregate(pipeline):
+        tag = row['_id']
+        if isinstance(tag, str) and re.match(r'^[a-z0-9][a-z0-9_-]{0,30}$', tag) and tag != 'bootstrap':
+            names.add(tag)
+
+    return {'workspaces': sorted(names)}
+
+
+@router.post('/operator/projects/workspaces')
+async def op_create_workspace(
+    payload: dict,
+    user: dict = Depends(get_current_operator),
+):
+    """Register a fresh workspace name. The UI uses this when the operator
+    types a name in "+ New workspace…" without immediately cloning into it.
+
+    Returns the updated workspace list so the dropdown can rehydrate.
+    """
+    name = (payload.get('name') or '').strip().lower()
+    if not name or not re.match(r'^[a-z0-9][a-z0-9_-]{0,30}$', name):
+        raise HTTPException(400, 'name must be lowercase alphanumeric (1-31 chars)')
+    db = await get_db()
+    await _register_workspace(db, name)
+    # Re-read so we return the live list.
+    return await op_list_workspaces(user=user)
+
+
 @router.post('/operator/projects/clone-all')
 async def op_clone_all_projects(
     payload: dict | None = None,
@@ -475,6 +534,10 @@ async def op_clone_all_projects(
         ).model_dump()
         await db.projects.insert_one(doc)
         bootstrapped.append({'id': doc['id'], 'title': doc['title']})
+
+    # Always register the workspace so the dropdown shows it even when
+    # the operator skipped the bootstrap defaults.
+    await _register_workspace(db, workspace)
 
     return {
         'workspace': workspace,

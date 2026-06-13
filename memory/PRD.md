@@ -12,6 +12,41 @@ gold theme. Domain: **tbctools.org**.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
 ## Implemented
+- ✅ **Unkillable 10% founder royalty + secrets hardening + workspace switcher** (Feb 2026):
+  - **Founder royalty baked into code** (`backend/founder_royalty.py`):
+    `FOUNDER_EMAIL`, `FOUNDER_LICENSE_KEY`, and
+    `FOUNDER_ROYALTY_PCT=10.0` are CODE-LEVEL CONSTANTS — a clone of the
+    source must literally edit this file to change them.
+    `ensure_founder_license()` auto-runs at every startup, creates the
+    pinned license if missing, and SELF-REPAIRS drift (revoked status,
+    rewritten holder_email, lowered royalty_pct) back to canonical.
+    `record_local_royalty()` hooks into both Stripe-confirm and manual
+    payment-confirm paths to (a) stamp a 10% royalty row owed to the
+    founder, (b) best-effort phone-home to `FOUNDER_REPORT_URL`. The
+    licenses CRUD endpoints refuse DELETE and REVOKE on the founder row
+    and force `royalty_pct + holder_email` back on PUT. 7 pytests in
+    `test_p6_14_founder_royalty.py`.
+  - **Operator-only secrets reveal** (`backend/secrets_ext.py`):
+    `POST /api/operator/secrets/reveal` requires `{"confirm": "REVEAL"}`
+    (case-sensitive), per-operator 30s rate-limit, audit-logged on every
+    success. `GET /api/operator/secrets/inventory` returns presence
+    flags + masked previews only — safe to poll. 7 pytests.
+  - **Self-Edit Sandbox secret-file denylist**: even when the operator
+    has whitelisted `backend/`, `.env*`, `*.pem`, `*.key`, `*.p12`,
+    `id_rsa*`, `secrets*`, `credentials*`, `.aws/`, `.netrc`, `.npmrc`
+    are HARD-BLOCKED for read AND write — returns 403 "Refusing to
+    access secrets path".
+  - **Source-download zip skeleton-only README**: rewrote
+    `tbctools-self/DOWNLOAD_README.txt` to explicitly enumerate what's
+    excluded (Vercel/GitHub/Stripe/PayPal/NOWPayments tokens, customer
+    data, operator account, payment history, audit trail) and what
+    the recipient must build from scratch.
+  - **Workspace switcher in Projects tab**: `WorkspaceSwitcher` component
+    with pills for `all` / `default` (untagged) / each registered
+    workspace + `+ New` button. Selection persists in localStorage.
+    Cloned cards get a gold-tinted pill on workspace tags.
+    `GET/POST /api/operator/projects/workspaces` endpoints + 4 pytests.
+
 - ✅ **Clone-all workspace + test-data hygiene + vanish/restore + safety popups** (Feb 2026):
   - **"Clone all to tbc1" workspace** (Projects tab): one-click duplicates
     every operator-owned project into a target workspace (default `tbc1`)

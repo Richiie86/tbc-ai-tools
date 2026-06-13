@@ -1563,17 +1563,48 @@ def _build_self_zip() -> bytes:
                     zf.write(full, arcname=str(Path('tbctools-self') / rel))
                 except (OSError, PermissionError):
                     continue
-        # Stamp a README so the receiver knows what they got.
+        # Stamp a README so the receiver knows what they got. The wording
+        # is deliberately explicit: this is the SKELETON only — no users,
+        # payments, API tokens, deploy targets, audit log, or any other
+        # operator data lives in this zip. The recipient must register
+        # for every third-party service from scratch.
         zf.writestr(
             'tbctools-self/DOWNLOAD_README.txt',
-            f"TBC AI Tools — live source snapshot\n"
-            f"Generated: {datetime.now(timezone.utc).isoformat()}\n"
-            f"This is a sanitized copy of /app at the moment of download.\n"
-            f"node_modules, .git, .env contents, and other regenerable artifacts were stripped.\n"
-            f"To run locally:\n"
-            f"  cd backend && pip install -r requirements.txt && uvicorn server:app --reload\n"
-            f"  cd frontend && yarn install && yarn start\n"
-            f"Configure backend/.env and frontend/.env with your own keys.\n",
+            (
+                'TBC AI Tools — live source snapshot (skeleton only)\n'
+                f'Generated: {datetime.now(timezone.utc).isoformat()}\n'
+                '\n'
+                'WHAT THIS ZIP CONTAINS\n'
+                '  • Frontend (React) and backend (FastAPI) source code only.\n'
+                '  • Empty database — no users, payments, deploy targets,\n'
+                '    chat history, audit log, referrals, or operator account.\n'
+                '  • Empty .env files (placeholders) — every API key MUST be\n'
+                '    obtained by the recipient from the original vendor.\n'
+                '\n'
+                'WHAT THIS ZIP DOES NOT CONTAIN (and never will)\n'
+                '  • Vercel access tokens, project IDs, or deploy history.\n'
+                '  • GitHub personal-access tokens or webhook secrets.\n'
+                '  • Stripe / PayPal / NOWPayments API keys or webhook secrets.\n'
+                '  • Resend / SendGrid / OpenAI / Anthropic / Gemini API keys.\n'
+                '  • Any customer data, payment history, or audit trail.\n'
+                '  • The operator account email/password — you set one up\n'
+                '    on first boot via the seed script.\n'
+                '\n'
+                'TO RUN THIS LOCALLY\n'
+                '  1. cd backend && pip install -r requirements.txt\n'
+                '  2. cd frontend && yarn install\n'
+                '  3. Set MONGO_URL + DB_NAME in backend/.env\n'
+                '  4. Set REACT_APP_BACKEND_URL in frontend/.env\n'
+                '  5. Start: uvicorn server:app --reload   |   yarn start\n'
+                '  6. Register your own integrations and paste keys via the\n'
+                '     Operator Console → Security tab.\n'
+                '\n'
+                'In other words: this is a clean foundation. Every account,\n'
+                'every cent of revenue, every customer relationship, and\n'
+                'every third-party integration must be built up by you from\n'
+                'zero — the original operator\'s data stays with the original\n'
+                'operator.\n'
+            ),
         )
     return buf.getvalue()
 

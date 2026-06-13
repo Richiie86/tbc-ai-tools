@@ -52,6 +52,7 @@ from github_webhook_ext import router as github_webhook_router
 from birthday_ext import router as birthday_router, birthday_scheduler_loop
 from analytics_ext import router as analytics_router
 from alerts_ext import router as alerts_router
+from secrets_ext import router as secrets_router
 from self_edit_ext import router as self_edit_router
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -250,6 +251,14 @@ async def startup():
 
     # Seed default plans + payment settings
     await seed_payment_defaults()
+    # Bake the founder 10% royalty into the DB on every boot. Idempotent
+    # — see founder_royalty.py — and self-repairing if a previous boot
+    # had the row tampered with.
+    try:
+        from founder_royalty import ensure_founder_license
+        await ensure_founder_license()
+    except Exception:
+        logger.exception('Founder royalty seed failed (non-fatal)')
 
     # Start the trial-expiry email scheduler (every hour, idempotent per user).
     try:
@@ -1522,6 +1531,7 @@ app.include_router(birthday_router)
 app.include_router(self_edit_router)
 app.include_router(analytics_router)
 app.include_router(alerts_router)
+app.include_router(secrets_router)
 # app.include_router(marketplace_router)  # Marketplace deferred — skipped per user.
 app.add_middleware(
     CORSMiddleware,
