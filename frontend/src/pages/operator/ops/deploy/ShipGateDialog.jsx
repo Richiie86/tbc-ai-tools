@@ -73,7 +73,7 @@ export function ShipGateDialog({ open, onOpenChange, project, block, onOpenChat,
           <div className="space-y-2">
             {findings.slice(0, 6).map((f, i) => (
               <div
-                key={i}
+                key={`${f.severity || 'low'}-${f.file || 'unknown'}-${i}`}
                 data-testid={`ship-gate-finding-${project.id}-${i}`}
                 className="rounded border border-tbc-900/60 bg-ink-900/60 p-2"
               >

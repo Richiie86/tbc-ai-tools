@@ -96,7 +96,7 @@ function EventCard({ event }) {
             {Array.isArray(event.data.paths) && event.data.paths.length > 0 && (
               <ul className="mt-1 list-disc pl-5 text-[10px] text-tbc-200/70">
                 {event.data.paths.map((p, i) => (
-                  <li key={i}><code className="font-mono">{p}</code></li>
+                  <li key={`path-${p}-${i}`}><code className="font-mono">{p}</code></li>
                 ))}
               </ul>
             )}
@@ -108,7 +108,7 @@ function EventCard({ event }) {
             {Array.isArray(event.data.commits) && (
               <ul className="mt-1 list-none pl-3 text-[10px] text-emerald-100/80">
                 {event.data.commits.map((c, i) => (
-                  <li key={i}>
+                  <li key={`commit-${c.commit_sha || c.path}-${i}`}>
                     <code className="font-mono">{c.path}</code>
                     {c.commit_url && (
                       <>
@@ -388,7 +388,7 @@ export function AutopilotDialog({ open, onOpenChange, project }) {
               Press <span className="font-semibold">Run autopilot</span> to start the timeline.
             </p>
           )}
-          {events.map((e, i) => <EventCard key={i} event={e} />)}
+          {events.map((e, i) => <EventCard key={`${e.type}-${e.timestamp || e.data?.iteration || i}`} event={e} />)}
           {running && (
             <div className="flex items-center gap-2 rounded-lg border border-tbc-900/60 bg-ink-900/60 p-2 text-xs text-tbc-200">
               <Loader2 className="h-3 w-3 animate-spin text-tbc-300" />

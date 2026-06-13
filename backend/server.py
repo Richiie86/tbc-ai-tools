@@ -227,9 +227,12 @@ async def startup():
     # Seed permanent test user — lets the operator preview the app as a
     # regular user without manually creating / juggling throwaway accounts.
     # Credentials are documented in /app/memory/test_credentials.md and
-    # echoed by GET /api/operator/test-user.
+    # echoed by GET /api/operator/test-user. The password is intentionally
+    # *not* secret (it's literally returned by that endpoint), but we
+    # still read it from `TEST_USER_PASSWORD` env so deployments can pick
+    # their own value without editing source.
     test_email = 'preview-user@tbctools.dev'
-    test_password = 'TestUser-123'
+    test_password = os.environ.get('TEST_USER_PASSWORD', 'TestUser-123')
     existing_test = await db.users.find_one({'email': test_email})
     if not existing_test:
         tu = User(
@@ -1222,7 +1225,7 @@ async def op_get_test_user(_: dict = Depends(get_current_operator)):
     doc = await db.users.find_one({'email': test_email})
     return {
         'email': test_email,
-        'password': 'TestUser-123',
+        'password': os.environ.get('TEST_USER_PASSWORD', 'TestUser-123'),
         'exists': bool(doc),
         'name': (doc or {}).get('name') or 'Test User (preview)',
         'plan': (doc or {}).get('plan') or 'starter',

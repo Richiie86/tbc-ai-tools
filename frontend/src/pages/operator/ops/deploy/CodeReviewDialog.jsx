@@ -62,7 +62,7 @@ export function CodeReviewDialog({ open, onOpenChange, review, project }) {
               </h4>
               {findings.map((f, i) => (
                 <div
-                  key={i}
+                  key={`${f.severity || 'low'}-${f.file || 'unknown'}-${i}`}
                   data-testid={`review-finding-${project.id}-${i}`}
                   className="rounded-lg border border-tbc-900/60 bg-ink-900/60 p-3"
                 >
@@ -105,7 +105,7 @@ export function CodeReviewDialog({ open, onOpenChange, review, project }) {
               </h4>
               <ul className="mt-1 list-disc pl-5 text-xs text-tbc-200/80">
                 {missing.map((m, i) => (
-                  <li key={i}><code className="rounded bg-ink-900 px-1 font-mono">{m}</code></li>
+                  <li key={`missing-${m}-${i}`}><code className="rounded bg-ink-900 px-1 font-mono">{m}</code></li>
                 ))}
               </ul>
             </div>

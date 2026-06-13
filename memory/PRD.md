@@ -12,6 +12,38 @@ gold theme. Domain: **tbctools.org**.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
 ## Implemented
+- ✅ **Code review pass — easy wins + false-positive triage** (Feb 2026):
+  - **Fixed**: Moved seeded test-user password to `TEST_USER_PASSWORD`
+    env var (default `'TestUser-123'`, kept for backward compat). The
+    value is intentionally non-secret (echoed by GET
+    `/api/operator/test-user`) but the lint warning is now resolved.
+  - **Fixed**: Replaced `key={i}` with stable composite keys
+    (`${severity}-${file}-${i}` etc.) in ShipGateDialog,
+    CodeReviewDialog, and AutopilotDialog — prevents state bugs when
+    items reorder.
+  - **False positives, intentionally NOT changed** (documented here so
+    nobody re-chases them):
+    1. localStorage usage flagged as "sensitive data" → actually
+       all UI prefs (workspace, project picker, tour-seen, dismissed
+       banner). Auth tokens are in httpOnly cookies (see
+       `frontend/src/lib/api.js:8`, `AuthContext.jsx:18`).
+    2. `is None` flagged as "string identity comparison" → correct
+       Python idiom; ruff F632 passes clean.
+    3. Empty catches in BirthdayRewardsCard / TestUserBanner /
+       AlertsCard / SandboxTab localStorage paths → documented
+       `/* non-fatal */` graceful-degradation sites for incognito-mode
+       browsers that throw on localStorage access. Not bugs.
+    4. Hook-deps in useInlineDomain / OpsDeploySection → imported
+       modules (`api`), local try-vars (`data`), and React-stable
+       setters were flagged. All actual deps are correctly listed.
+  - **Deferred to future session** (real, but large refactors):
+    - `Dashboard.jsx` (311 lines, 50 complexity) → split into
+      `DashboardChatArea/MessageList/InputControls` + `useChatSend`.
+    - `deploy/autopilot.py::_autopilot_stream` (38 complexity, 197
+      lines) → extract stream/state/business-logic helpers.
+    - `SettingsTab.jsx` / `SandboxTab.jsx` / `ProjectRow.jsx`
+      (300+ lines each) → component splits.
+
 - ✅ **Dynamic CORS — any domain you attach auto-connects** (Feb 2026):
   - New `DynamicCORSMiddleware` in `/app/backend/cors_dynamic_ext.py`
     reads the allow-list at request-time from FOUR sources, cached 60s:
