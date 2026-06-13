@@ -39,6 +39,37 @@ function StatusPill({ user }) {
   return <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] uppercase tracking-wider text-emerald-300">Active</span>;
 }
 
+// Online threshold: user counts as "online" if they've hit any authenticated
+// endpoint in the last 90s (auth_utils.get_current_user stamps last_seen_at
+// on every request). 90s is generous enough to survive a slow page reload
+// but short enough that a dropped browser tab goes grey within a minute.
+const ONLINE_WINDOW_MS = 90_000;
+
+function OnlinePulse({ user }) {
+  const lastSeen = user.last_seen_at ? new Date(user.last_seen_at).getTime() : 0;
+  const online = lastSeen && (Date.now() - lastSeen) < ONLINE_WINDOW_MS;
+  const title = lastSeen
+    ? `Last seen ${new Date(lastSeen).toLocaleString()}`
+    : 'Never signed in';
+  return (
+    <span
+      data-testid={`online-pulse-${user.id}`}
+      data-online={online ? 'true' : 'false'}
+      title={title}
+      className="relative inline-flex h-2 w-2 flex-shrink-0"
+    >
+      {online && (
+        <span className="absolute inset-0 inline-flex h-2 w-2 animate-ping rounded-full bg-emerald-400 opacity-75" />
+      )}
+      <span
+        className={`relative inline-flex h-2 w-2 rounded-full ${
+          online ? 'bg-emerald-400' : 'bg-tbc-200/30'
+        }`}
+      />
+    </span>
+  );
+}
+
 /**
  * Users table — header with bulk-select checkbox, per-row checkboxes, and the
  * per-user inline actions (grant credits, reset 2FA, pause/resume, delete).
@@ -48,7 +79,8 @@ export function UsersTable({
   onGrantCredits, onSetPlan, onReset2FA, onTogglePause, onDelete, onRestore, onVanish,
   onToggleDeploy,
 }) {
-  const allSelected = users.length > 0 && users.every((u) => selectedIds.has(u.id));
+  const selectableUsers = users.filter((u) => !isProtectedRole(u));
+  const allSelected = selectableUsers.length > 0 && selectableUsers.every((u) => selectedIds.has(u.id));
   // Vanish dialog state. Single dialog at the table level so we don't mount
   // a hidden AlertDialog per row (cheaper + simpler focus management).
   const [vanishTarget, setVanishTarget] = useState(null); // { id, email }
@@ -89,7 +121,7 @@ export function UsersTable({
                 data-testid="bulk-select-all"
                 className="h-4 w-4 cursor-pointer accent-tbc-500"
                 checked={allSelected}
-                onChange={() => onToggleSelectAll(users)}
+                onChange={() => onToggleSelectAll(users.filter((u) => !isProtectedRole(u)))}
               />
             </TableHead>
             <TableHead>Email</TableHead>
@@ -111,15 +143,33 @@ export function UsersTable({
               className={`border-tbc-900/60 hover:bg-ink-900/60 ${selectedIds.has(u.id) ? 'bg-tbc-500/5' : ''}`}
             >
               <TableCell>
-                <input
-                  type="checkbox"
-                  data-testid={`bulk-select-${u.id}`}
-                  className="h-4 w-4 cursor-pointer accent-tbc-500"
-                  checked={selectedIds.has(u.id)}
-                  onChange={() => onToggleSelect(u.id)}
-                />
+                {isProtectedRole(u) ? (
+                  // Operator/admin accounts cannot be bulk-selected — they're
+                  // protected from every bulk action anyway, and the empty
+                  // checkbox slot in the photo confused operators. Render an
+                  // explicit lock cell instead so the column still aligns.
+                  <span
+                    data-testid={`bulk-select-locked-${u.id}`}
+                    title="Operator accounts cannot be bulk-selected"
+                    className="inline-block h-4 w-4 text-tbc-200/30"
+                    aria-hidden="true"
+                  />
+                ) : (
+                  <input
+                    type="checkbox"
+                    data-testid={`bulk-select-${u.id}`}
+                    className="h-4 w-4 cursor-pointer accent-tbc-500"
+                    checked={selectedIds.has(u.id)}
+                    onChange={() => onToggleSelect(u.id)}
+                  />
+                )}
               </TableCell>
-              <TableCell className="font-medium text-tbc-100">{u.email}</TableCell>
+              <TableCell className="font-medium text-tbc-100">
+                <span className="inline-flex items-center gap-2">
+                  <OnlinePulse user={u} />
+                  {u.email}
+                </span>
+              </TableCell>
               <TableCell className="text-tbc-200/80">{u.name || '—'}</TableCell>
               <TableCell><StatusPill user={u} /></TableCell>
               <TableCell>

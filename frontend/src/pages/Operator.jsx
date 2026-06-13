@@ -87,24 +87,32 @@ export default function Operator() {
     finally { setLoading(false); }
   }, []);
 
-  // Refresh ONLY the stats — keeps the live cards in sync without
-  // re-fetching the whole users table every 25s.
+  // Refresh stats AND the user list — the user list carries `last_seen_at`
+  // which the OnlinePulse uses to render the live online/offline dot.
+  // Both calls are cheap projections; doing them on the same tick keeps
+  // the operator dashboard consistent without separate timers.
   const refreshStats = useCallback(async () => {
     try {
-      const s = await api.get('/operator/stats');
+      const [s, u] = await Promise.all([
+        api.get('/operator/stats'),
+        api.get('/operator/users'),
+      ]);
       setStats(s.data);
+      setUsers(u.data);
     } catch { /* silent — surface only on the manual refresh button */ }
   }, []);
 
   useEffect(() => { loadAll(); }, [loadAll]);
 
-  // Real-time-ish: poll stats every 25s while the tab is foregrounded.
+  // Real-time-ish: poll stats every 8s while the tab is foregrounded.
   // We pause when the document is hidden so background tabs don't burn
-  // requests (and unblock immediately on visibility-change).
+  // requests (and unblock immediately on visibility-change). Drop from
+  // 25s → 8s so the cards feel live — operators saw "247 messages, $9
+  // revenue" pinned for ages because the refresh was too lazy.
   useEffect(() => {
     let id = setInterval(() => {
       if (!document.hidden) refreshStats();
-    }, 25_000);
+    }, 8_000);
     const onVis = () => { if (!document.hidden) refreshStats(); };
     document.addEventListener('visibilitychange', onVis);
     return () => { clearInterval(id); document.removeEventListener('visibilitychange', onVis); };
@@ -151,7 +159,14 @@ export default function Operator() {
           </div>
         ) : (
           <>
-            <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="mt-8 mb-2 flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-emerald-300/80" data-testid="live-stats-pulse">
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inset-0 inline-flex h-2 w-2 animate-ping rounded-full bg-emerald-400 opacity-75" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" />
+              </span>
+              Live · refreshed every 8s
+            </div>
+            <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
               <StatCard icon={Users}        label="Total Users"     value={stats?.total_users ?? '–'}
                 onClick={() => setActiveTab('users')} hint="View user list" />
               <StatCard icon={CreditCard}   label="Paid Customers"  value={stats?.paid_users ?? '–'}

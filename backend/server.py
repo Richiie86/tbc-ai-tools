@@ -400,6 +400,12 @@ async def root():
 @api.post('/auth/register', response_model=AuthResponse)
 async def register(req: RegisterRequest, response: Response):
     email = req.email.lower()
+    # Hard-block the operator email from being claimed via the public
+    # register form — it's reserved for the seeded operator account.
+    # Belt-and-suspenders alongside the OPERATOR_EMAIL auto-elevation
+    # logic below: even if someone bypasses the UI hint, the API refuses.
+    if email == OPERATOR_EMAIL.lower():
+        raise HTTPException(400, 'This email is reserved. Please use a different address.')
     if await db.users.find_one({'email': email}):
         raise HTTPException(400, 'Email already registered')
     strength_err = validate_password_strength(req.password)
@@ -1130,15 +1136,43 @@ async def op_bulk_delete_contacts(
 async def _compute_op_stats() -> dict:
     """Single source of truth for the operator stats payload. Used by both
     `op_stats` (GET) and `op_stats_self_fix` (POST) so the shape stays in
-    sync after data normalization."""
-    total_users = await db.users.count_documents({})
-    paid_users = await db.users.count_documents({'plan': {'$in': ['starter', 'pro', 'enterprise']}})
-    total_sessions = await db.chat_sessions.count_documents({})
-    total_messages = await db.chat_messages.count_documents({})
-    paid_txs = await db.payment_transactions.count_documents({'payment_status': 'paid'})
+    sync after data normalization.
+
+    Excludes the seeded test user AND the operator's own activity from
+    Total messages, sessions, paid transactions, and revenue — those
+    numbers should reflect real customers only. Test money / test chatter
+    accumulates during QA and used to pin the dashboard at "247 messages,
+    $9 revenue" indefinitely.
+    """
+    # Pull the ids we want to exclude from "real customer" stats.
+    # Excludes: seeded test user, operator's own account, and any
+    # `@example.com` / `test_*@*` synthetic account (RFC-reserved domain,
+    # only ever used by our pytest suite and never a real customer).
+    excluded_emails = ['preview-user@tbctools.dev', OPERATOR_EMAIL.lower()]
+    excluded_users_cursor = db.users.find(
+        {'$or': [
+            {'email': {'$in': excluded_emails}},
+            {'email': {'$regex': '@example\\.com$', '$options': 'i'}},
+            {'email': {'$regex': '^test[_-]', '$options': 'i'}},
+        ]},
+        {'id': 1},
+    )
+    excluded_ids = [u['id'] async for u in excluded_users_cursor]
+    user_filter = {'id': {'$nin': excluded_ids}} if excluded_ids else {}
+    activity_filter = {'user_id': {'$nin': excluded_ids}} if excluded_ids else {}
+
+    total_users = await db.users.count_documents(user_filter)
+    paid_users = await db.users.count_documents({
+        **user_filter, 'plan': {'$in': ['starter', 'pro', 'enterprise']},
+    })
+    total_sessions = await db.chat_sessions.count_documents(activity_filter)
+    total_messages = await db.chat_messages.count_documents(activity_filter)
+    paid_txs = await db.payment_transactions.count_documents({
+        **activity_filter, 'payment_status': 'paid',
+    })
 
     revenue_cursor = db.payment_transactions.aggregate([
-        {'$match': {'payment_status': 'paid'}},
+        {'$match': {**activity_filter, 'payment_status': 'paid'}},
         {'$group': {'_id': None, 'total': {'$sum': '$amount'}}},
     ])
     revenue_doc = await revenue_cursor.to_list(1)

@@ -139,6 +139,23 @@ async def get_current_user(
     token_tv = int(payload.get('tv') or 0)
     if token_tv < stored_tv:
         raise HTTPException(status_code=401, detail='Session ended on another device. Please sign in again.')
+    # Fire-and-forget "last seen" stamp so the operator dashboard can paint
+    # a live online/offline dot next to each user. We avoid awaiting the
+    # update so the auth check stays a single round-trip — the bookkeeping
+    # write is non-critical (~throttled by the cached stored projection
+    # above + Mongo's own write coalescing).
+    import asyncio
+    from datetime import datetime, timezone
+
+    async def _stamp_last_seen():
+        try:
+            await db.users.update_one(
+                {'id': payload['sub']},
+                {'$set': {'last_seen_at': datetime.now(timezone.utc)}},
+            )
+        except Exception:
+            pass  # bookkeeping; never let it bubble up
+    asyncio.create_task(_stamp_last_seen())
     return payload
 
 

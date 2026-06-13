@@ -12,7 +12,51 @@ gold theme. Domain: **tbctools.org**.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
 ## Implemented
-- ✅ **Inline Vercel domain editor click bug fix** (Feb 2026):
+- ✅ **Live online/offline dot per user** (Feb 2026):
+  - `auth_utils.get_current_user` fires a fire-and-forget `last_seen_at`
+    write on every authenticated request. Bookkeeping; never blocks the
+    auth check.
+  - Users table renders a small green pulsing dot next to the email if
+    the user has hit any endpoint in the last 90s, else a grey dot.
+    `data-testid="online-pulse-{id}"` + `data-online="true|false"`
+    attributes for testability.
+  - Operator dashboard polls users on the same 8s tick as the stats so
+    the dot stays live.
+
+- ✅ **Real-customer stats + locked operator + deploy-access permissions** (Feb 2026):
+  - `_compute_op_stats` excludes the seeded test user, the operator's own
+    account, every `@example.com` synthetic, and any `test_*` email prefix
+    so the dashboard counts only real customers. Was pinned at "247
+    messages / $9 revenue" — now starts at $0 and ticks up live.
+  - Operator dashboard polling cadence dropped from 25s → 8s, with a
+    pulsing green "Live · refreshed every 8s" indicator above the cards.
+  - Hard-blocked the operator email (`OPERATOR_EMAIL`) from being
+    claimed via `/api/auth/register` so the account stays unique.
+  - Users-table bulk-select checkbox is hidden for protected roles
+    (operator/admin) — replaced with an invisible spacer to keep the
+    column aligned. Select-All also skips protected rows.
+  - **New per-user `can_deploy` permission system**:
+    - Field on `users` doc (default = `payment_settings.default_can_deploy`,
+      itself default `false`). Operators always have implicit access.
+    - `/api/me/deploy-access` (GET/POST `/request`) for users.
+    - `/api/operator/deploy-access/{requests,default}` + 
+      `/api/operator/users/{id}/deploy-access` for operator.
+    - Users tab has a new "Deploy" column with an inline toggle.
+    - `InChatDeployControls` shows a "Request deploy access" button to
+      users without permission, a "Request pending" pill once they
+      submit, and the full controls when granted.
+    - Mirror user-facing endpoints `/api/me/deploy/{projects,*/deploy,
+      */healthcheck}` gated by `get_user_with_deploy_access`.
+
+- ✅ **Backend refactor — vercel_api_ext + github_api_ext** (Feb 2026):
+  - Extracted ~235 lines of Vercel REST client (`_vercel_*` helpers,
+    `VERCEL_API`, `TERMINAL_STATES`, `VERCEL_TOKEN_MISSING_DETAIL`)
+    into `/app/backend/vercel_api_ext.py` and the GitHub zip-stream
+    helper into `/app/backend/github_api_ext.py`. `deploy_projects_ext.py`
+    dropped from ~1745 → ~1534 lines.
+  - 133/134 backend tests still passing.
+
+- ✅ **Inline domain editor — click fix + optimistic UI + Vercel attach** (Feb 2026):
   - Iter_12 testing revealed pencil click on `[data-testid='domain-edit-{id}']` did NOT
     open the inline domain input — an adjacent sibling DOM element was absorbing the
     click. Iter_13 re-verified the fix at 16/16 (100%).
