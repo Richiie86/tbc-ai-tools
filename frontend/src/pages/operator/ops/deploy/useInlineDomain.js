@@ -1,0 +1,64 @@
+import { useState, useCallback } from 'react';
+import { toast } from 'sonner';
+import api from '../../../../lib/api';
+
+/**
+ * Inline-domain editor state machine for a single deploy project.
+ *
+ * Extracted out of ProjectRow.jsx so the row component focuses on layout
+ * + action dispatch. Owns:
+ *   - whether the editor is open (`editing`)
+ *   - the draft value while typing (`draft`)
+ *   - the in-flight save (`saving`)
+ *   - PATCH /api/operator/deploy/{id}/domain on commit
+ *
+ * Usage:
+ *   const dom = useInlineDomain(project, onSaved);
+ *   <Input value={dom.draft} onChange={...} onKeyDown={dom.onKeyDown} />
+ *   <Button onClick={dom.save}>Save</Button>
+ */
+export function useInlineDomain(project, onSaved) {
+  const [editing, setEditing] = useState(!project.domain);
+  const [draft, setDraft] = useState(project.domain || '');
+  const [saving, setSaving] = useState(false);
+
+  const save = useCallback(async () => {
+    const next = draft.trim();
+    if (!next) {
+      toast.error('Domain required');
+      return;
+    }
+    setSaving(true);
+    try {
+      await api.patch(`/operator/deploy/${project.id}/domain`, { domain: next });
+      toast.success('Domain saved');
+      setEditing(false);
+      onSaved?.();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Save failed');
+    } finally {
+      setSaving(false);
+    }
+  }, [draft, project.id, onSaved]);
+
+  const cancel = useCallback(() => {
+    setDraft(project.domain || '');
+    setEditing(false);
+  }, [project.domain]);
+
+  const onKeyDown = useCallback((e) => {
+    if (e.key === 'Enter') save();
+    else if (e.key === 'Escape') cancel();
+  }, [save, cancel]);
+
+  return {
+    editing,
+    setEditing,
+    draft,
+    setDraft,
+    saving,
+    save,
+    cancel,
+    onKeyDown,
+  };
+}

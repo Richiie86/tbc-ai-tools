@@ -1,0 +1,39 @@
+{
+  "summary": "P4 autopilot SSE loop tested via httpx ASGITransport with monkeypatched _run_code_review. All 56 backend tests pass (50 regression + 6 new P4) + 1 skip preserved. Frontend loads cleanly; static code review confirms useInlineDomain hook extraction, STICK_TO_BOTTOM_THRESHOLD_PX module-level constant, all required autopilot data-testids, and file size compliance (ProjectRow.jsx 481 lines, AutopilotDialog.jsx 329 lines).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "deploy_projects_ext.py line 554/556", "issue": "Pydantic V1 .dict() call deprecated — use .model_dump() (warning only, not failing)"}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_p4_autopilot.py",
+    "/app/test_reports/pytest/iter5_full.xml"
+  ],
+  "action_items": [
+    "Optional cleanup: migrate ChatSession/ChatMessage `.dict()` calls in _create_fix_review_chat to `.model_dump()` to silence Pydantic V2 deprecation warnings."
+  ],
+  "critical_code_review_comments": [
+    "AutopilotDialog SSE consumer uses fetch+ReadableStream (correct — EventSource cannot POST). Verified file exists and is wired in ProjectRow.jsx.",
+    "_autopilot_stream guarantees `loop_error` is always emitted on missing project / exception (matches the 404 spec scenario).",
+    "Gate logic correctly checks `verdict == 'do_not_ship' and not bypass_review`; ship/ship_with_fixes verdicts pass through.",
+    "ai_autopilot passes user_id=None (correct — AI surface has no user context); op_autopilot passes user.get('sub') so fix_chat_session_id can be seeded.",
+    "deploy_projects_ext.py is 1627 lines — approaching size limit; consider splitting autopilot SSE block + code review block into separate submodules in a future refactor."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_p4_autopilot.py (new)",
+    "/app/test_reports/pytest/iter5_full.xml (new)"
+  ],
+  "success_rate": {"backend": "100% (56/56 + 1 skip)", "frontend": "100% (static review + landing-page smoke test)"},
+  "test_credentials": "Operator rac.investments.swe@gmail.com / 123Admin@98 — not used by P4 tests (we override get_current_operator via app.dependency_overrides).",
+  "seed_data_creation": "Two deploy_projects rows seeded: autopilot-test-blocked (verdict=do_not_ship), autopilot-test-ship (verdict=ship). Cleaned up in module-scope teardown along with any 'Fix review:' chat sessions/messages.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "P4 backend tests use httpx ASGITransport + module-scoped event loop (pytest.mark.asyncio(loop_scope='module')) because motor's mongo client binds to the first loop. If extending, keep pytestmark and per-test loop_scope='module' decorators in sync. _run_code_review is monkeypatched to read `_verdict_for_test` from the seeded doc — set that field to control the branch. The Authorization-Bearer 401 path returns regular HTTP (not SSE) because FastAPI runs Depends() before invoking the StreamingResponse handler.",
+  "rca of the issue": "N/A — no bugs found. Initial test attempt with the live supervisor backend failed because module-level monkeypatch of deploy_projects_ext._run_code_review only affects the pytest process, not the running uvicorn worker; switching to in-process ASGITransport (httpx.AsyncClient) made monkeypatching effective. Second iteration hit 'Event loop is closed' RuntimeError from motor — fixed by binding all async fixtures + tests to a single module-scoped loop via pytest-asyncio's loop_scope='module'."
+}

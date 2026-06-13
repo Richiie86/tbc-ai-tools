@@ -6,12 +6,14 @@ import { Input } from '../../../../components/ui/input';
 import { toast } from 'sonner';
 import {
   Rocket, Globe, Loader2, Copy, Check, GitBranch, ExternalLink, RotateCw, Save,
-  Sparkles, Activity, AlertCircle, CheckCircle2, GitFork, Pencil, ShieldCheck,
+  Sparkles, Activity, AlertCircle, CheckCircle2, GitFork, Pencil, ShieldCheck, Bot,
 } from 'lucide-react';
 
 import { CodeReviewDialog } from './CodeReviewDialog';
 import { CloneProjectDialog } from './CloneProjectDialog';
 import { ShipGateDialog } from './ShipGateDialog';
+import { AutopilotDialog } from './AutopilotDialog';
+import { useInlineDomain } from './useInlineDomain';
 
 export const SELF_PROJECT_ID = 'tbctools-self';
 
@@ -42,20 +44,20 @@ function HealthPill({ health }) {
  * ~500 lines and to make ProjectRow unit-testable in isolation.
  */
 export function ProjectRow({ project, onDeployed }) {
-  const [busy, setBusy] = useState(null); // 'deploy'|'preview'|'redeploy'|'health'|'clone'|'domain'|'review'|'download'
+  const [busy, setBusy] = useState(null); // 'deploy'|'preview'|'redeploy'|'health'|'clone'|'review'|'download'
   const [health, setHealth] = useState(null);
   const [copied, setCopied] = useState(false);
-  const [editingDomain, setEditingDomain] = useState(!project.domain);
-  const [domainDraft, setDomainDraft] = useState(project.domain || '');
   const [review, setReview] = useState(project.last_code_review || null);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [cloneOpen, setCloneOpen] = useState(false);
+  const [autopilotOpen, setAutopilotOpen] = useState(false);
   // When the backend ship-gate fires (HTTP 412), we stash the failing review
   // + seeded fix-chat id here so the dialog can offer "Open fix chat" /
   // "Bypass and ship anyway" without re-fetching.
   const [gateBlock, setGateBlock] = useState(null); // { review, fix_chat_session_id }
   const isSelf = project.id === SELF_PROJECT_ID;
   const navigate = useNavigate();
+  const domain = useInlineDomain(project, onDeployed);
 
   const previewUrl = project.last_deployment_url
     ? (project.last_deployment_url.startsWith('http') ? project.last_deployment_url : `https://${project.last_deployment_url}`)
@@ -213,26 +215,6 @@ export function ProjectRow({ project, onDeployed }) {
     }
   };
 
-  // --- inline domain editor --------------------------------------------
-  const saveDomain = async () => {
-    const next = domainDraft.trim();
-    if (!next) {
-      toast.error('Domain required');
-      return;
-    }
-    setBusy('domain');
-    try {
-      await api.patch(`/operator/deploy/${project.id}/domain`, { domain: next });
-      toast.success('Domain saved');
-      setEditingDomain(false);
-      onDeployed();
-    } catch (e) {
-      toast.error(e?.response?.data?.detail || 'Save failed');
-    } finally {
-      setBusy(null);
-    }
-  };
-
   return (
     <div
       data-testid={`deploy-project-${project.id}`}
@@ -270,32 +252,32 @@ export function ProjectRow({ project, onDeployed }) {
             </div>
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-3 text-[11px]">
-            {editingDomain ? (
+            {domain.editing ? (
               <div className="flex items-center gap-1.5">
                 <Globe className="h-3 w-3 text-tbc-300" />
                 <Input
                   data-testid={`domain-input-${project.id}`}
                   autoFocus
                   placeholder="my-app.tbctools.org"
-                  value={domainDraft}
-                  onChange={(e) => setDomainDraft(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') saveDomain(); }}
+                  value={domain.draft}
+                  onChange={(e) => domain.setDraft(e.target.value)}
+                  onKeyDown={domain.onKeyDown}
                   className="h-7 w-56 border-tbc-900/60 bg-ink-900 font-mono text-[11px] text-tbc-100"
                 />
                 <Button
                   size="sm"
                   data-testid={`domain-save-${project.id}`}
-                  onClick={saveDomain}
-                  disabled={busy === 'domain'}
+                  onClick={domain.save}
+                  disabled={domain.saving}
                   className="h-7 bg-tbc-500 px-2 text-ink-950 hover:bg-tbc-400 font-semibold"
                 >
-                  {busy === 'domain' ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
+                  {domain.saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
                 </Button>
                 {project.domain && (
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => { setDomainDraft(project.domain); setEditingDomain(false); }}
+                    onClick={domain.cancel}
                     className="h-7 border-tbc-900/60 bg-ink-900 px-2 text-[10px] text-tbc-200 hover:bg-ink-950"
                   >
                     Cancel
@@ -314,7 +296,7 @@ export function ProjectRow({ project, onDeployed }) {
                 </a>
                 <button
                   data-testid={`domain-edit-${project.id}`}
-                  onClick={() => setEditingDomain(true)}
+                  onClick={() => domain.setEditing(true)}
                   title="Edit domain"
                   className="rounded p-0.5 text-tbc-200/50 hover:bg-ink-950 hover:text-tbc-200"
                 >
@@ -428,6 +410,18 @@ export function ProjectRow({ project, onDeployed }) {
           </Button>
           <Button
             size="sm"
+            data-testid={`autopilot-${project.id}`}
+            onClick={() => setAutopilotOpen(true)}
+            disabled={busy !== null}
+            variant="outline"
+            title="Run the full propose → review → ship → watch → react loop"
+            className="border-tbc-500/40 bg-ink-900 text-tbc-100 hover:bg-tbc-500/10"
+          >
+            <Bot className="mr-1.5 h-3 w-3" />
+            Autopilot
+          </Button>
+          <Button
+            size="sm"
             data-testid={`health-${project.id}`}
             onClick={() => trigger('health')}
             disabled={busy !== null}
@@ -476,6 +470,11 @@ export function ProjectRow({ project, onDeployed }) {
         onOpenChat={openFixChat}
         onBypass={bypassAndShip}
         busy={busy === 'deploy'}
+      />
+      <AutopilotDialog
+        open={autopilotOpen}
+        onOpenChange={setAutopilotOpen}
+        project={project}
       />
     </div>
   );

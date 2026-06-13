@@ -16,6 +16,11 @@ import { ChatComposer } from './dashboard/ChatComposer';
 import CreditsBadge from '../components/CreditsBadge';
 import { OutOfCreditsDialog } from './dashboard/OutOfCreditsDialog';
 
+// Anything within this many pixels from the bottom counts as "still at the
+// end" so a stray scroll-wheel nudge doesn't unstick the stream. Module-level
+// so the constant isn't reallocated every render.
+const STICK_TO_BOTTOM_THRESHOLD_PX = 80;
+
 function sidebarTimeLabel(iso) {
   try {
     const d = new Date(iso);
@@ -97,6 +102,10 @@ export default function Dashboard({ variant = 'tbc1' }) {
     setCurrentId((prev) => (paramSession !== prev ? paramSession : prev));
   }, [paramSession]);
 
+  // Anything within this many pixels from the bottom counts as "still at
+  // the end" so a stray scroll-wheel nudge doesn't unstick the stream.
+  // Lifted to a named constant per code-review #4.
+
   // Conditional auto-scroll: only follow the bottom when the user is already
   // pinned there. Once they scroll up `stickToBottom` flips off (see the
   // onScroll handler on the scroller) and we leave their viewport alone.
@@ -106,12 +115,10 @@ export default function Dashboard({ variant = 'tbc1' }) {
     if (el) requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
   }, [messages, streamText, stickToBottom]);
 
-  // Detect user scroll position to toggle the follow flag. Anything within
-  // ~80px of the bottom counts as "still at the end" so the stream doesn't
-  // unstick from a tiny scroll-wheel nudge.
+  // Detect user scroll position to toggle the follow flag.
   const onScrollContainer = useCallback((e) => {
     const el = e.currentTarget;
-    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_TO_BOTTOM_THRESHOLD_PX;
     setStickToBottom(atBottom);
   }, []);
 
