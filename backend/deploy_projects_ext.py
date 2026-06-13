@@ -551,9 +551,9 @@ async def _create_fix_review_chat(project: dict, review: dict, user_id: Optional
         model=DEFAULT_MODEL,
         variant='tbc1',
     )
-    await db.chat_sessions.insert_one(s.dict())
+    await db.chat_sessions.insert_one(s.model_dump())
     msg = ChatMessage(session_id=s.id, user_id=user_id, role='user', content=prompt)
-    await db.chat_messages.insert_one(msg.dict())
+    await db.chat_messages.insert_one(msg.model_dump())
     logger.info('Seeded fix-review chat %s for project %s (user %s)', s.id, project.get('id'), user_id)
     return s.id
 

@@ -12,6 +12,28 @@ gold theme. Domain: **tbctools.org**.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
 ## Implemented
+- ✅ **Autopilot loop + useInlineDomain hook + chat-scroll constant** (Feb 2026):
+  - **Autopilot SSE loop** (`POST /api/operator/deploy/{id}/autopilot` and
+    `POST /api/projects/{id}/autopilot`) — runs `review → ship → watch → react`
+    end-to-end and streams progress as Server-Sent Events. Frame types:
+    `loop_start`, `review_start`, `review_done`, `gate_blocked`,
+    `deploy_start`, `deploy_started`, `deploy_state` (one per Vercel poll),
+    `deploy_ready`, `health_check`, `loop_complete`, `loop_error`. Honours
+    the ship-gate by default; operator can override with `bypass_review:true`.
+    Watch step polls Vercel every 4s up to `watch_timeout_s` (default 90s).
+  - **AutopilotDialog.jsx** — new modal with target selector, bypass
+    checkbox, live typed-event timeline. Consumes SSE via
+    `fetch + ReadableStream`. When the loop ends in `gate_blocked`, an
+    `autopilot-open-fix-{id}` button jumps to the seeded fix chat.
+  - **useInlineDomain.js** — extracted the inline domain editor from
+    `ProjectRow.jsx`. Owns `editing`/`draft`/`saving`, PATCH on commit, and
+    `Enter` / `Escape` keyboard shortcuts.
+  - **STICK_TO_BOTTOM_THRESHOLD_PX = 80** — chat-scroll threshold lifted to
+    a module-level constant in `Dashboard.jsx`.
+  - **Tests**: `tests/test_p4_autopilot.py` (6 SSE tests via httpx
+    ASGITransport with monkeypatched `_run_code_review`). Backend now at
+    **56 passed + 1 skipped**.
+
 - ✅ **Deploy card layout v2 + Code Review + Code Download** (Feb 2026):
   - **Standardized button row** on every deploy project card:
     `Deploy · Preview · Redeploy · Copy URL · Clone · Download · Code Review · Health`.
