@@ -8,9 +8,10 @@ import { Card } from '../components/ui/card';
 import { toast } from 'sonner';
 import {
   ArrowLeft, Mail, KeyRound, Save, Loader2, Plus, Trash2,
-  Rocket, Activity, ShieldCheck, RotateCw, BadgeCheck,
+  Rocket, Activity, ShieldCheck, RotateCw, BadgeCheck, Zap,
 } from 'lucide-react';
 import { PreviewReadyPill } from './dashboard/PostAiDeploySuggestion';
+import { Switch } from '../components/ui/switch';
 
 /**
  * Per-project settings page: lets the operator manage the project admin
@@ -27,6 +28,8 @@ export default function ProjectSettings() {
   const [savingEnv, setSavingEnv] = useState(false);
   const [busy, setBusy] = useState(null); // 'deploy' | 'redeploy' | 'health' | 'review' | null
   const [previewUrl, setPreviewUrl] = useState('');
+  const [autoPromote, setAutoPromote] = useState(false);
+  const [savingAuto, setSavingAuto] = useState(false);
 
   const [emailDraft, setEmailDraft] = useState('');
   const [passwordDraft, setPasswordDraft] = useState('');
@@ -49,6 +52,7 @@ export default function ProjectSettings() {
           const u = me.last_deployment_url;
           setPreviewUrl(u.startsWith('http') ? u : `https://${u}`);
         }
+        if (me) setAutoPromote(!!me.auto_promote);
       } catch { /* non-fatal */ }
     } catch (e) {
       toast.error(e?.response?.data?.detail || 'Failed to load project');
@@ -150,6 +154,19 @@ export default function ProjectSettings() {
     }
   };
 
+  const toggleAutoPromote = async (next) => {
+    setSavingAuto(true);
+    try {
+      const { data } = await api.patch(`/operator/deploy/${projectId}`, { auto_promote: next });
+      setAutoPromote(!!data.auto_promote);
+      toast.success(next ? 'Auto-promote enabled' : 'Auto-promote disabled');
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Toggle failed');
+    } finally {
+      setSavingAuto(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-ink-950 text-tbc-100">
@@ -193,13 +210,45 @@ export default function ProjectSettings() {
           </div>
         )}
 
+        <div
+          data-testid="auto-promote-card"
+          className="mb-5 flex items-start justify-between gap-4 rounded-xl border border-emerald-500/30 bg-gradient-to-br from-emerald-500/[0.07] via-ink-900/60 to-ink-900/60 p-4"
+        >
+          <div className="flex items-start gap-3">
+            <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-emerald-500/20 text-emerald-300">
+              <Zap className="h-4 w-4" />
+            </div>
+            <div>
+              <div className="text-sm font-bold text-tbc-100">Hands-off ship pipeline</div>
+              <p className="mt-0.5 text-xs text-tbc-200/60">
+                When ON, the watcher fires <strong>Promote to prod</strong> automatically
+                as soon as a fresh preview reaches <code className="rounded bg-ink-950 px-1">READY</code>
+                and the live URL returns HTTP 200 within 30 seconds.
+                A latest <code className="rounded bg-ink-950 px-1">do_not_ship</code> AI review
+                still blocks it.
+              </p>
+            </div>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <span className="text-[10px] uppercase tracking-wider text-tbc-200/60">
+              {autoPromote ? 'Auto' : 'Manual'}
+            </span>
+            <Switch
+              checked={autoPromote}
+              onCheckedChange={toggleAutoPromote}
+              disabled={savingAuto}
+              data-testid="auto-promote-switch"
+            />
+          </div>
+        </div>
+
         <div className="grid gap-5 lg:grid-cols-2">
           <Card className="border-tbc-900/60 bg-ink-900/60 p-5">
             <h2 className="flex items-center gap-2 text-sm font-bold uppercase tracking-wider text-tbc-200">
               <Mail className="h-4 w-4 text-tbc-300" /> Admin credentials
             </h2>
             <p className="mt-1 text-xs text-tbc-200/60">
-              Used as the seed admin account for this project's deployed app.
+              Used as the seed admin account for this project&apos;s deployed app.
               Password is hashed (bcrypt) — only its presence is shown back.
             </p>
             <div className="mt-4 space-y-3">
@@ -246,7 +295,7 @@ export default function ProjectSettings() {
               <KeyRound className="h-4 w-4 text-tbc-300" /> API keys & env vars
             </h2>
             <p className="mt-1 text-xs text-tbc-200/60">
-              Per-project secrets pushed into the deployed app's environment.
+              Per-project secrets pushed into the deployed app&apos;s environment.
               Values are stored encrypted at rest; only the last 4 characters are shown back.
             </p>
 

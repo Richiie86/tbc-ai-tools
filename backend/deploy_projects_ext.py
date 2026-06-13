@@ -67,6 +67,11 @@ class ProjectIn(BaseModel):
     # it in lazily on the first successful deploy so the operator doesn't have
     # to paste it.
     vercel_project_id: Optional[str] = None
+    # When true, the watcher auto-fires Promote-to-prod the moment a preview
+    # deploy reaches READY *and* the live URL returns HTTP 200. Combined with
+    # the existing ship-gate (block on AI `do_not_ship`) this turns the
+    # pipeline into "land preview → AI reviews → if green, auto-ship".
+    auto_promote: bool = False
 
 
 class ProjectOut(BaseModel):
@@ -122,10 +127,12 @@ def _project_to_out(doc: dict) -> dict:
         'repoType': doc.get('repoType', 'github'),
         'gitRef': doc.get('gitRef'),
         'vercel_project_id': doc.get('vercel_project_id'),
+        'auto_promote': bool(doc.get('auto_promote', False)),
         'last_deployment_id': doc.get('last_deployment_id'),
         'last_deployment_url': doc.get('last_deployment_url'),
         'last_deployment_state': doc.get('last_deployment_state'),
         'last_deployed_at': doc.get('last_deployed_at'),
+        'last_promoted_at': doc.get('last_promoted_at'),
         'created_at': doc['created_at'],
         'updated_at': doc['updated_at'],
     }
@@ -196,25 +203,43 @@ async def _vercel_create_deployment(
     ref = git_ref or project.get('gitRef') or 'main'
     repo = project['repo']
     repo_type = project.get('repoType', 'github')
+    # Vercel's deployments API expects `gitSource.org` + `gitSource.repo`
+    # as separate strings (not "owner/name"). Split the stored
+    # "owner/name" string so the payload validates.
+    if '/' in repo:
+        org_part, repo_part = repo.split('/', 1)
+    else:
+        org_part, repo_part = '', repo
     payload = {
-        # `name` lets Vercel auto-create the project on first deploy when no
-        # `project` id is on file yet. Once Vercel returns a `projectId` we
-        # persist it onto the project doc so subsequent deploys are stable.
+        # Vercel requires `name` even when targeting an existing project.
         'name': _slugify(project['projectName']),
         'target': target,
         'gitSource': {
             'type': repo_type,
-            'repo': repo,           # "owner/name"
+            'org': org_part,
+            'repo': repo_part,
             'ref': ref,
         },
     }
     if project.get('vercel_project_id'):
+        # Existing project — Vercel uses its own stored settings for the
+        # build, so we don't need to supply `projectSettings` here.
         payload['project'] = project['vercel_project_id']
+    else:
+        # New project path — pair with framework override so Vercel
+        # doesn't refuse with "projectSettings required".
+        payload['projectSettings'] = {'framework': None}
 
+    # `?skipAutoDetectionConfirmation=1` is the Vercel-recommended way to
+    # avoid the "projectSettings required" 400 when we hand off framework
+    # detection to Vercel itself (the project's existing settings on file
+    # take precedence anyway when `payload['project']` is set).
+    qs = dict(_vercel_team_qs(settings) or {})
+    qs['skipAutoDetectionConfirmation'] = '1'
     async with httpx.AsyncClient(timeout=20.0) as client:
         r = await client.post(
             f'{VERCEL_API}/v13/deployments',
-            params=_vercel_team_qs(settings),
+            params=qs,
             headers={'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'},
             json=payload,
         )
@@ -299,9 +324,15 @@ async def _vercel_promote_to_production(settings: dict, project_vercel_id: str, 
             err = r.json().get('error', {})
         except Exception:
             err = {'message': r.text[:300]}
+        msg = err.get('message') or err.get('code') or 'failed'
+        # Soft-success: deploy was already promoted (e.g. it landed on the
+        # production branch). The operator's intent is satisfied — surface
+        # a 200 with an `already_production` flag instead of a hard error.
+        if 'already the current production' in msg.lower() or 'already production' in msg.lower():
+            return {'already_production': True, 'message': msg}
         raise HTTPException(
             502,
-            f"Vercel promote: {err.get('message') or err.get('code') or 'failed'}",
+            f"Vercel promote: {msg}",
         )
     # Vercel sometimes returns 200 with empty body — wrap defensively.
     try:
@@ -346,6 +377,84 @@ async def _fire_webhook(event: str, payload: dict, settings: Optional[dict] = No
 
 
 # ---------- Ship-and-watch poller -------------------------------------
+async def _maybe_auto_promote(
+    project_id: str,
+    deployment_id: str,
+    deploy_url: Optional[str],
+    settings: dict,
+) -> None:
+    """If the project has `auto_promote=true`, poll the preview URL for up
+    to 30 s and — when it returns HTTP < 400 — call the promote helper.
+
+    Mirrors the ship-gate philosophy: a successful build alone is not
+    enough, the preview must actually respond before we put it in front
+    of users. Last AI review (if present) acts as the second gate.
+    """
+    project = await db.deploy_projects.find_one({'id': project_id})
+    if not project or not project.get('auto_promote'):
+        return
+
+    # Honour the ship-gate: a recent `do_not_ship` review blocks promote
+    # just like it would block a manual production deploy. The review is
+    # persisted onto the project doc itself as `last_code_review`.
+    last_review = (project or {}).get('last_code_review') or {}
+    if last_review.get('verdict') == 'do_not_ship':
+        logger.info(
+            'Auto-promote blocked for %s: latest code review verdict=do_not_ship',
+            project_id,
+        )
+        await _fire_webhook('deploy.auto_promote_blocked', {
+            'project_id': project_id,
+            'deployment_id': deployment_id,
+            'reason': 'do_not_ship',
+        }, settings)
+        return
+
+    # Probe the preview URL for up to 30 s, 5 s apart. Without this we'd
+    # frequently catch the build before Vercel's edge cache warmed up.
+    if not deploy_url:
+        deploy_url = project.get('last_deployment_url')
+    probe_url = (
+        deploy_url if (deploy_url and deploy_url.startswith('http'))
+        else (f'https://{deploy_url}' if deploy_url else None)
+    )
+    if not probe_url:
+        logger.info('Auto-promote skipped: no preview URL to probe')
+        return
+
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        for attempt in range(6):  # 6 * 5 s = 30 s
+            try:
+                r = await client.get(probe_url, follow_redirects=True)
+                if r.status_code < 400:
+                    break
+            except httpx.HTTPError:
+                pass
+            if attempt < 5:
+                await asyncio.sleep(5.0)
+        else:
+            logger.info('Auto-promote skipped: %s did not return <400 within 30 s', probe_url)
+            await _fire_webhook('deploy.auto_promote_blocked', {
+                'project_id': project_id,
+                'deployment_id': deployment_id,
+                'reason': 'preview_health_failed',
+                'url': probe_url,
+            }, settings)
+            return
+
+    # All gates passed → promote.
+    try:
+        await _trigger_promote(project_id, settings, deployment_id)
+        logger.info('Auto-promoted %s → production (deployment %s)', project_id, deployment_id)
+    except HTTPException as e:
+        logger.warning('Auto-promote final step failed for %s: %s', project_id, e.detail)
+        await _fire_webhook('deploy.auto_promote_failed', {
+            'project_id': project_id,
+            'deployment_id': deployment_id,
+            'error': str(e.detail),
+        }, settings)
+
+
 async def _watch_deployment(project_id: str, deployment_id: str) -> None:
     """Poll Vercel until `deployment_id` reaches a terminal state.
 
@@ -395,6 +504,16 @@ async def _watch_deployment(project_id: str, deployment_id: str) -> None:
                 },
                 settings,
             )
+            # ── auto-promote gate ───────────────────────────────────────
+            # Fire only on a clean READY *and* when the project opted in.
+            # We also re-check the ship-gate's last review verdict so a
+            # `do_not_ship` blocks the auto-promote even though the build
+            # itself succeeded.
+            if state == 'READY':
+                try:
+                    await _maybe_auto_promote(project_id, deployment_id, res.get('url'), settings)
+                except Exception as e:
+                    logger.warning('Auto-promote failed for %s: %s', deployment_id, str(e)[:200])
             return
     # Timed out — log and let Ops tab show the last known state.
     logger.warning('Watch %s: timed out after 10 minutes', deployment_id)
@@ -902,6 +1021,34 @@ async def op_promote_project(
         # Audit failures must never block the operator action.
         pass
     return result
+
+
+class ProjectFlagsUpdate(BaseModel):
+    """Partial flag update for the per-project Settings page.
+
+    Currently only carries `auto_promote` but kept as a model so we can
+    add more toggles (auto_redeploy_on_push, slack_notify_on_fail, ...)
+    without churning the endpoint signature.
+    """
+    auto_promote: Optional[bool] = None
+
+
+@ops_router.patch('/{project_id}')
+async def op_patch_project_flags(
+    project_id: str,
+    payload: ProjectFlagsUpdate,
+    op: dict = Depends(get_current_operator),
+):
+    """Toggle per-project automation flags. Today: `auto_promote`."""
+    project = await db.deploy_projects.find_one({'id': project_id})
+    if not project:
+        raise HTTPException(404, 'Project not found')
+    update: dict = {'updated_at': datetime.now(timezone.utc)}
+    if payload.auto_promote is not None:
+        update['auto_promote'] = bool(payload.auto_promote)
+    await db.deploy_projects.update_one({'id': project_id}, {'$set': update})
+    fresh = await db.deploy_projects.find_one({'id': project_id})
+    return _project_to_out(fresh)
 
 
 # ----- AI-agent deploy actions (Bearer-token auth) ---------------------
