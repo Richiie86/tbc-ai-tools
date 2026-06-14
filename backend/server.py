@@ -643,7 +643,7 @@ async def register(req: RegisterRequest, response: Response, request: Request):
     # Honour the operator-configured default for deploy access. Operators
     # always have implicit access — we set `can_deploy=True` for them
     # purely so the Users table toggle reflects reality.
-    settings_row = await db.payment_settings.find_one({}) or {}
+    settings_row = await db.settings.find_one({'_id': 'payment_settings'}) or {}
     default_can_deploy = bool(settings_row.get('default_can_deploy', False))
     user_doc['can_deploy'] = True if user.role == 'operator' else default_can_deploy
     # Re-registration approval flow:

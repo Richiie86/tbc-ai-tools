@@ -333,7 +333,7 @@ async def plan(req: PlanRequest, user: dict = Depends(get_current_operator)):
     if not repo:
         raise HTTPException(400, 'Project has no `repo` configured')
 
-    settings = await db.payment_settings.find_one({}) or {}
+    settings = await db.settings.find_one({'_id': 'payment_settings'}) or {}
     gh_token = settings.get('github_token') or os.environ.get('GITHUB_TOKEN')
     if not gh_token:
         raise HTTPException(503, 'github_token not set in Operator → Security.')
@@ -465,7 +465,7 @@ async def open_pr(req: OpenPRRequest, user: dict = Depends(get_current_operator)
     if not doc.get('files'):
         raise HTTPException(422, 'Plan has no actionable files (likely refused or all blocked).')
 
-    settings = await db.payment_settings.find_one({}) or {}
+    settings = await db.settings.find_one({'_id': 'payment_settings'}) or {}
     gh_token = settings.get('github_token') or os.environ.get('GITHUB_TOKEN')
     if not gh_token:
         raise HTTPException(503, 'github_token not set in Operator → Security.')
@@ -628,7 +628,7 @@ async def preview_url(plan_id: str, user: dict = Depends(get_current_operator)):
     if not branch:
         raise HTTPException(409, 'Plan has not been shipped — open a PR first.')
 
-    settings = await db.payment_settings.find_one({}) or {}
+    settings = await db.settings.find_one({'_id': 'payment_settings'}) or {}
     token = vercel_token(settings)
     if not token:
         # Operator may be using a non-Vercel deploy target — surface a clean

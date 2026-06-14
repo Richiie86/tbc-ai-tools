@@ -478,7 +478,7 @@ async def run_auto_fix_tick() -> dict:
 async def _auto_merge_sweep() -> int:
     """Merge any auto-fix PRs whose GitHub `mergeable_state == clean`.
     Returns count merged. Best-effort — never raises."""
-    settings = await db.payment_settings.find_one({}) or {}
+    settings = await db.settings.find_one({'_id': 'payment_settings'}) or {}
     gh_token = settings.get('github_token') or os.environ.get('GITHUB_TOKEN')
     if not gh_token:
         return 0

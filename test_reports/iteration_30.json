@@ -1,0 +1,42 @@
+{
+  "summary": "Iter30 backend regression for the MongoDB collection-name fix is GREEN. 12/12 new tests in test_iter30_settings_collection_fix.py pass + 42/42 iter28/iter29 regression suites still pass (54/54 = 100%). All 7 fixed code paths now correctly read from db.settings._id='payment_settings': github_token + vercel_token retrieval succeeds, /api/operator/deploy/projects returns 200 (no 503 about missing token), default_can_deploy round-trips through GET/PATCH and is persisted to the canonical settings doc (verified via direct Mongo inspection AND legacy `payment_settings` collection confirmed empty/absent), AI Build endpoints (plan/open-pr/preview-url) do not pre-503 on token lookup, initial-push token gate works, signup endpoint correctly applies default_can_deploy from the settings doc to new users.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/operator/auto-fix (auto_merge code path)", "issue": "Pre-existing latent issue from iter29 — `_auto_merge_sweep()` now calls `cfg = await _config()` at line 490 (verified fixed), so the iter29-flagged NameError is resolved. No new issues."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter30_settings_collection_fix.py",
+    "/app/test_reports/pytest/iter30_settings_fix.xml",
+    "/app/test_reports/pytest/iter30_regression.xml"
+  ],
+  "action_items": [
+    "No fixes required from main agent for this iteration's scope. The MongoDB collection-name fix is verified end-to-end.",
+    "(Carried-over from iter29, MEDIUM) AutoFixCard toggles (auto-fix-push-empty-toggle, auto-fix-run-tests-toggle) still need UI wiring verification — not retested here as backend-only was requested.",
+    "(Carried-over from iter29, MEDIUM) SecurityCard KYC bypass input renders disabled at mount — not retested here as backend-only was requested."
+  ],
+  "critical_code_review_comments": [
+    "All 7 fixed sites use the identical pattern `await db.settings.find_one({'_id': 'payment_settings'}) or {}` — consistent and idempotent.",
+    "deploy_access_ext.py:233 `op_set_default` uses `upsert=True` on the settings doc — safe even if the doc were missing.",
+    "Direct Mongo verification (test 3) confirms the write lands at db.settings._id='payment_settings' and NOT in a legacy `payment_settings` collection.",
+    "Legacy collection check (test_no_legacy_payment_settings_collection) confirms no rogue writes are creating the wrong collection.",
+    "server.py:646 in signup correctly applies `default_can_deploy` from the settings doc; flipping the value via PATCH and registering a fresh user reflects the new value (verified for both True→user.can_deploy=True and False→user.can_deploy=False).",
+    "Backend logs (last 500 lines of /var/log/supervisor/backend.err.log) contain no traceback mentioning github_token, confirming scheduled jobs (auto_fix_loop._auto_merge_sweep) do not crash on the corrected lookup."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter30_settings_collection_fix.py (NEW — 12 tests, all passing)"
+  ],
+  "success_rate": {"backend": "100% (12/12 iter30 + 42/42 iter28+iter29 regression = 54/54)", "frontend": "not tested (backend-only request)"},
+  "test_credentials": "Operator rac.investments.swe@gmail.com / 123Admin@98 (no 2FA enrolled — login returns token directly because RESET_OPERATOR_PASSWORD=true clears TOTP on boot).",
+  "seed_data_creation": "Inserted+cleaned within tests: TEST_iter30_signup_true_<uuid>@example.com + TEST_iter30_signup_false_<uuid>@example.com (users), removed in teardown. default_can_deploy flag is flipped during the PATCH test and restored to its original value in the finally block. No persistent test data leaked.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "MongoDB collection-name fix is fully verified. If iter31 picks up the iter29 UI follow-ups (AutoFixCard toggle wiring + SecurityCard KYC input disabled-at-mount), the backend layer for both is already green — focus playwright on the React components in /app/frontend/src/pages/operator/AutoFixCard.jsx and SecurityCard.jsx. The canonical settings doc lives at db.settings._id='payment_settings' — never query a 'payment_settings' collection.",
+  "rca of the issue": "Previous agent's bug: 7 code paths read `await db.payment_settings.find_one({})` (a non-existent collection) instead of `await db.settings.find_one({'_id': 'payment_settings'})` (the actual canonical doc). Symptom: github_token and default_can_deploy were always None, breaking the GitHub 'Push Code' feature with a misleading 503 'github_token not set in Operator → Security' even when the operator had configured it. Fix applied across 4 files (auto_fix_loop_ext.py:481, ai_build_ext.py:336/468/631, deploy_access_ext.py:40/234, server.py:613/646/1060). Verification: test_iter30_settings_collection_fix.py asserts (a) the canonical doc contains github_token/vercel_token in the expected format, (b) /api/operator/deploy/projects no longer 503s, (c) PATCH /deploy-access/default writes to db.settings._id='payment_settings' (confirmed by direct Mongo read), (d) the legacy `payment_settings` collection is empty/absent (so nothing writes there now), (e) signup applies default_can_deploy to new users correctly, (f) AI Build + initial-push endpoints no longer pre-503 on token lookup, (g) backend logs show no scheduled-job tracebacks about github_token. All assertions pass."
+}

@@ -37,7 +37,7 @@ router = APIRouter(prefix='/api', tags=['deploy-access'])
 
 # ---------- Helpers --------------------------------------------------
 async def _default_can_deploy() -> bool:
-    settings = await db.payment_settings.find_one({}) or {}
+    settings = await db.settings.find_one({'_id': 'payment_settings'}) or {}
     return bool(settings.get('default_can_deploy', False))
 
 
@@ -230,8 +230,8 @@ async def op_set_default(
     body: DefaultBody,
     _op: dict = Depends(get_current_operator),
 ):
-    await db.payment_settings.update_one(
-        {},
+    await db.settings.update_one(
+        {'_id': 'payment_settings'},
         {'$set': {'default_can_deploy': bool(body.default_can_deploy),
                   'updated_at': datetime.now(timezone.utc)}},
         upsert=True,
