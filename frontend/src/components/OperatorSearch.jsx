@@ -192,16 +192,20 @@ export default function OperatorSearch({ onTabChange }) {
 
   return (
     <>
-      {/* Trigger pill — sits next to the BuildBadge. */}
+      {/* Trigger pill — sits next to the credits badge in the navbar.
+          On wide screens (xl+) shows "Search operator…" + ⌘K hint; on
+          tablets it collapses to just the search icon so the
+          Home/About/Pricing/Contact nav links keep their space. */}
       <button
         type="button"
         onClick={() => setOpen(true)}
+        title="Search operator (⌘K)"
         data-testid="operator-search-trigger"
-        className="inline-flex items-center gap-2 rounded-full border border-tbc-900/60 bg-ink-900/60 px-3 py-1.5 text-xs text-tbc-200/80 transition hover:border-amber-500/40 hover:bg-ink-900 hover:text-tbc-100"
+        className="inline-flex items-center gap-2 rounded-full border border-tbc-900/60 bg-ink-900/60 px-2.5 py-1.5 text-xs text-tbc-200/80 transition hover:border-amber-500/40 hover:bg-ink-900 hover:text-tbc-100"
       >
-        <Search className="h-3 w-3" />
-        <span>Search operator…</span>
-        <kbd className="hidden rounded border border-tbc-900/60 bg-ink-950 px-1.5 py-0.5 font-mono text-[10px] text-tbc-200/60 sm:inline-flex sm:items-center sm:gap-1">
+        <Search className="h-3.5 w-3.5" />
+        <span className="hidden xl:inline">Search operator…</span>
+        <kbd className="hidden items-center gap-1 rounded border border-tbc-900/60 bg-ink-950 px-1.5 py-0.5 font-mono text-[10px] text-tbc-200/60 xl:inline-flex">
           <Command className="h-2.5 w-2.5" />K
         </kbd>
       </button>
