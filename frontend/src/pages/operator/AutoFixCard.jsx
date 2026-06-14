@@ -208,7 +208,7 @@ export default function AutoFixCard() {
           <Switch
             checked={cfg.auto_push_empty_repo || false}
             onCheckedChange={(v) => save({ auto_push_empty_repo: v })}
-            disabled={saving || !cfg.enabled}
+            disabled={saving}
             data-testid="auto-fix-push-empty-toggle"
           />
         </div>
@@ -229,7 +229,7 @@ export default function AutoFixCard() {
           <Switch
             checked={cfg.auto_run_tests || false}
             onCheckedChange={(v) => save({ auto_run_tests: v })}
-            disabled={saving || !cfg.enabled}
+            disabled={saving}
             data-testid="auto-fix-run-tests-toggle"
           />
         </div>

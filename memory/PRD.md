@@ -11,6 +11,18 @@ gold theme. Domain: **tbctools.org**.
 - **End user (member)** — Chats with the AI builder, manages plan, copies referral link.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
+## Implemented — Feb 2026 (batch 20 — security + AI automation)
+- ✅ **Re-registration approval flow** — operator vanishing a user now stamps `db.vanished_emails`. A subsequent `/auth/register` with that email is held (`pending_approval=true, status='pending'`); login returns 403 with a "pending operator approval" message. Operator surface at `/api/operator/security/pending-users[/approve|/reject]`.
+- ✅ **KYC-bypass allowlist** — operator-only `GET/POST/DELETE /api/operator/security/kyc-bypass`. Lives in `db.kyc_bypass_emails`. Public helper `is_kyc_bypassed(email)` exposed. 2FA is unchanged — that gate lives in auth.
+- ✅ **`SecurityCard.jsx`** mounted in Operator → Security with pending-user accept/reject list + KYC bypass form. Locked behind operator auth.
+- ✅ **AI auto-test runner** — new `ai_build_tests_ext.py` shells out to `pytest /app/backend/tests/` with a 180s hard timeout. Endpoints: `POST/GET /api/operator/ai-build/run-tests/{plan_id}`. Verdict (`pass`/`fail`/`error`) + output tail stamped on the plan doc.
+- ✅ **Auto-test triggers + gate** — `ai_build_ext.open_pr` auto-fires `run_tests_for_plan` when `auto_fix.auto_run_tests` is on. Auto-merge sweep blocks when `test_run.verdict==='fail'`. AIs "double-check their own code" exactly like the agent does.
+- ✅ **AutoFixCard toggles** for `auto_push_empty_repo` and `auto_run_tests` (operator UI in Settings → Auto-Fix). Independent of the master switch so they can be pre-configured.
+- ✅ **iter28 critical fix** — `deploy_projects_ext._project_to_out` now uses `doc.get()` everywhere, ending the `KeyError: 'domain'` 500 that blocked the entire Ops tab from rendering. `/api/operator/deploy/projects` confirmed 200.
+- ✅ **Bug fix** — latent `NameError` in `auto_fix_loop_ext._auto_merge_sweep` referencing `cfg` without it being in scope; now fetches `cfg = await _config()` at the top.
+- ✅ **iter29 testing**: backend 9/9 PASS + regression 30/30 PASS. All four new testids present (security-pending-users-card, security-kyc-bypass-card, auto-fix-push-empty-toggle, auto-fix-run-tests-toggle). Round-trip persistence verified via curl.
+
+
 ## Implemented — Feb 2026 (latest session, batch 19 — credit-burn loop killer)
 - ✅ **Empty-repo deploy block fixed** — `deploy/code_review.py` short-circuits to `verdict='repo_empty'` BEFORE any LLM call when the configured GitHub repo contains only README/LICENSE/.gitignore-class placeholders. No more cross-AI calls (and no more credit burn) on empty repos. Verdict body carries `can_auto_push: true` so the frontend can render a one-click push dialog.
 - ✅ **`POST /api/operator/deploy/{id}/initial-push`** (`deploy_initial_push_ext.py`) — uploads `/app/{backend,frontend}` + curated top-level files (README, package.json, vercel.json, etc.) to the configured GitHub repo via the Contents API. Hard caps: 1 MB/file, 800 files/push, 4-way parallel. Excludes `.git`, `node_modules`, `.env*`, build artefacts. Tries `main` → `master` fallback. Returns `{pushed, skipped, errors[], next_step}`.

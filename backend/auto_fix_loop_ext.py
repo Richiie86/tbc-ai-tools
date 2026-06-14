@@ -482,6 +482,12 @@ async def _auto_merge_sweep() -> int:
     gh_token = settings.get('github_token') or os.environ.get('GITHUB_TOKEN')
     if not gh_token:
         return 0
+    # Pull the live auto-fix config so the test_run gate below can read
+    # `auto_run_tests` without depending on a closure variable. Caller is
+    # `run_auto_fix_tick` which has its own `cfg`, but this function is
+    # also invoked directly in some paths — fetching here avoids a latent
+    # NameError flagged by iter29 testing.
+    cfg = await _config()
     cursor = db.ai_build_plans.find({
         'source': {'$in': ['auto_fix', 'auto_fix_drift']},
         'status': 'opened',
