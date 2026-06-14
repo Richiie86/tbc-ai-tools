@@ -730,7 +730,15 @@ async def _create_fix_review_chat(project: dict, review: dict, user_id: Optional
         model=DEFAULT_MODEL,
         variant='tbc1',
     )
-    await db.chat_sessions.insert_one(s.model_dump())
+    # Tag the doc so the user-facing sidebar can exclude these auto-seeded
+    # "Fix review:" chats — operator explicitly asked for the sidebar to
+    # only show conversations they started themselves. The session still
+    # exists at its direct URL (returned via the 412 deploy body) so the
+    # operator can jump to it when they want — it just won't clutter the
+    # "New session" list.
+    session_doc = s.model_dump()
+    session_doc['kind'] = 'fix_review'
+    await db.chat_sessions.insert_one(session_doc)
     msg = ChatMessage(session_id=s.id, user_id=user_id, role='user', content=prompt)
     await db.chat_messages.insert_one(msg.model_dump())
     logger.info('Seeded fix-review chat %s for project %s (user %s)', s.id, project.get('id'), user_id)
@@ -792,6 +800,26 @@ async def _trigger_deploy(
     # operator can sanity-check fixes before re-running the review).
     if target == 'production' and not bypass_review:
         last_review = project.get('last_code_review') or {}
+        if last_review.get('verdict') == 'repo_empty':
+            # Special-case: nothing to fix because there's no code yet.
+            # Operator needs the one-click initial push, not the AI fix
+            # chat. Surface a dedicated error so the frontend can render
+            # the correct dialog (and stop charging the user to talk to
+            # an LLM that can't help here).
+            raise HTTPException(
+                412,
+                {
+                    'error': 'repo_empty',
+                    'message': (
+                        f"The GitHub repo {project.get('repo')!r} has no source code yet. "
+                        "Use the one-click 'Push initial code' button to upload this app's "
+                        "source, then click Deploy again."
+                    ),
+                    'review': last_review,
+                    'initial_push_url': f'/api/operator/deploy/{project_id}/initial-push',
+                    'can_auto_push': True,
+                },
+            )
         if last_review.get('verdict') == 'do_not_ship':
             fix_session_id = await _create_fix_review_chat(project, last_review, user_id)
             raise HTTPException(

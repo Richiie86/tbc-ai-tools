@@ -287,6 +287,71 @@ async def run_code_review(project: dict, settings: dict) -> dict:
     if not snapshot['files']:
         raise HTTPException(502, f"Could not fetch any source files from {project['repo']}@{snapshot['ref']}")
 
+    # FAST-PATH: detect empty / placeholder repo BEFORE we burn LLM credits.
+    # A repo with just a README + maybe a LICENSE has nothing to review and
+    # nothing to ship; the LLM was previously called twice in this case and
+    # confidently said `do_not_ship`, which left the operator stuck in a
+    # "fix → review → still empty → fix" loop that drained credits without
+    # ever unblocking the deploy.
+    #
+    # We surface a dedicated `repo_empty` verdict so the frontend can show a
+    # one-click "Push initial code" dialog instead of the generic fix/force
+    # prompt — that's the action the operator actually needs.
+    code_files = [
+        f for f in snapshot['files']
+        if not f['path'].lower().endswith(
+            ('readme.md', 'readme.rst', 'license', 'license.md',
+             'license.txt', '.gitignore', '.gitattributes', 'code_of_conduct.md',
+             'contributing.md', 'security.md', '.env.example')
+        )
+    ]
+    if not code_files:
+        review = {
+            'summary': (
+                f"Repository {project['repo']} has no source code yet — only documentation/config "
+                f"placeholders ({snapshot['file_count']} file{'s' if snapshot['file_count'] != 1 else ''} sampled). "
+                "Push your code first; nothing to deploy until then."
+            ),
+            'verdict': 'repo_empty',
+            'findings': [{
+                'severity': 'high',
+                'file': project['repo'],
+                'line_hint': 'N/A',
+                'title': 'Repository has no source code',
+                'explanation': (
+                    'The cross-AI code reviewer cannot evaluate code that does not exist. '
+                    'A README/LICENSE-only repo is treated as empty.'
+                ),
+                'suggested_fix': (
+                    "Use the operator console's one-click 'Push initial code' button "
+                    "(Operator → Ops → 'Initial push') to upload this app's current source "
+                    "to the configured repo, then re-run Review."
+                ),
+            }],
+            'missing_files': ['source files (package.json, requirements.txt, src/, backend/, …)'],
+            'files_sampled': [f['path'] for f in snapshot['files']],
+            'project_id': project['id'],
+            'repo': project['repo'],
+            'ref': snapshot['ref'],
+            'reviewed_at': datetime.now(timezone.utc).isoformat(),
+            'second_opinion': {
+                'verdict': 'repo_empty',
+                'summary': 'Skipped — nothing to second-review.',
+                'concerns': [],
+                'reviewer_model': 'skipped',
+            },
+            'can_auto_push': True,
+        }
+        await db.deploy_projects.update_one(
+            {'id': project['id']},
+            {'$set': {
+                'last_code_review': review,
+                'last_code_review_at': datetime.now(timezone.utc),
+                'updated_at': datetime.now(timezone.utc),
+            }},
+        )
+        return review
+
     file_blocks = []
     for f in snapshot['files']:
         marker = '  [TRUNCATED]' if f['truncated'] else ''

@@ -53,6 +53,31 @@ export function useInlineChatActions({ navigate, messages, currentId }) {
       toast.success(`Deploy queued — ${data?.url || data?.deployment_id || 'OK'}`);
     };
 
+    // One-click "push initial code" — when the repo is empty, this uploads
+    // /app/{backend,frontend} to the configured GitHub repo via the API
+    // so the next deploy click has something to ship. Without this the
+    // operator was stuck in a loop where the cross-AI review correctly
+    // refused an empty repo but they had no way to actually fix it from
+    // inside the app.
+    const runInitialPush = async () => {
+      const t = toast.loading('Pushing app source to GitHub… (~30s)');
+      try {
+        const { data } = await api.post(`/operator/deploy/${projectId}/initial-push`, {});
+        toast.dismiss(t);
+        const errCount = (data?.errors || []).length;
+        if (data?.pushed > 0) {
+          toast.success(`Pushed ${data.pushed} file${data.pushed === 1 ? '' : 's'} to ${data.repo}@${data.branch}${errCount ? ` · ${errCount} error${errCount === 1 ? '' : 's'}` : ''}`);
+          return true;
+        }
+        toast.error(`Push failed — ${errCount} error${errCount === 1 ? '' : 's'}`);
+        return false;
+      } catch (e) {
+        toast.dismiss(t);
+        toast.error(e?.response?.data?.detail || 'Initial push failed');
+        return false;
+      }
+    };
+
     // Auto cross-AI review before the deploy fires. Operator requested
     // "deploy auto-runs the testing agent for all AIs" — we surface the
     // review verdict in-chat first so they see it, then chain into the
@@ -67,6 +92,33 @@ export function useInlineChatActions({ navigate, messages, currentId }) {
         const v = data?.verdict;
         const second = data?.second_opinion;
         const promotedBy = data?.verdict_promoted_by;
+        // Empty / placeholder GitHub repo — the operator's only useful
+        // option is to push the live source. Don't waste the dialog on
+        // fix/force because there's literally nothing to fix.
+        if (v === 'repo_empty') {
+          const ok = window.confirm(
+            `Your GitHub repo "${data?.repo}" has no source code yet.\n\n`
+            + `Click OK to upload this app's current source (backend/ + frontend/) `
+            + `to GitHub in one shot, then re-run Deploy. Cancel to skip.`
+          );
+          if (!ok) return false;
+          const pushed = await runInitialPush();
+          if (!pushed) return false;
+          // Re-run review now that the repo has code in it.
+          const t2 = toast.loading('Re-running review on the pushed code…');
+          try {
+            await api.post(`/operator/deploy/${projectId}/code-review`, {});
+            toast.dismiss(t2);
+            return true;
+          } catch {
+            toast.dismiss(t2);
+            // Even if the re-review hiccups, the operator can hit Deploy
+            // again — the empty-repo block is gone, so the normal flow
+            // will fire on the next click.
+            toast.message('Pushed — try Deploy again to re-run review.');
+            return false;
+          }
+        }
         if (v === 'do_not_ship') {
           const msg = `Review blocked deploy.\n\n`
             + `Primary verdict: ${v}\n`

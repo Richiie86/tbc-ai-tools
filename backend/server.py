@@ -919,7 +919,12 @@ async def me(user: dict = Depends(get_current_user)):
 # ===== CHAT =====
 @api.get('/chat/sessions')
 async def list_sessions(user: dict = Depends(get_current_user), variant: Optional[str] = Query(None)):
-    q = {'user_id': user['sub']}
+    # Auto-seeded "Fix review:" chats (created when a production deploy is
+    # blocked by AI code review) carry `kind: 'fix_review'`. We hide them
+    # from the sidebar so the user only sees conversations they started —
+    # the fix-review session is still reachable via the deep-link returned
+    # in the 412 body.
+    q = {'user_id': user['sub'], 'kind': {'$ne': 'fix_review'}}
     if variant in ('tbc1', 'tbc2'):
         q['variant'] = variant
     cursor = db.chat_sessions.find(
@@ -1920,6 +1925,8 @@ from ai_build_ext import router as ai_build_router
 app.include_router(ai_build_router)
 from ai_visual_verify_ext import router as ai_visual_verify_router
 app.include_router(ai_visual_verify_router)
+from deploy_initial_push_ext import router as deploy_initial_push_router
+app.include_router(deploy_initial_push_router)
 from changelog_ext import router as changelog_router
 app.include_router(changelog_router)
 from auto_fix_loop_ext import router as auto_fix_router
