@@ -79,6 +79,10 @@ function QuickActionsBar({ content, onAction }) {
   const wantsDeploy = /\bdeploy\b|\bship\b|\bpublish\b|\bpush.*live\b|\bredeploy\b/.test(lc);
   const wantsReview = /\breview\b|\bcheck.*code\b|\bcode.*review\b/.test(lc);
   const wantsHealth = /\bhealth\b|\bis.*site.*up\b|\bworking\?\b/.test(lc);
+  // Review always rides alongside Deploy — clicking Deploy without first
+  // seeing the code-review verdict was the workflow gap that triggered
+  // the operator's "add Review next to Deploy" request.
+  const showReview = wantsReview || wantsDeploy;
   if (!wantsDeploy && !wantsReview && !wantsHealth) return null;
   return (
     <div

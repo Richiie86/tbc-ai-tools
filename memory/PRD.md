@@ -11,7 +11,18 @@ gold theme. Domain: **tbctools.org**.
 - **End user (member)** — Chats with the AI builder, manages plan, copies referral link.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
-## Implemented — Feb 2026 (latest session, batch 10)
+## Implemented — Feb 2026 (latest session, batch 11)
+- ✅ **Cross-AI second opinion on every code review**:
+  - `deploy/code_review.py` — `_second_opinion()` calls Claude over the same snapshot + GPT-4o's first verdict. If Claude says `do_not_ship`, the final verdict is escalated and `verdict_promoted_by: 'second_opinion'` is set so the existing 412 ship-gate triggers on either reviewer's objection.
+  - `ai_build_ext.py` — `_cross_ai_review()` (GPT-4o-mini reviews Claude's AI Build plans) attaches `review: {verdict, summary, concerns, missing_imports, security_flags, reviewer_model}` to every `/plan` response.
+- ✅ **Vercel `Preview` button on AI Build PR rows** — `GET /api/operator/ai-build/preview-url/{plan_id}` polls Vercel deployments filtered by `meta.githubCommitRef`. `PreviewButton` shows a pill that becomes a clickable `<a>` once the preview URL is live; gracefully degrades when `vercel_token` is unset.
+- ✅ **In-chat auto-review-then-deploy** — `Dashboard.jsx handleInlineAction`:
+  - Clicking the inline **Deploy** button now auto-runs the cross-AI code review FIRST (toast: "Running cross-AI code review…"), surfaces the verdict + cross-AI concerns + escalation warning in a window.prompt if blocked, then proceeds to `/deploy` only when green.
+  - Clicking **Review** now shows the full verdict + cross-AI second-opinion + concerns in a `window.alert` instead of a tiny toast.
+- ✅ **QuickActionsBar always pairs Review with Deploy** — `ChatMessages.jsx` now renders the Review button alongside any message that hints at Deploy (was previously conditional on the message text mentioning 'review' explicitly).
+- ✅ **iter24 testing**: 10/10 backend pytest pass, 100% frontend on rendering + preview-probe + 409 graceful path. New regression file at `/app/backend/tests/test_iter24_cross_ai_review.py`.
+
+## Implemented — Feb 2026 (previous session, batch 10)
 - ✅ **Errors → AI Build self-closing loop** — every runtime error row in the Operator → Errors tab now has a **"Generate fix PR"** button (`data-testid="error-fix-pr-btn-<id>"`). Clicking it:
   - Extracts the file hint from `rca.suggested_file` if present, otherwise parses the first `frontend/src/...` or `backend/...` frame out of the stack trace.
   - Builds a structured prompt: error message + source + URL + likely file + RCA root_cause + suggested_change.
