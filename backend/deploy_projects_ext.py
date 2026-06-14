@@ -962,6 +962,25 @@ async def op_promote_project(
                     {'sha': changelog.get('sha'), 'message': changelog.get('message')}
                     if changelog else {'error': 'changelog_write_failed'}
                 )
+                # Also write an in-app changelog entry so the "What's new"
+                # popover surfaces this promote to end users without
+                # needing to read GitHub. Best-effort — never blocks.
+                try:
+                    from changelog_ext import _insert_entry
+                    await _insert_entry(
+                        title=f"{tag_info['tag']} — {project.get('name') or project_id}",
+                        body_md=(
+                            f"Promoted to production from `{branch}` "
+                            f"({commit_sha[:8] if commit_sha else ''}).\n\n"
+                            f"By {op.get('email') or 'unknown'}."
+                        ),
+                        tag=tag_info['tag'],
+                        project=project.get('name') or project_id,
+                        source='promote',
+                        author_email=op.get('email'),
+                    )
+                except Exception:
+                    logger.exception('in-app changelog entry failed')
         except Exception:
             # Never block the operator's promote on the audit-trail layer.
             logger.exception('release-tag / changelog post-promote failed')

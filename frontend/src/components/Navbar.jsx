@@ -6,6 +6,7 @@ import SessionStatusDot from './SessionStatusDot';
 import { LayoutDashboard, LogOut, ShieldCheck, Sparkles, Bot, Coins, Receipt, Loader2 } from 'lucide-react';
 import Logo from './Logo';
 import CreditsBadge from './CreditsBadge';
+import WhatsNewPopover from './WhatsNewPopover';
 import api from '../lib/api';
 import { toast } from 'sonner';
 import {
@@ -87,6 +88,7 @@ export default function Navbar({ minimal = false }) {
               {/* Always-visible credit chip so users never lose sight of their
                   budget. Tapping it jumps to the Pricing page for a top-up. */}
               <CreditsBadge user={user} testid="nav-credits-badge" />
+              <WhatsNewPopover />
               <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button className="flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-1.5 text-sm font-medium text-slate-200 hover:bg-slate-800 transition-colors">

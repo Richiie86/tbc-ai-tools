@@ -11,7 +11,15 @@ gold theme. Domain: **tbctools.org**.
 - **End user (member)** — Chats with the AI builder, manages plan, copies referral link.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
-## Implemented — Feb 2026 (latest session, batch 11)
+## Implemented — Feb 2026 (latest session, batch 12)
+- ✅ **In-app "What's new" changelog popover** — `WhatsNewPopover.jsx` rendered between the credits chip and user avatar in the Navbar:
+  - Bell icon with unread badge (1, 2, … 9+); badge clears on first open via `POST /api/changelog/mark-read`.
+  - Backend `changelog_ext.py`: `GET /api/changelog` (logged-in user, computes per-user `unread_count` against `users.last_changelog_read_at`), `POST /api/changelog/mark-read`, `POST /api/changelog` (operator-only, manual entry), `DELETE /api/changelog/{id}` (operator-only).
+  - Auto-inserts an entry on every successful production promote when `auto_changelog=true` (alongside the existing GitHub `CHANGELOG.md` append).
+  - 60-second background refresh, click-outside + ESC to close, multi-line `body_md` preserves newlines, optional `tag` pill (e.g. `v1.0`), `deploy` badge on promote-sourced entries.
+  - End-to-end live-tested: bell visible, popover opens, both seeded entries rendered with correct tag pill + multi-line body + locale timestamps. Test data cleaned post-verification.
+
+## Implemented — Feb 2026 (previous session, batch 11)
 - ✅ **Cross-AI second opinion on every code review**:
   - `deploy/code_review.py` — `_second_opinion()` calls Claude over the same snapshot + GPT-4o's first verdict. If Claude says `do_not_ship`, the final verdict is escalated and `verdict_promoted_by: 'second_opinion'` is set so the existing 412 ship-gate triggers on either reviewer's objection.
   - `ai_build_ext.py` — `_cross_ai_review()` (GPT-4o-mini reviews Claude's AI Build plans) attaches `review: {verdict, summary, concerns, missing_imports, security_flags, reviewer_model}` to every `/plan` response.
