@@ -14,6 +14,7 @@ import {
 import PlansTab     from './operator/PlansTab';
 import TreasuryTab  from './operator/TreasuryTab';
 import SettingsTab  from './operator/SettingsTab';
+import BuildBadge from '../components/BuildBadge';
 import PaymentsTab  from './operator/PaymentsTab';
 import LicensesTab  from './operator/LicensesTab';
 import RoyaltiesTab from './operator/RoyaltiesTab';
@@ -183,6 +184,14 @@ export default function Operator() {
             </div>
 
             <StatsToolbar stats={stats} onRefresh={loadAll} />
+
+            {/* Build badge — a clearly visible marker that proves this
+                bundle reached production. If you can see this pill on
+                tbctools.org, the latest deploy worked. Tap to see what
+                shipped in this build. */}
+            <div className="mt-4 flex justify-start">
+              <BuildBadge />
+            </div>
 
             <PreviewWidget />
 
