@@ -1318,3 +1318,21 @@ See `/app/memory/test_credentials.md`.
 - 🟢 (low) React hydration warning in operator Ops tab `<select>` — `<span>`
   child of `<option>` (pre-existing, not new in iter31).
 
+
+---
+
+## 2026-02 — Iter31b: Restore preview diff (BackupCard polish)
+- **New endpoint** `GET /api/operator/backup/snapshots/{snap_id}/diff` — returns
+  per-collection `{snapshot_count, current_count, merge_delta_max, replace_delta}`
+  for each restorable collection. Path-traversal guarded the same way as
+  download/restore (`Path.resolve()` + `relative_to(_BACKUP_DIR.resolve())`).
+- **UI** in `BackupCard.jsx`: each snapshot row now has a "Preview" button
+  (`backup-snapshot-preview-{id}`) that lazy-loads + caches the diff and toggles
+  a collapsible table (`backup-snapshot-diff-{id}` with per-row testids
+  `backup-snapshot-diff-row-{id}-{collection}`). Operators see exactly how many
+  rows a Merge will write and the net delta a Replace will cause BEFORE
+  clicking the destructive action.
+- **Verified**: traversal attempts return 404, nonexistent ids return 404, real
+  snapshot returns full payload. Playwright confirmed the Preview button is
+  clickable end-to-end.
+

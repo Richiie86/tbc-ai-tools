@@ -343,6 +343,62 @@ async def download_snapshot(snap_id: str, _op: dict = Depends(get_current_operat
     )
 
 
+@router.get('/snapshots/{snap_id}/diff')
+async def diff_snapshot(snap_id: str, _op: dict = Depends(get_current_operator)):
+    """Pre-flight diff between a saved snapshot and the current DB state.
+    Shown in the BackupCard UI before the operator hits Merge/Replace so
+    a destructive restore never surprises them.
+
+    Returns per-collection: snapshot_count, current_count, delta (+/-)
+    so the UI can render a compact "+3 deploy projects, -1 promo code"
+    strip. Counts only — no row-level diff (keep it cheap)."""
+    safe_id = snap_id.replace('..', '').replace('/', '').strip()
+    path = (_ensure_backup_dir() / f'{safe_id}.json').resolve()
+    try:
+        path.relative_to(_BACKUP_DIR.resolve())
+    except ValueError:
+        raise HTTPException(400, 'invalid snapshot id')
+    if not path.is_file():
+        raise HTTPException(404, 'snapshot not found')
+    try:
+        payload = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError) as e:
+        raise HTTPException(500, f'could not read snapshot: {e}')
+
+    # Pair snapshot list lengths against current collection counts.
+    # Order mirrors `/export` so the UI can render in the same order.
+    pairs = [
+        ('deploy_projects',   db.deploy_projects),
+        ('promo_codes',       db.promo_codes),
+        ('kyc_bypass_emails', db.kyc_bypass_emails),
+        ('vanished_emails',   db.vanished_emails),
+        ('app_settings',      db.app_settings),
+    ]
+    rows = []
+    for name, coll in pairs:
+        snap_count = len(payload.get(name) or [])
+        cur_count = await coll.count_documents({})
+        rows.append({
+            'collection': name,
+            'snapshot_count': snap_count,
+            'current_count': cur_count,
+            # Merge delta: how many *new* docs the snapshot would add at
+            # worst (capped at snap_count). This is approximate — primary-
+            # key collisions are upserts not inserts — but it's close
+            # enough to flag "this restore would write N rows".
+            'merge_delta_max': snap_count,
+            # Replace delta: net change if we WIPE then INSERT the snapshot.
+            'replace_delta': snap_count - cur_count,
+        })
+
+    return {
+        'snapshot_id': safe_id,
+        'snapshot_exported_at': payload.get('exported_at'),
+        'snapshot_exported_by': payload.get('exported_by'),
+        'rows': rows,
+    }
+
+
 @router.post('/snapshots/{snap_id}/restore')
 async def restore_snapshot(
     snap_id: str,

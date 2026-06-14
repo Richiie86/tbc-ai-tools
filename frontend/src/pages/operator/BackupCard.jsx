@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Loader2, Download, Upload, Database, AlertTriangle, History, Camera, RotateCcw } from 'lucide-react';
+import { Loader2, Download, Upload, Database, AlertTriangle, History, Camera, RotateCcw, GitCompareArrows } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '../../components/ui/button';
 import api from '../../lib/api';
@@ -34,6 +34,12 @@ export default function BackupCard() {
   const [snapshotting, setSnapshotting] = useState(false);
   const [restoringId, setRestoringId] = useState(null);
   const [retentionDays, setRetentionDays] = useState(30);
+  // Per-snapshot diff cache + the id currently expanded. Lazy-loaded
+  // when the operator clicks "Preview" on a row so the list itself
+  // stays cheap.
+  const [diffById, setDiffById] = useState({});
+  const [diffOpenId, setDiffOpenId] = useState(null);
+  const [diffLoadingId, setDiffLoadingId] = useState(null);
 
   const loadSnapshots = useCallback(async () => {
     setSnapshotsLoading(true);
@@ -116,6 +122,28 @@ export default function BackupCard() {
       setRestoringId(null);
     }
   }, []);
+
+  // Pre-flight diff — fetched lazily when the operator clicks "Preview"
+  // on a snapshot row. The result is cached so reopening the same row
+  // doesn't re-hit the backend.
+  const togglePreview = useCallback(async (snap) => {
+    if (diffOpenId === snap.id) {
+      setDiffOpenId(null);
+      return;
+    }
+    setDiffOpenId(snap.id);
+    if (diffById[snap.id]) return; // already cached
+    setDiffLoadingId(snap.id);
+    try {
+      const { data } = await api.get(`/operator/backup/snapshots/${snap.id}/diff`);
+      setDiffById((prev) => ({ ...prev, [snap.id]: data }));
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Could not load preview');
+      setDiffOpenId(null);
+    } finally {
+      setDiffLoadingId(null);
+    }
+  }, [diffOpenId, diffById]);
 
   const exportNow = useCallback(async () => {
     setExporting(true);
@@ -312,48 +340,113 @@ export default function BackupCard() {
               <li
                 key={s.id}
                 data-testid={`backup-snapshot-row-${s.id}`}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-tbc-900/60 bg-ink-900/40 px-2.5 py-1.5"
+                className="rounded-md border border-tbc-900/60 bg-ink-900/40 px-2.5 py-1.5"
               >
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-[11px] font-mono text-tbc-100" title={s.filename}>{s.filename}</p>
-                  <p className="text-[10px] text-tbc-200/50">
-                    {new Date(s.created_at).toLocaleString()} · {(s.size_bytes / 1024).toFixed(1)} KB
-                  </p>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-[11px] font-mono text-tbc-100" title={s.filename}>{s.filename}</p>
+                    <p className="text-[10px] text-tbc-200/50">
+                      {new Date(s.created_at).toLocaleString()} · {(s.size_bytes / 1024).toFixed(1)} KB
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => togglePreview(s)}
+                      disabled={diffLoadingId === s.id}
+                      data-testid={`backup-snapshot-preview-${s.id}`}
+                      className="h-7 border-amber-500/40 bg-ink-900 px-2 text-[10px] text-amber-200 hover:bg-amber-500/10"
+                    >
+                      {diffLoadingId === s.id
+                        ? <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                        : <GitCompareArrows className="mr-1 h-3 w-3" />}
+                      {diffOpenId === s.id ? 'Hide' : 'Preview'}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => downloadSnapshot(s)}
+                      data-testid={`backup-snapshot-download-${s.id}`}
+                      className="h-7 border-tbc-700/60 bg-ink-900 px-2 text-[10px] text-tbc-200 hover:bg-ink-950"
+                    >
+                      <Download className="mr-1 h-3 w-3" />
+                      Download
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={() => restoreSnapshot(s, 'merge')}
+                      disabled={restoringId === s.id}
+                      data-testid={`backup-snapshot-restore-merge-${s.id}`}
+                      className="h-7 bg-emerald-500 px-2 text-[10px] font-semibold text-ink-950 hover:bg-emerald-400"
+                    >
+                      {restoringId === s.id
+                        ? <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                        : <RotateCcw className="mr-1 h-3 w-3" />}
+                      Merge
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => restoreSnapshot(s, 'replace')}
+                      disabled={restoringId === s.id}
+                      data-testid={`backup-snapshot-restore-replace-${s.id}`}
+                      className="h-7 border-rose-500/40 bg-ink-900 px-2 text-[10px] text-rose-300 hover:bg-rose-500/10"
+                    >
+                      Replace
+                    </Button>
+                  </div>
                 </div>
-                <div className="flex shrink-0 items-center gap-1.5">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => downloadSnapshot(s)}
-                    data-testid={`backup-snapshot-download-${s.id}`}
-                    className="h-7 border-tbc-700/60 bg-ink-900 px-2 text-[10px] text-tbc-200 hover:bg-ink-950"
+
+                {/* Collapsible diff strip — counts only, no row-level diff. */}
+                {diffOpenId === s.id && diffById[s.id] && (
+                  <div
+                    data-testid={`backup-snapshot-diff-${s.id}`}
+                    className="mt-2 grid gap-1 rounded border border-tbc-900/60 bg-ink-950/80 p-2 text-[10px]"
                   >
-                    <Download className="mr-1 h-3 w-3" />
-                    Download
-                  </Button>
-                  <Button
-                    size="sm"
-                    onClick={() => restoreSnapshot(s, 'merge')}
-                    disabled={restoringId === s.id}
-                    data-testid={`backup-snapshot-restore-merge-${s.id}`}
-                    className="h-7 bg-emerald-500 px-2 text-[10px] font-semibold text-ink-950 hover:bg-emerald-400"
-                  >
-                    {restoringId === s.id
-                      ? <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                      : <RotateCcw className="mr-1 h-3 w-3" />}
-                    Merge
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => restoreSnapshot(s, 'replace')}
-                    disabled={restoringId === s.id}
-                    data-testid={`backup-snapshot-restore-replace-${s.id}`}
-                    className="h-7 border-rose-500/40 bg-ink-900 px-2 text-[10px] text-rose-300 hover:bg-rose-500/10"
-                  >
-                    Replace
-                  </Button>
-                </div>
+                    <div className="text-tbc-200/60">
+                      Snapshot taken {new Date(diffById[s.id].snapshot_exported_at).toLocaleString()} by{' '}
+                      <code className="rounded bg-ink-900 px-1 py-0.5 text-tbc-200">{diffById[s.id].snapshot_exported_by}</code>
+                    </div>
+                    <table className="mt-1 w-full">
+                      <thead className="text-[9px] uppercase tracking-wider text-tbc-200/50">
+                        <tr>
+                          <th className="text-left">Collection</th>
+                          <th className="text-right">Current</th>
+                          <th className="text-right">Snapshot</th>
+                          <th className="text-right">Merge writes ≤</th>
+                          <th className="text-right">Replace delta</th>
+                        </tr>
+                      </thead>
+                      <tbody className="font-mono">
+                        {(diffById[s.id].rows || []).map((r) => (
+                          <tr
+                            key={r.collection}
+                            data-testid={`backup-snapshot-diff-row-${s.id}-${r.collection}`}
+                            className="border-t border-tbc-900/40 text-tbc-100"
+                          >
+                            <td className="py-0.5">{r.collection}</td>
+                            <td className="text-right text-tbc-200/70">{r.current_count}</td>
+                            <td className="text-right text-tbc-100">{r.snapshot_count}</td>
+                            <td className="text-right text-emerald-300">+{r.merge_delta_max}</td>
+                            <td className={`text-right ${
+                              r.replace_delta > 0 ? 'text-emerald-300'
+                              : r.replace_delta < 0 ? 'text-rose-300'
+                              : 'text-tbc-200/50'
+                            }`}>
+                              {r.replace_delta > 0 ? '+' : ''}{r.replace_delta}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    <p className="text-[9px] leading-relaxed text-tbc-200/50">
+                      <strong className="text-emerald-300">Merge</strong> upserts by primary key — actual writes
+                      may be fewer (existing ids update in place). <strong className="text-rose-300">Replace</strong>
+                      {' '}WIPES the collection first then inserts the snapshot rows; the delta column shows the net change.
+                    </p>
+                  </div>
+                )}
               </li>
             ))}
           </ul>
