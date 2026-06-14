@@ -1248,3 +1248,27 @@ See `/app/memory/test_credentials.md`.
 - Audit log filter for deploy_project deletions (P2).
 - End-to-end Vercel/GitHub loop verification with real tokens (P1, blocked on user-provided creds).
 - Email transport for notifications (currently in-app only) (P2).
+
+---
+
+## 2026-02 — Iter30: MongoDB collection-name fix (P0)
+- **Bug**: 7 backend code paths queried a non-existent `db.payment_settings` collection
+  instead of the canonical `db.settings._id='payment_settings'` document. Symptom:
+  `github_token` and `default_can_deploy` always returned `None`, breaking the
+  GitHub "Push Code" feature on production with a misleading
+  "github_token not set in Operator → Security" 503.
+- **Fix applied** to 4 files (search→replace `await db.payment_settings.find_one({})`
+  → `await db.settings.find_one({'_id': 'payment_settings'})`, plus the
+  `update_one` write in deploy_access_ext.py):
+  - `auto_fix_loop_ext.py:481` (`_auto_merge_sweep`)
+  - `ai_build_ext.py:336` / `468` / `631` (plan, ship-PR, preview-url handlers)
+  - `deploy_access_ext.py:40` (`_default_can_deploy` read) + `233` (op_set_default write)
+  - `server.py:646` (signup `default_can_deploy` lookup)
+- **Verification** — `/app/test_reports/iteration_30.json`: 54/54 tests green
+  (12 new + 42 regression). Direct Mongo inspection confirms the legacy
+  `payment_settings` collection is empty/absent and all reads/writes land on
+  `db.settings._id='payment_settings'`.
+- **Next step for user**: tap "Save to GitHub" in chat so the fix ships to
+  production at `https://tbctools.org` — the "Push Code" button will then
+  succeed because the operator's configured `github_token` is finally retrievable.
+
