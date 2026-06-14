@@ -1272,3 +1272,49 @@ See `/app/memory/test_credentials.md`.
   production at `https://tbctools.org` — the "Push Code" button will then
   succeed because the operator's configured `github_token` is finally retrievable.
 
+
+---
+
+## 2026-02 — Iter31: P2/P3 Backlog Batch
+- **Iter29 carry-over verified**: AutoFixCard toggles (`auto-fix-push-empty-toggle`,
+  `auto-fix-run-tests-toggle`) save through `PUT /api/operator/auto-fix/config`
+  and persist to `db.app_settings.auto_fix.*`. SecurityCard KYC bypass input renders
+  enabled at mount; the Add button is disabled only when the email field is empty
+  (intentional UX, not a bug).
+- **Dashboard.jsx decomposition (P2)**: extracted `useStickToBottom` and
+  `useChatSessionsCrud` into `/app/frontend/src/pages/dashboard/`.
+  Dashboard.jsx slimmed from 376 → 275 lines with zero behaviour change.
+- **Skill-tree as react-flow graph (P3)**: added `reactflow@11.11.4`. AI Brain
+  tab now has a Grid ↔ Graph toggle (data-testid `ai-brain-skill-view-grid` /
+  `ai-brain-skill-view-graph`). Graph view (`ai-brain-skill-graph`) renders
+  buckets as nodes branching from a central "AI Brain" root with the top 4
+  learnings of each bucket as children + "+N more" footer. Toggle persisted
+  to localStorage key `ai-brain-skill-view`.
+- **Multi-pod Redis rate-limit on runtime-errors ingest (P3)**: `_rate_limited()`
+  now uses `redis.asyncio.from_url(REDIS_URL)` with a fixed-window INCR+EXPIRE
+  counter when `REDIS_URL` env var is set. Falls back to the per-pod in-memory
+  bucket when Redis is unset or unreachable. Hardened post-test-review:
+  - `_client_ip()` honours `X-Forwarded-For` first-hop so the rate-key uses the
+    real end-user IP (not the ingress proxy IP that rotates per connection).
+  - On Redis failure, the client is disabled for a 60s cooldown then retried —
+    transient KV outages self-heal without a backend restart.
+- **Local-disk 30-day backup snapshot rotation (P3)**: new endpoints
+  `GET/POST /api/operator/backup/snapshots`, `GET /snapshots/{id}/download`,
+  `POST /snapshots/{id}/restore?mode=merge|replace`. Storage at
+  `/app/data/backups/`; retention defaults to 30 days
+  (env: `BACKUP_SNAPSHOT_RETENTION_DAYS`). Daily APScheduler job
+  `_backup_snapshot_job` writes a snapshot every 24h. Path-traversal-guarded
+  via `Path.resolve()` + `relative_to(_BACKUP_DIR.resolve())`. UI exposed
+  in `BackupCard.jsx` (`backup-snapshots-card`, `backup-snapshot-now`,
+  `backup-snapshot-download-{id}`, `backup-snapshot-restore-merge|replace-{id}`).
+- **Verification** — `/app/test_reports/iteration_31.json`: backend 7/7 + all
+  frontend flows green. iter30 regression suite unaffected.
+- **Pending for user**: provide a Redis URL (Vercel KV `REDIS_URL` value) and
+  I'll drop it into `backend/.env` so the rate-limiter swaps to cross-pod mode.
+  Until then it runs single-pod (functional but undercounts at scale).
+
+### Updated backlog (post-iter31)
+- 🟢 Wire `REDIS_URL` into `backend/.env` once user provides Vercel KV URL.
+- 🟢 (low) React hydration warning in operator Ops tab `<select>` — `<span>`
+  child of `<option>` (pre-existing, not new in iter31).
+

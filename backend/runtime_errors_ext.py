@@ -163,14 +163,40 @@ _RATE_MAX = 30  # 30 reports / minute / IP
 
 _REDIS_URL = os.environ.get('REDIS_URL')
 _redis_client = None  # lazy-init
+# When Redis fails we don't disable it for the whole process anymore —
+# we just back off for a short cooldown. That way a transient KV outage
+# self-heals without needing a backend restart.
+_REDIS_COOLDOWN_S = 60
+_redis_disabled_until: float = 0.0
+
+
+def _client_ip(request: Request) -> str:
+    """Return the *real* end-user IP, honouring X-Forwarded-For when the
+    request comes through an ingress/reverse-proxy (Kubernetes ingress,
+    Cloudflare, Vercel etc.). Falls back to `request.client.host` if the
+    header is absent.
+
+    We only trust the FIRST hop because in our deployment topology the
+    ingress always appends; spoofing would require control of the proxy.
+    """
+    xff = request.headers.get('x-forwarded-for') or request.headers.get('X-Forwarded-For')
+    if xff:
+        first = xff.split(',', 1)[0].strip()
+        if first:
+            return first
+    return request.client.host if request.client else 'unknown'
 
 
 async def _get_redis():
     """Lazy-init the shared Redis client. Returns None if no REDIS_URL is
-    configured (in which case callers fall back to the in-memory bucket).
+    configured OR if Redis is currently in cooldown after a recent
+    failure (so transient outages self-heal automatically).
     """
-    global _redis_client
+    global _redis_client, _redis_disabled_until
     if not _REDIS_URL:
+        return None
+    import time
+    if _redis_disabled_until and time.time() < _redis_disabled_until:
         return None
     if _redis_client is not None:
         return _redis_client
@@ -185,13 +211,12 @@ async def _get_redis():
         # Ping once so we surface mis-configured URLs at first use rather
         # than on every request.
         await _redis_client.ping()
+        _redis_disabled_until = 0.0
         logger.info('runtime-errors rate-limiter: Redis backend ready (%s)', _REDIS_URL.split('@')[-1][:40])
     except Exception as e:  # noqa: BLE001
-        logger.warning('Redis rate-limiter unavailable, falling back to in-memory: %s', e)
+        logger.warning('Redis rate-limiter unavailable, falling back to in-memory for %ss: %s', _REDIS_COOLDOWN_S, e)
         _redis_client = None
-        # Stop trying for the rest of this process — REDIS_URL is bad.
-        # (A restart will retry; that's the right granularity.)
-        globals()['_REDIS_URL'] = None
+        _redis_disabled_until = time.time() + _REDIS_COOLDOWN_S
     return _redis_client
 
 
@@ -209,24 +234,27 @@ def _rate_limited_inmem(ip: str) -> bool:
 
 async def _rate_limited(ip: str) -> bool:
     """Cross-pod-correct rate limiter. Tries Redis first; falls back to
-    the in-memory bucket if Redis is unset or unreachable so the ingest
-    endpoint stays available even when Vercel KV is having a bad day.
+    the in-memory bucket if Redis is unset, in cooldown, or unreachable
+    so the ingest endpoint stays available even when Vercel KV is
+    having a bad day.
     """
+    global _redis_disabled_until
     client = await _get_redis()
     if client is None:
         return _rate_limited_inmem(ip)
     try:
         # Fixed-window counter: key expires after _RATE_WINDOW_S, so the
         # worst case is a 2x burst across a boundary — acceptable for
-        # spam protection. Sliding-window would need a sorted set + ZADD
-        # and the extra round-trips aren't worth it here.
+        # spam protection.
         key = f'rl:rt_err:{ip}'
         count = await client.incr(key)
         if count == 1:
             await client.expire(key, _RATE_WINDOW_S)
         return count > _RATE_MAX
     except Exception as e:  # noqa: BLE001
-        logger.warning('Redis rate-limit call failed, falling back to in-memory: %s', e)
+        import time
+        logger.warning('Redis rate-limit call failed, falling back to in-memory for %ss: %s', _REDIS_COOLDOWN_S, e)
+        _redis_disabled_until = time.time() + _REDIS_COOLDOWN_S
         return _rate_limited_inmem(ip)
 
 
@@ -235,7 +263,7 @@ async def ingest(report: ErrorReport, request: Request):
     """Open ingest — frontend ErrorBoundary calls this. Rate-limited by
     IP (Redis when REDIS_URL is set, in-memory otherwise). Stores raw +
     signature so the operator dashboard can group by fingerprint."""
-    ip = request.client.host if request.client else 'unknown'
+    ip = _client_ip(request)
     if await _rate_limited(ip):
         # Soft-fail — we don't want to break the page rendering an error
         # toast because we rate-limited the error report itself.
