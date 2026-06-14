@@ -56,6 +56,11 @@ async def _config() -> dict:
         # because it WRITES to the operator's GitHub repo — no surprises.
         # Only fires for projects with `auto_heal: true`.
         'auto_push_empty_repo': bool(cfg.get('auto_push_empty_repo', False)),
+        # When true, every AI-Build PR triggers the automated test
+        # harness (POST /ai-build/run-tests) and the auto-merge gate
+        # waits for the verdict before merging. Off by default —
+        # adds ~2 min per fix.
+        'auto_run_tests': bool(cfg.get('auto_run_tests', False)),
         'per_day_cap': int(cfg.get('per_day_cap') or _DEFAULT_PER_DAY),
         'per_tick_cap': int(cfg.get('per_tick_cap') or _DEFAULT_PER_TICK),
         'project_id': cfg.get('project_id'),
@@ -508,6 +513,19 @@ async def _auto_merge_sweep() -> int:
                     logger.info('auto-merge skipped PR #%s — visual_verify=fail (%s)',
                                 number, vv.get('summary'))
                     continue
+                # Third gate: pytest run. When `auto_run_tests` is on the
+                # plan should have a `test_run` doc; if it failed, block.
+                # If `auto_run_tests` is off, `test_run` will be missing
+                # and we don't block (operator opted out of the extra
+                # signal — visual+text review still cover them).
+                tr = (plan_doc.get('test_run') or {})
+                if cfg.get('auto_run_tests') and tr.get('verdict') == 'fail':
+                    logger.info(
+                        'auto-merge skipped PR #%s — test_run=fail '
+                        '(%s passed / %s failed / %s errors)',
+                        number, tr.get('passed'), tr.get('failed'), tr.get('errors'),
+                    )
+                    continue
                 m = await client.put(
                     f'{_GITHUB_API}/repos/{repo}/pulls/{number}/merge',
                     headers={'Authorization': f'Bearer {gh_token}',
@@ -530,6 +548,14 @@ class AutoFixConfig(BaseModel):
     enabled: bool = False
     auto_merge: bool = False
     include_health: bool = False
+    # Opt-in: lets the auto-fix loop push the live /app source to any
+    # deploy project whose configured GitHub repo is empty (verdict =
+    # `repo_empty`). Off by default — writes to GitHub.
+    auto_push_empty_repo: bool = False
+    # Opt-in: makes every AI-Build PR get its own comprehensive test run
+    # before auto-merge. Off by default because it can take ~2 minutes
+    # per fix and we don't want to silently slow down the loop.
+    auto_run_tests: bool = False
     per_day_cap: int = Field(_DEFAULT_PER_DAY, ge=0, le=50)
     per_tick_cap: int = Field(_DEFAULT_PER_TICK, ge=1, le=10)
     project_id: Optional[str] = None

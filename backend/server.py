@@ -646,6 +646,17 @@ async def register(req: RegisterRequest, response: Response, request: Request):
     settings_row = await db.payment_settings.find_one({}) or {}
     default_can_deploy = bool(settings_row.get('default_can_deploy', False))
     user_doc['can_deploy'] = True if user.role == 'operator' else default_can_deploy
+    # Re-registration approval flow:
+    #   If this email was previously VANISHED by an operator, the new
+    #   account is HELD in `pending_approval` until an operator clicks
+    #   Accept. The account exists in the users collection (so we can
+    #   show it in the operator UI) but cannot log in and shows up in
+    #   the "Banned / pending" tab with an Accept button.
+    vanished = await db.vanished_emails.find_one({'email': email})
+    if vanished:
+        user_doc['pending_approval'] = True
+        user_doc['pending_reason'] = 'reregistration_after_vanish'
+        user_doc['status'] = 'pending'
     await db.users.insert_one(user_doc)
     # Auto-generate referral code for the new user
     try:
@@ -721,6 +732,15 @@ async def login(req: LoginRequest, response: Response, request: Request):
         raise HTTPException(403, 'This account has been deactivated. Please contact support.')
     if user.get('status') == 'paused':
         raise HTTPException(403, 'This account is paused. Contact your administrator to restore access.')
+    if user.get('pending_approval') or user.get('status') == 'pending':
+        # Re-registration after a permanent delete (vanish). The account
+        # exists but is held until an operator clicks Accept in the Ops
+        # console. We surface a specific 403 so the login UI can show a
+        # friendlier "waiting for approval" message.
+        raise HTTPException(
+            403,
+            'This account is pending operator approval and cannot log in yet. You will be notified when it is approved.',
+        )
     tv = int(user.get('token_version') or 0)
     # On an operator login that won't be gated by 2FA, fire the test-data
     # purge immediately. For 2FA-gated operators we instead purge on
@@ -1720,6 +1740,22 @@ async def op_vanish_user(
     if confirm != (target.get('email') or '').lower():
         raise HTTPException(400, "confirm_email must exactly match the target user's email")
     res = await db.users.delete_one({'id': user_id})
+    # Operator explicitly asked: if a vanished email later signs up
+    # again, the new account must be HELD until an operator approves
+    # it. We persist the vanish so the register handler can flip the
+    # new doc to `pending_approval: true`.
+    try:
+        await db.vanished_emails.update_one(
+            {'email': (target.get('email') or '').lower()},
+            {'$set': {
+                'email': (target.get('email') or '').lower(),
+                'vanished_at': datetime.now(timezone.utc),
+                'vanished_by': op.get('email'),
+            }},
+            upsert=True,
+        )
+    except Exception as e:
+        logger.warning('vanished_emails persistence failed: %s', e)
     logger.warning('Operator %s VANISHED user %s (hard delete)', op.get('email'), target.get('email'))
     await record_audit(op, 'user.vanish', target=target.get('email'), request=request)
     return {'success': True, 'email': target.get('email'), 'deleted_count': res.deleted_count}
@@ -1929,6 +1965,10 @@ from deploy_initial_push_ext import router as deploy_initial_push_router
 app.include_router(deploy_initial_push_router)
 from deploy_suggestions_ext import router as deploy_suggestions_router
 app.include_router(deploy_suggestions_router)
+from operator_security_ext import router as operator_security_router
+app.include_router(operator_security_router)
+from ai_build_tests_ext import router as ai_build_tests_router
+app.include_router(ai_build_tests_router)
 from changelog_ext import router as changelog_router
 app.include_router(changelog_router)
 from auto_fix_loop_ext import router as auto_fix_router

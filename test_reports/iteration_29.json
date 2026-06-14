@@ -1,0 +1,45 @@
+{
+  "summary": "Iter29 backend 9/9 PASS + iter27/28 regression 30/30 PASS. The /api/operator/deploy/projects 500 (iter28 blocker) is FIXED — endpoint returns 200. New /api/operator/security/* (pending-users + kyc-bypass) + /api/operator/ai-build/run-tests/{plan_id} endpoints all behave per spec. AutoFixConfig now persists auto_push_empty_repo + auto_run_tests on round-trip. Frontend Settings tab renders all four expected testids (security-pending-users-card, security-kyc-bypass-card, auto-fix-push-empty-toggle, auto-fix-run-tests-toggle). Vanish→re-register→approve E2E PASS; reject path PASS.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/operator/auto-fix (auto_merge code path)", "issue": "auto_fix_loop_ext.py:522 references `cfg.get('auto_run_tests')` inside _auto_merge_sweep(), but `cfg` is not defined in that function's scope — would raise NameError when auto_merge=true AND a plan has test_run set. Not exercised by current tests because auto_merge is off in the test env. Pass `cfg` into _auto_merge_sweep() or re-fetch via `await _config()`."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "AutoFixCard toggles", "issue": "After clicking auto-fix-push-empty-toggle / auto-fix-run-tests-toggle once and reloading, both render as data-state='unchecked' (aria-checked=false). Backend PUT /config does persist when called directly (verified by test_auto_fix_config_persists_new_fields), so the toggles may not be wiring onCheckedChange → PUT request, or they may revert because the doc reload reads stale state. Worth confirming with the UI handler.", "selector": "[data-testid='auto-fix-push-empty-toggle'], [data-testid='auto-fix-run-tests-toggle']", "priority": "MEDIUM"},
+      {"component": "SecurityCard KYC input", "issue": "[data-testid='security-kyc-bypass-add'] input renders disabled on initial mount until something loads — playwright .fill() timed out 30s with 'element is not enabled'. Likely an isLoading guard not clearing. Cannot exercise the add/remove UI flow as a result.", "selector": "[data-testid='security-kyc-bypass-add']", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Operator Console settings tab", "issues": ["Onboarding tour modal auto-opens for operator on every visit; blocks automated/keyboard testing until Skip clicked. Consider a 'seen' cookie."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter29_security_and_ai_tests.py",
+    "/app/test_reports/pytest/iter29_v2.xml"
+  ],
+  "action_items": [
+    "(MEDIUM) Verify the AutoFixCard toggle onClick handler actually fires PUT /api/operator/auto-fix/config with the new auto_push_empty_repo / auto_run_tests fields and re-reads cfg state from the response — observed unchecked after reload despite toggle click.",
+    "(MEDIUM) SecurityCard KYC input is rendered disabled at mount; user (and tests) cannot type. Likely an `isLoading` or `!list` guard. Drop the disabled attr or clear it after first fetch resolves.",
+    "(LOW) Fix the latent NameError in auto_fix_loop_ext._auto_merge_sweep where `cfg.get('auto_run_tests')` is referenced without `cfg` being in scope.",
+    "(INFO) Ops tab project-row testids (push-initial-<id>, suggestions-<id>, review-status-dot-<id>) could not be observed live because the test env has only the lazy-upserted `tbctools-self` project with no last_suggestions / last_code_review seeded — those testids only render when those fields exist. The /deploy/projects 500 itself is FIXED."
+  ],
+  "critical_code_review_comments": [
+    "operator_security_ext.py is clean: norm_email lowercases, EmailStr+regex validation, upsert is idempotent, audit_log writes wrapped in try/except so a missing collection never blocks the operator action.",
+    "ai_build_tests_ext.py: 180s hard timeout via asyncio.wait_for, last 4KB stdout preserved, verdict='pass'|'fail'|'error', never raises. Good defensive shape.",
+    "deploy_projects_ext._project_to_out — iter28 KeyError fix verified — every field accessed via doc.get(). 200 OK confirmed live.",
+    "auto_fix_loop_ext.AutoFixConfig now carries auto_push_empty_repo + auto_run_tests with defaults False. Round-trip verified. Latent: _auto_merge_sweep uses `cfg.get('auto_run_tests')` without cfg in local scope — silent NameError waiting to happen when auto_merge gate is enabled."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter29_security_and_ai_tests.py (NEW — 9 tests, all passing)"
+  ],
+  "success_rate": {"backend": "100% (9/9 iter29 + 30/30 iter27+iter28 regression)", "frontend": "Testids present 4/4. Toggle persistence + KYC input remain blocked by UI bugs above."},
+  "test_credentials": "Operator rac.investments.swe@gmail.com / 123Admin@98 — no 2FA enrolled in this env, login returns token directly.",
+  "seed_data_creation": "Inserted+cleaned within tests: test_kyc_bypass_iter29@example.com (kyc_bypass_emails), test_vanish_reregister_iter29@example.com (users + vanished_emails), test_reject_iter29@example.com (vanished_emails), TEST_iter29_plan_<uuid> (ai_build_plans). All deleted in teardown.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend portion fully GREEN. Two UI follow-ups for the main agent: (1) AutoFixCard toggle: trace the onCheckedChange handler in /app/frontend/src/pages/operator/AutoFixCard.jsx — does it call PUT /api/operator/auto-fix/config and merge response into cfg state? Verify by toggling once, F5, expecting data-state='checked'. (2) SecurityCard KYC input is disabled at mount — check /app/frontend/src/pages/operator/SecurityCard.jsx for an isLoading / list-not-yet-loaded guard. Re-seed deploy_projects with last_suggestions + last_code_review (as in iter28 seed_data hint) to live-verify push-initial-<id> / suggestions-<id> / review-status-dot-<id> / review-dots-<id>.",
+  "rca of the issue": "Iter28's /api/operator/deploy/projects 500 (KeyError 'domain') is verified FIXED — _project_to_out now uses doc.get() everywhere. Endpoint returns 200 with the expected list shape. Iter28's reported UI testids are now reachable code-wise; live render depends on seeded data (last_suggestions + last_code_review). New iter29 features verified end-to-end at the backend layer (9/9). Remaining gaps are frontend-level wiring (toggle persistence + input disabled-at-mount) that the main agent can self-fix and re-verify."
+}

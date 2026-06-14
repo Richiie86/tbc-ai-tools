@@ -189,6 +189,51 @@ export default function AutoFixCard() {
           />
         </div>
 
+        {/* New: auto-push the live /app source whenever a deploy project's
+            configured GitHub repo is empty (verdict='repo_empty'). Opt-in
+            because it WRITES to the operator's GitHub repo without
+            human confirmation. */}
+        <div className="mt-3 flex items-start justify-between gap-3 border-t border-emerald-500/20 pt-3">
+          <div className="grow">
+            <p className="text-xs font-semibold text-tbc-100">
+              Auto-push to empty repos
+            </p>
+            <p className="mt-0.5 text-[11px] text-tbc-200/60">
+              If a project&apos;s GitHub repo has no code, automatically push
+              <code className="mx-1 rounded bg-ink-950 px-1 font-mono text-[10px] text-tbc-300">/app</code>
+              source so the next deploy ships. Only fires when the project also has
+              <span className="font-bold text-amber-300"> auto-heal</span> on.
+            </p>
+          </div>
+          <Switch
+            checked={cfg.auto_push_empty_repo || false}
+            onCheckedChange={(v) => save({ auto_push_empty_repo: v })}
+            disabled={saving || !cfg.enabled}
+            data-testid="auto-fix-push-empty-toggle"
+          />
+        </div>
+
+        {/* New: run pytest against /app/backend/tests after every PR opens
+            and gate auto-merge on a green run. Adds ~2 min per fix. */}
+        <div className="mt-3 flex items-start justify-between gap-3 border-t border-emerald-500/20 pt-3">
+          <div className="grow">
+            <p className="text-xs font-semibold text-tbc-100">
+              Run tests automatically
+            </p>
+            <p className="mt-0.5 text-[11px] text-tbc-200/60">
+              Run the pytest suite after every AI-Build PR and block auto-merge
+              if it fails. The AIs &quot;double-check their own code&quot; the
+              same way the agent does while coding.
+            </p>
+          </div>
+          <Switch
+            checked={cfg.auto_run_tests || false}
+            onCheckedChange={(v) => save({ auto_run_tests: v })}
+            disabled={saving || !cfg.enabled}
+            data-testid="auto-fix-run-tests-toggle"
+          />
+        </div>
+
         <div className="mt-3 flex items-center justify-between border-t border-emerald-500/20 pt-3">
           <div className="text-[10px] text-tbc-200/60">
             Today: {status?.today_count || 0} / {cfg.per_day_cap} PRs · runs every 5 min

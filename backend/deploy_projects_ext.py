@@ -132,12 +132,14 @@ def _gen_project_id(name: str) -> str:
 
 
 def _project_to_out(doc: dict) -> dict:
-    """Strip internal Mongo `_id`, surface only the documented fields."""
+    """Strip internal Mongo `_id`, surface only the documented fields.
+    Uses .get() everywhere so a partially-seeded or half-migrated doc
+    (missing `domain`, `created_at`, etc.) never 500s the whole list."""
     return {
-        'id': doc['id'],
-        'projectName': doc['projectName'],
-        'repo': doc['repo'],
-        'domain': doc['domain'],
+        'id': doc.get('id'),
+        'projectName': doc.get('projectName', ''),
+        'repo': doc.get('repo', ''),
+        'domain': doc.get('domain', ''),
         'repoType': doc.get('repoType', 'github'),
         'gitRef': doc.get('gitRef'),
         'vercel_project_id': doc.get('vercel_project_id'),
@@ -148,8 +150,8 @@ def _project_to_out(doc: dict) -> dict:
         'last_deployment_state': doc.get('last_deployment_state'),
         'last_deployed_at': doc.get('last_deployed_at'),
         'last_promoted_at': doc.get('last_promoted_at'),
-        'created_at': doc['created_at'],
-        'updated_at': doc['updated_at'],
+        'created_at': doc.get('created_at'),
+        'updated_at': doc.get('updated_at'),
     }
 
 

@@ -14,6 +14,7 @@ import AppSettingsCard from './AppSettingsCard';
 import WebhookSettingsCard from './WebhookSettingsCard';
 import AutoFixCard from './AutoFixCard';
 import ChangelogManagerCard from './ChangelogManagerCard';
+import SecurityCard from './SecurityCard';
 
 export default function SettingsTab() {
   const [settings, setSettings] = useState(null);
@@ -92,6 +93,10 @@ export default function SettingsTab() {
 
       <Section icon={Sparkles} title="Autonomous Auto-Fix Loop">
         <AutoFixCard />
+      </Section>
+
+      <Section icon={Lock} title="Account approvals & KYC bypass (operator-only)">
+        <SecurityCard />
       </Section>
 
       <Section icon={Megaphone} title="Changelog ('What's new')">
