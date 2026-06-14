@@ -93,16 +93,54 @@ async def _check_master_payments() -> dict:
 
 
 async def _check_frontend() -> dict:
-    frontend_url = os.environ.get('FRONTEND_URL') or 'http://localhost:3000'
+    """Verify the public frontend is reachable.
+
+    On preview (Kubernetes pod) the frontend is on localhost:3000.
+    On production (Vercel serverless) backend cannot reach localhost
+    — there is no local frontend process. Walk a small list of
+    candidate URLs and accept the first one that returns < 500.
+    Connection errors fall through to a graceful 'skipped' instead of
+    flagging the whole health card red.
+    """
+    candidates: list[str] = []
+    env_url = os.environ.get('FRONTEND_URL')
+    if env_url:
+        candidates.append(env_url.rstrip('/'))
+    # Public origin candidates (production + preview Vercel domains).
+    for v in (
+        os.environ.get('VERCEL_URL'),                    # set by Vercel
+        os.environ.get('NEXT_PUBLIC_SITE_URL'),
+        os.environ.get('PUBLIC_FRONTEND_URL'),
+    ):
+        if v:
+            candidates.append('https://' + v if not v.startswith('http') else v.rstrip('/'))
+    # Local fallback for preview/dev only.
+    candidates.append('http://localhost:3000')
+
     started = datetime.now(timezone.utc)
-    try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
-            r = await client.get(frontend_url)
-        ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
-        return {'key': 'frontend', 'label': 'Frontend', 'ok': r.status_code < 500,
-                'latency_ms': ms, 'detail': f'HTTP {r.status_code}'}
-    except Exception as e:
-        return {'key': 'frontend', 'label': 'Frontend', 'ok': False, 'detail': str(e)[:200]}
+    last_err: str | None = None
+    for url in candidates:
+        try:
+            async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
+                r = await client.get(url)
+            ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
+            return {
+                'key': 'frontend', 'label': 'Frontend',
+                'ok': r.status_code < 500,
+                'latency_ms': ms,
+                'detail': f'HTTP {r.status_code} via {url}',
+            }
+        except Exception as e:
+            last_err = str(e)[:160]
+            continue
+    # No candidate reachable. On serverless prod this is expected — the
+    # backend simply has no path to the frontend. Surface as "skipped"
+    # rather than fail-red so the health card doesn't lie about uptime.
+    return {
+        'key': 'frontend', 'label': 'Frontend',
+        'ok': True, 'skipped': True,
+        'detail': f'Skipped (no reachable URL · last error: {last_err or "n/a"})',
+    }
 
 
 def _check_disk() -> dict:

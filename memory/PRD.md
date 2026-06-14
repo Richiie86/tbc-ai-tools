@@ -11,6 +11,14 @@ gold theme. Domain: **tbctools.org**.
 - **End user (member)** — Chats with the AI builder, manages plan, copies referral link.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
+## Implemented — Feb 2026 (batch 22 — backup/restore + healthcheck fix)
+- ✅ **`operator_backup_ext.py`** — operator-only `GET /api/operator/backup/export` returns deploy_projects + promo_codes + kyc_bypass_emails + vanished_emails + app_settings as JSON. `POST /api/operator/backup/import` upserts the same shape with `mode='merge'` (safe) or `mode='replace'` (destructive). Secrets (Stripe keys, GitHub token, etc.) are stripped on export — operator re-enters them manually.
+- ✅ **`BackupCard.jsx`** mounted at Settings → "Backup / restore" anchor. Download as JSON, paste/select JSON to import, current env counts surfaced as a live preview.
+- ✅ **Frontend healthcheck robustness** — `ops_ext._check_frontend` now walks a candidate list (FRONTEND_URL → VERCEL_URL → public env vars → localhost) and treats no-route-found as `skipped: true` (returns ok=True instead of red-failing the whole status card).
+- ✅ **Search index updated** with the new "backup / restore" entry — ⌘K "copy projects" or "migrate" jumps straight there.
+- ✅ **Build badge bumped to v2.4** so the user spots production deploys.
+
+
 ## Implemented — Feb 2026 (batch 21 — universal operator search)
 - ✅ **`GET /api/operator/search?q=…`** new universal-search endpoint (`operator_search_ext.py`) — fans out across `db.users` (email/name), `db.deploy_projects` (projectName/repo/domain), `db.contacts` (subject/email/name), `db.audit_log` (kind/target/actor). Hard cap 8 hits/collection. Operator-only.
 - ✅ **OperatorSearch.jsx upgraded** — debounced 250ms fetch into `/operator/search`, merges with the static tab/setting INDEX. Per-kind icons (user=sky, project=emerald, contact=violet, audit=slate, static=amber) + per-kind body layouts. ⌘K / `/` keyboard shortcuts unchanged.

@@ -7,7 +7,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '../../components/ui/select';
 import { toast } from 'sonner';
-import { Loader2, KeyRound, Save, Lock, Eye, EyeOff, Plug, Mail, Sparkles, UserPlus, Rocket, Megaphone, Webhook } from 'lucide-react';
+import { Loader2, KeyRound, Save, Lock, Eye, EyeOff, Plug, Mail, Sparkles, UserPlus, Rocket, Megaphone, Webhook, Database } from 'lucide-react';
 import SecretsCard from './SecretsCard';
 import BirthdayRewardsCard from './BirthdayRewardsCard';
 import AppSettingsCard from './AppSettingsCard';
@@ -15,6 +15,7 @@ import WebhookSettingsCard from './WebhookSettingsCard';
 import AutoFixCard from './AutoFixCard';
 import ChangelogManagerCard from './ChangelogManagerCard';
 import SecurityCard from './SecurityCard';
+import BackupCard from './BackupCard';
 
 export default function SettingsTab() {
   const [settings, setSettings] = useState(null);
@@ -97,6 +98,10 @@ export default function SettingsTab() {
 
       <Section icon={Lock} title="Account approvals & KYC bypass (operator-only)" anchor="security">
         <SecurityCard />
+      </Section>
+
+      <Section icon={Database} title="Backup / restore (copy projects + codes between environments)" anchor="backup">
+        <BackupCard />
       </Section>
 
       <Section icon={Megaphone} title="Changelog ('What's new')" anchor="changelog">

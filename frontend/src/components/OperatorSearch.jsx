@@ -89,6 +89,8 @@ const INDEX = [
     keywords: ['vercel', 'pat', 'vcp_'], anchor: 'vercel' },
   { tab: 'settings', section: 'Birthday rewards', label: 'Birthday rewards',
     keywords: ['birthday', 'rewards', 'credits gift'], anchor: 'birthday' },
+  { tab: 'settings', section: 'Backup / restore', label: 'Backup / restore — copy data between environments',
+    keywords: ['backup', 'restore', 'export', 'import', 'copy projects', 'copy codes', 'migrate', 'json'], anchor: 'backup' },
 
   // ─── Ops actions ─────────────────────────────────────────────────────
   { tab: 'ops', label: 'Push Code (upload /app source)',

@@ -9,14 +9,14 @@ import { Rocket } from 'lucide-react';
  * Bump `BUILD_TAG` whenever we cut a meaningful release. If you can see
  * the tag on tbctools.org, the deploy worked.
  */
-const BUILD_TAG = 'v2.3 · Feb 2026';
+const BUILD_TAG = 'v2.4 · Feb 2026';
 const BUILD_HIGHLIGHTS = [
+  'Backup / restore: copy projects + codes between environments',
   'Universal operator search: ⌘K finds tabs, settings, users, projects, contacts, audit',
   'One-click "Push Code" button (Ops tab)',
   'AI improvement suggestions (per project)',
   'Operator Security card: re-registration approvals + KYC bypass',
-  'Auto-run pytest gate on every AI Build PR',
-  'Severity dot pills on Code Review',
+  'Frontend health-check: skipped gracefully on serverless prod',
 ];
 
 export default function BuildBadge() {
