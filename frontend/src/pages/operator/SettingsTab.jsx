@@ -13,6 +13,7 @@ import BirthdayRewardsCard from './BirthdayRewardsCard';
 import AppSettingsCard from './AppSettingsCard';
 import WebhookSettingsCard from './WebhookSettingsCard';
 import AutoFixCard from './AutoFixCard';
+import ChangelogManagerCard from './ChangelogManagerCard';
 
 export default function SettingsTab() {
   const [settings, setSettings] = useState(null);
@@ -91,6 +92,10 @@ export default function SettingsTab() {
 
       <Section icon={Sparkles} title="Autonomous Auto-Fix Loop">
         <AutoFixCard />
+      </Section>
+
+      <Section icon={Megaphone} title="Changelog ('What's new')">
+        <ChangelogManagerCard />
       </Section>
 
       <Section icon={UserPlus} title="New user defaults">

@@ -11,7 +11,16 @@ gold theme. Domain: **tbctools.org**.
 - **End user (member)** — Chats with the AI builder, manages plan, copies referral link.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
-## Implemented — Feb 2026 (latest session, batch 15)
+## Implemented — Feb 2026 (latest session, batch 16 — backlog sweep)
+
+- ✅ **Public `/changelog` page** — `ChangelogPage.jsx` + new anonymous `GET /api/changelog/public`. Marketing-trust signal for tbctools.org with "What we've shipped" hero, per-entry cards (title, body, tag pill, "deploy" badge, timestamp), and footer links to `/status` + `/contact`.
+- ✅ **Operator changelog editor** — `ChangelogManagerCard.jsx` in Operator → Settings → "Changelog ('What's new')". Form for title (200 chars), body_md (8000 chars), optional tag, plus a recent-entries list with delete buttons. Reuses existing `POST` / `DELETE` endpoints.
+- ✅ **Health-check sweep for the auto-fix loop** — `_auto_fix_health_sweep()` runs alongside the runtime-error + drift sweeps when `include_health=true`. Probes each project's public URL via httpx, throttled to once-per-hour-per-project, queues a fix PR with the failure detail pre-loaded when probe returns non-2xx. New amber toggle "Include health-check sweep" in AutoFixCard (third corner of the self-healing triangle: errors + drift + downtime).
+- ✅ **TTL GC for `ai_build_plans`** — new scheduler job every 6h that drops draft/refused/discarded plans older than 24h. Opened plans (audit trail) stay forever.
+- ✅ **Operator Tabs first-load double-click race FIXED** — replaced dual `activeTab` state + URL-sync `useEffect` with a single derived `searchParams.get('tab')` source of truth. Eliminates the race between the 8s stats poll re-render and the tab-syncing effect that caused the first click after page load to "miss".
+- ⏭️ **Dashboard.jsx decomposition — DEFERRED** to a future session. File is currently 506 LOC and 100% passing tests; a clean split (SessionsSidebar / ChatHeader / MessageList / ChatComposer) is straightforward but high-touch and would benefit from a dedicated review iteration.
+
+## Implemented — Feb 2026 (previous session, batch 15)
 - ✅ **End-of-Session action bar in chat** — `EndOfSessionActions.jsx` renders BIG pill buttons under the last assistant message of every completed session, matching the Emergent-style strip the operator showed in the screenshot:
   - 🚀 **Deploy** (blue→tbc gradient)
   - 🛡️ **Run Code Review** (emerald gradient)

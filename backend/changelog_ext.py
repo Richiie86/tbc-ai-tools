@@ -67,6 +67,23 @@ class CreateEntryRequest(BaseModel):
 
 
 # ─── Endpoints ────────────────────────────────────────────────────────────
+@router.get('/public')
+async def list_entries_public(limit: int = 20):
+    """Anonymous read of the changelog — powers the public `/changelog`
+    marketing page. No unread tracking, no PII, no auth. Same data shape
+    as the authenticated endpoint minus `unread_count` / `last_read`."""
+    limit = max(1, min(limit, _MAX_ENTRIES_PER_FETCH))
+    cursor = db.changelog.find({}, {
+        'id': 1, 'title': 1, 'body_md': 1, 'tag': 1, 'project': 1, 'source': 1, 'created_at': 1,
+    }).sort('created_at', -1).limit(limit)
+    entries = []
+    async for d in cursor:
+        d.pop('_id', None)
+        d['created_at'] = _iso(d.get('created_at'))
+        entries.append(d)
+    return {'entries': entries, 'count': len(entries)}
+
+
 @router.get('')
 async def list_entries(user: dict = Depends(get_current_user), limit: int = 10):
     """Return recent entries + `unread_count` for the calling user.

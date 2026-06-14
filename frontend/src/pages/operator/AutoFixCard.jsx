@@ -173,6 +173,22 @@ export default function AutoFixCard() {
           />
         </div>
 
+        <div className="mt-3 flex items-center justify-between rounded border border-amber-500/30 bg-amber-500/[0.04] px-3 py-2">
+          <div>
+            <div className="text-[12px] font-semibold text-amber-200">Include health-check sweep</div>
+            <p className="text-[10px] text-amber-200/60">
+              Probe each project's public URL every 5 min; if it fails,
+              queue a fix PR with the failure logs pre-loaded.
+            </p>
+          </div>
+          <Switch
+            checked={cfg.include_health}
+            onCheckedChange={(v) => save({ include_health: v })}
+            disabled={saving || !cfg.enabled}
+            data-testid="auto-fix-health-toggle"
+          />
+        </div>
+
         <div className="mt-3 flex items-center justify-between border-t border-emerald-500/20 pt-3">
           <div className="text-[10px] text-tbc-200/60">
             Today: {status?.today_count || 0} / {cfg.per_day_cap} PRs · runs every 5 min

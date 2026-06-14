@@ -59,18 +59,13 @@ export default function Operator() {
   // "Configure Vercel token now" toast) lands the operator straight
   // on the right tab.
   const [searchParams, setSearchParams] = useSearchParams();
-  const initialTab = searchParams.get('tab') || 'users';
-  const [activeTab, setActiveTab] = useState(initialTab);
-  // Sync `?tab=` → state when the URL changes externally (e.g.
-  // operator hits back/forward).
-  useEffect(() => {
-    const next = searchParams.get('tab');
-    if (next && next !== activeTab) setActiveTab(next);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]);
-  // And state → URL so the operator can deep-link the current tab.
+  // Single source of truth — derive the active tab from the URL rather
+  // than mirroring it in local state. Eliminates the previously-flaky
+  // race where the 8s stats poll could re-render between an external
+  // ?tab change and the syncing useEffect, causing the first tab click
+  // after a fresh load to "miss".
+  const activeTab = searchParams.get('tab') || 'users';
   const onTabChange = useCallback((next) => {
-    setActiveTab(next);
     setSearchParams((prev) => {
       const p = new URLSearchParams(prev);
       p.set('tab', next);
@@ -141,7 +136,7 @@ export default function Operator() {
                 <span
                   data-testid="founder-royalty-badge"
                   title="10% of every paid transaction in this codebase is owed to the original operator. Baked into founder_royalty.py — cannot be disabled from the UI."
-                  onClick={() => setActiveTab('royalties')}
+                  onClick={() => onTabChange('royalties')}
                   className="inline-flex cursor-pointer items-center gap-1 rounded-full border border-tbc-500/40 bg-tbc-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-tbc-300 hover:bg-tbc-500/20"
                 >
                   <Lock className="h-2.5 w-2.5" />
@@ -178,13 +173,13 @@ export default function Operator() {
             </div>
             <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
               <StatCard icon={Users}        label="Total Users"     value={stats?.total_users ?? '–'}
-                onClick={() => setActiveTab('users')} hint="View user list" />
+                onClick={() => onTabChange('users')} hint="View user list" />
               <StatCard icon={CreditCard}   label="Paid Customers"  value={stats?.paid_users ?? '–'}
-                onClick={() => setActiveTab('payments')} hint="See payments" />
+                onClick={() => onTabChange('payments')} hint="See payments" />
               <StatCard icon={MessageSquare} label="Total Messages" value={stats?.total_messages?.toLocaleString() ?? '–'}
-                onClick={() => setActiveTab('contacts')} hint="Read messages" />
+                onClick={() => onTabChange('contacts')} hint="Read messages" />
               <StatCard icon={DollarSign}   label="Revenue (USD)"   value={`$${(stats?.revenue_usd ?? 0).toLocaleString()}`}
-                onClick={() => setActiveTab('money')} hint="Open Money tab" />
+                onClick={() => onTabChange('money')} hint="Open Money tab" />
             </div>
 
             <StatsToolbar stats={stats} onRefresh={loadAll} />
@@ -254,7 +249,7 @@ export default function Operator() {
       <OperatorGuideTour
         key={guideKey}
         forceOpen={guideKey > 0}
-        onJumpToTab={setActiveTab}
+        onJumpToTab={onTabChange}
         onClose={() => { /* leave guideKey as-is so re-clicking still bumps */ }}
       />
     </div>

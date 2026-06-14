@@ -50,6 +50,7 @@ async def _config() -> dict:
     return {
         'enabled': bool(cfg.get('enabled', False)),
         'auto_merge': bool(cfg.get('auto_merge', False)),
+        'include_health': bool(cfg.get('include_health', False)),
         'per_day_cap': int(cfg.get('per_day_cap') or _DEFAULT_PER_DAY),
         'per_tick_cap': int(cfg.get('per_tick_cap') or _DEFAULT_PER_TICK),
         'project_id': cfg.get('project_id'),
@@ -224,6 +225,86 @@ async def _auto_fix_drift_sweep(cfg: dict, operator_id: str, budget: int) -> dic
     return out
 
 
+async def _auto_fix_health_sweep(cfg: dict, operator_id: str, budget: int) -> dict:
+    """Third corner of the self-healing triangle: run the deploy
+    `/healthcheck` for each tracked project; for any that fail (or
+    error), queue a fix PR with the failure payload pre-loaded.
+
+    Throttled so we don't hammer the project — last attempt timestamp is
+    stored on `deploy_projects.last_auto_health_attempt_at` and we skip
+    projects probed in the last 60 minutes."""
+    from ai_build_ext import PlanRequest, plan as ai_plan
+    out = {'processed': 0, 'opened': 0, 'errors': []}
+    if budget <= 0:
+        return out
+    cooldown = datetime.now(timezone.utc) - timedelta(minutes=60)
+    cursor = db.deploy_projects.find({
+        '$or': [
+            {'last_auto_health_attempt_at': None},
+            {'last_auto_health_attempt_at': {'$lt': cooldown}},
+        ],
+    }).limit(min(cfg['per_tick_cap'], budget))
+    fake_user = {'id': operator_id, 'sub': operator_id, 'role': 'operator'}
+
+    async for project in cursor:
+        pid = project.get('id')
+        url = project.get('url') or project.get('domain')
+        if not url:
+            continue
+        # Probe via raw httpx — never trip the deploy router (which would
+        # need the operator's JWT for the /healthcheck endpoint).
+        target = url if url.startswith('http') else f'https://{url}'
+        ok = False
+        detail = ''
+        try:
+            async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+                r = await client.get(target)
+            ok = 200 <= r.status_code < 400
+            detail = f'HTTP {r.status_code}'
+        except Exception as e:
+            detail = f'connect failed: {str(e)[:200]}'
+        await db.deploy_projects.update_one(
+            {'id': pid},
+            {'$set': {
+                'last_auto_health_attempt_at': datetime.now(timezone.utc),
+                'last_auto_health_ok': ok,
+                'last_auto_health_detail': detail,
+            }},
+        )
+        if ok:
+            continue
+
+        out['processed'] += 1
+        prompt = (
+            f'Auto-fix request for a failing health-check on `{project.get("projectName") or pid}`.\n\n'
+            f'Probe target: {target}\n'
+            f'Outcome: {detail}\n\n'
+            'Investigate likely culprits in this priority order:\n'
+            '  - backend/server.py — startup / scheduler errors\n'
+            '  - backend/runtime_errors_ext.py — recent critical entries\n'
+            '  - frontend bundle errors blocking the public landing\n\n'
+            'Keep the fix minimal — restore the failing endpoint without '
+            'touching auth, payments, or schemas.'
+        )
+        req = PlanRequest(project_id=pid, prompt=prompt)
+        try:
+            resp = await ai_plan(req, user=fake_user)
+        except Exception as e:
+            out['errors'].append(f'health_plan_failed:{pid}:{e}')
+            continue
+        await db.ai_build_plans.update_one(
+            {'plan_id': resp.plan_id},
+            {'$set': {'source': 'auto_fix_health', 'project_id': pid}},
+        )
+        plan_doc = await db.ai_build_plans.find_one({'plan_id': resp.plan_id})
+        review = (plan_doc or {}).get('review') or {}
+        if review.get('verdict') == 'ship':
+            pr_url = await _open_pr_one(resp.plan_id, operator_id)
+            if pr_url:
+                out['opened'] += 1
+    return out
+
+
 # ─── Core tick ────────────────────────────────────────────────────────────
 async def run_auto_fix_tick() -> dict:
     """One pass of the loop. Returns `{processed, opened, skipped, errors}`."""
@@ -309,6 +390,18 @@ async def run_auto_fix_tick() -> dict:
     out['opened'] += drift['opened']
     out['processed'] += drift['processed']
 
+    # Health-check sweep — also bound by remaining daily cap. Only runs
+    # when explicitly opted in via `auto_fix.include_health`.
+    if cfg.get('include_health'):
+        remaining = max(0, cfg['per_day_cap'] - (await _today_attempt_count()))
+        health = await _auto_fix_health_sweep(cfg, operator_id, remaining)
+        out['health_processed'] = health['processed']
+        out['health_opened'] = health['opened']
+        if health['errors']:
+            out['errors'].extend(health['errors'])
+        out['opened'] += health['opened']
+        out['processed'] += health['processed']
+
     # Optional second sweep: auto-merge clean PRs.
     if cfg['auto_merge']:
         out['merged'] = await _auto_merge_sweep()
@@ -366,6 +459,7 @@ async def _auto_merge_sweep() -> int:
 class AutoFixConfig(BaseModel):
     enabled: bool = False
     auto_merge: bool = False
+    include_health: bool = False
     per_day_cap: int = Field(_DEFAULT_PER_DAY, ge=0, le=50)
     per_tick_cap: int = Field(_DEFAULT_PER_TICK, ge=1, le=10)
     project_id: Optional[str] = None

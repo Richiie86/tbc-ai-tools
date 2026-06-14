@@ -471,6 +471,25 @@ async def startup():
             _auto_fix_job, 'interval', minutes=5,
             next_run_time=datetime.now(timezone.utc) + timedelta(minutes=2),
         )
+
+        # AI Build plan GC — drop draft/refused/discarded plans older than
+        # 24h. Opened plans stay forever (audit trail + history view).
+        async def _ai_build_gc_job():
+            try:
+                cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+                r = await db.ai_build_plans.delete_many({
+                    'status': {'$in': ['planned', 'refused', 'discarded']},
+                    'created_at': {'$lt': cutoff},
+                })
+                if r.deleted_count:
+                    logger.info('ai_build_plans GC dropped %s rows', r.deleted_count)
+            except Exception:
+                logger.exception('ai_build GC failed')
+
+        scheduler.add_job(
+            _ai_build_gc_job, 'interval', hours=6,
+            next_run_time=datetime.now(timezone.utc) + timedelta(minutes=20),
+        )
         scheduler.start()
         app.state.scheduler = scheduler
         logger.info('Trial-email scheduler started (hourly).')
