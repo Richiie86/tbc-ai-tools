@@ -12,6 +12,7 @@ import SecretsCard from './SecretsCard';
 import BirthdayRewardsCard from './BirthdayRewardsCard';
 import AppSettingsCard from './AppSettingsCard';
 import WebhookSettingsCard from './WebhookSettingsCard';
+import AutoFixCard from './AutoFixCard';
 
 export default function SettingsTab() {
   const [settings, setSettings] = useState(null);
@@ -86,6 +87,10 @@ export default function SettingsTab() {
 
       <Section icon={Webhook} title="Slack / Discord alert webhook">
         <WebhookSettingsCard />
+      </Section>
+
+      <Section icon={Sparkles} title="Autonomous Auto-Fix Loop">
+        <AutoFixCard />
       </Section>
 
       <Section icon={UserPlus} title="New user defaults">

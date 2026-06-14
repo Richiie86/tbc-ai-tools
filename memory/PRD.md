@@ -11,7 +11,17 @@ gold theme. Domain: **tbctools.org**.
 - **End user (member)** — Chats with the AI builder, manages plan, copies referral link.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
-## Implemented — Feb 2026 (latest session, batch 12)
+## Implemented — Feb 2026 (latest session, batch 13)
+- ✅ **Autonomous Auto-Fix Loop** — `auto_fix_loop_ext.py` + `AutoFixCard.jsx`:
+  - APScheduler job ticks every 5 min. Looks for critical, non-dismissed runtime errors from last 24h that have no `auto_fix_attempted_at` stamp.
+  - For each error: builds a structured prompt from the RCA / stack trace → calls AI Build `/plan` (cross-AI reviewed) → if `review.verdict == 'ship'` opens the PR; otherwise stamps the outcome (`review_ship_with_concerns`, `review_do_not_ship`, etc.) and skips.
+  - Optional 2nd-tier toggle **"Auto-merge to production"** (rose danger-zone styling) — when ON, sweeps clean PRs and squash-merges via GitHub API.
+  - Hard guards: per_day_cap (default 5), per_tick_cap (default 3), enable requires `project_id`, 400 on enable-without-project, master kill-switch in Settings.
+  - Endpoints: `GET/PUT /api/operator/auto-fix/config`, `POST /run-now`, `GET /status` (shows today's count + last 5 outcomes with PR links).
+  - All operator-only; auth gated; default OFF so existing flows untouched.
+- ✅ **GitHub-token toast deep-link** — when AI Build `/plan` 503s with "github_token not set", the toast now deep-links to `/operator?tab=settings` after a 1.1s grace, replacing the dead red message.
+
+## Implemented — Feb 2026 (previous session, batch 12)
 - ✅ **In-app "What's new" changelog popover** — `WhatsNewPopover.jsx` rendered between the credits chip and user avatar in the Navbar:
   - Bell icon with unread badge (1, 2, … 9+); badge clears on first open via `POST /api/changelog/mark-read`.
   - Backend `changelog_ext.py`: `GET /api/changelog` (logged-in user, computes per-user `unread_count` against `users.last_changelog_read_at`), `POST /api/changelog/mark-read`, `POST /api/changelog` (operator-only, manual entry), `DELETE /api/changelog/{id}` (operator-only).

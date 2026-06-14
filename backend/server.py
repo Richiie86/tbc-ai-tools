@@ -454,6 +454,23 @@ async def startup():
             _ai_learnings_gc_job, 'interval', hours=24,
             next_run_time=datetime.now(timezone.utc) + timedelta(minutes=15),
         )
+
+        # Autonomous Auto-Fix loop — runs every 5 minutes. Internally
+        # gated by `app_settings.auto_fix.enabled` so this is a no-op
+        # until the operator explicitly opts in.
+        async def _auto_fix_job():
+            try:
+                from auto_fix_loop_ext import run_auto_fix_tick
+                result = await run_auto_fix_tick()
+                if result.get('processed') or result.get('errors'):
+                    logger.info('auto-fix tick: %s', result)
+            except Exception:
+                logger.exception('auto-fix tick failed')
+
+        scheduler.add_job(
+            _auto_fix_job, 'interval', minutes=5,
+            next_run_time=datetime.now(timezone.utc) + timedelta(minutes=2),
+        )
         scheduler.start()
         app.state.scheduler = scheduler
         logger.info('Trial-email scheduler started (hourly).')
@@ -1884,6 +1901,8 @@ from ai_build_ext import router as ai_build_router
 app.include_router(ai_build_router)
 from changelog_ext import router as changelog_router
 app.include_router(changelog_router)
+from auto_fix_loop_ext import router as auto_fix_router
+app.include_router(auto_fix_router)
 # app.include_router(marketplace_router)  # Marketplace deferred — skipped per user.
 # CORS — proven FastAPI built-in CORSMiddleware first (handles cookie
 # credentials correctly, battle-tested). The `DynamicCORSMiddleware`

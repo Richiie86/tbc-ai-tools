@@ -1,0 +1,304 @@
+"""Autonomous Auto-Fix Loop — operator-opt-in self-healing.
+
+Wires the existing runtime-error pipeline directly into AI Build so that
+critical errors with no existing fix PR get planned + reviewed +
+PR'd automatically — and (optionally) auto-merged once GH checks pass.
+
+Schedule: every 5 minutes via APScheduler (registered in server.py
+alongside the nightly drift cron). Each tick:
+  1. Read `app_settings.auto_fix.*` config (default OFF).
+  2. Count plans created today; bail if >= per_day_cap.
+  3. Find critical `runtime_errors` from the last 24h with no
+     `auto_fix_plan_id` and dismissed_at=None.
+  4. For each (up to 3 per tick): call `_plan_one` → `_open_pr_one`,
+     stamp the error doc so we never retry it.
+  5. If `auto_merge` is on, sweep planned PRs whose `review.verdict==ship`
+     AND whose GitHub `mergeable_state` is `clean`, and merge them.
+
+All steps are best-effort with logging — a single failure never halts
+the loop, but the failing error gets `auto_fix_attempted_at` set so we
+don't retry it forever.
+"""
+from __future__ import annotations
+
+import logging
+import os
+from datetime import datetime, timedelta, timezone
+from typing import Optional
+
+import httpx
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
+
+from auth_utils import get_current_operator
+from db import db
+
+logger = logging.getLogger('tbc')
+
+router = APIRouter(prefix='/api/operator/auto-fix', tags=['auto-fix'])
+
+_DEFAULT_PER_TICK = 3
+_DEFAULT_PER_DAY = 5
+_DEFAULT_LOOKBACK_HOURS = 24
+_GITHUB_API = 'https://api.github.com'
+
+
+# ─── Settings helpers ─────────────────────────────────────────────────────
+async def _config() -> dict:
+    s = await db.app_settings.find_one({}) or {}
+    cfg = s.get('auto_fix') or {}
+    return {
+        'enabled': bool(cfg.get('enabled', False)),
+        'auto_merge': bool(cfg.get('auto_merge', False)),
+        'per_day_cap': int(cfg.get('per_day_cap') or _DEFAULT_PER_DAY),
+        'per_tick_cap': int(cfg.get('per_tick_cap') or _DEFAULT_PER_TICK),
+        'project_id': cfg.get('project_id'),
+    }
+
+
+async def _today_attempt_count() -> int:
+    since = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    return await db.ai_build_plans.count_documents({
+        'created_at': {'$gte': since},
+        'source': 'auto_fix',
+    })
+
+
+# ─── Reusable building blocks (small wrappers around ai_build_ext logic) ──
+async def _plan_one(err: dict, project_id: str, operator_id: str) -> Optional[str]:
+    """Generate a plan for the given error and return the plan_id (or None
+    on failure). Reuses the same /plan code path via direct call."""
+    from ai_build_ext import PlanRequest, plan
+
+    rca = err.get('rca') or {}
+    file_hint = rca.get('suggested_file') or ''
+    if not file_hint and err.get('stack'):
+        import re
+        m = re.search(r'(frontend/src/[^\s):]+|backend/[^\s):]+\.py)(:\d+)?', err['stack'])
+        if m:
+            file_hint = m.group(1) + (m.group(2) or '')
+
+    prompt_lines = [
+        'Auto-fix request for a production runtime error:',
+        '',
+        f'Error: {(err.get("message") or "")[:400]}',
+        f'Source: {err.get("source") or "frontend"}',
+        f'URL: {err.get("url") or ""}',
+        f'Likely file: {file_hint}' if file_hint else '',
+        f'Root cause (RCA): {rca.get("root_cause") or ""}' if rca.get('root_cause') else '',
+        f'Suggested change: {rca.get("suggested_change") or ""}' if rca.get('suggested_change') else '',
+        '',
+        'Keep the fix minimal, behaviour-preserving, and well-tested.',
+    ]
+    req = PlanRequest(project_id=project_id, prompt='\n'.join(l for l in prompt_lines if l))
+    fake_user = {'id': operator_id, 'sub': operator_id, 'role': 'operator'}
+    try:
+        resp = await plan(req, user=fake_user)
+    except Exception as e:
+        logger.warning('auto-fix plan failed for err=%s: %s', err.get('id'), e)
+        return None
+    # Stamp `source=auto_fix` on the plan so the daily cap counter finds it.
+    await db.ai_build_plans.update_one(
+        {'plan_id': resp.plan_id},
+        {'$set': {'source': 'auto_fix', 'runtime_error_id': err.get('id')}},
+    )
+    return resp.plan_id
+
+
+async def _open_pr_one(plan_id: str, operator_id: str) -> Optional[str]:
+    """Best-effort PR open. Returns pr_url or None."""
+    from ai_build_ext import OpenPRRequest, open_pr
+    fake_user = {'id': operator_id, 'sub': operator_id, 'role': 'operator'}
+    try:
+        resp = await open_pr(OpenPRRequest(plan_id=plan_id), user=fake_user)
+        return resp.get('pr_url')
+    except Exception as e:
+        logger.warning('auto-fix open_pr failed for plan=%s: %s', plan_id, e)
+        return None
+
+
+async def _operator_id() -> Optional[str]:
+    """The 'agent' that auto-fix actions are attributed to. Falls back to
+    any operator account if none is explicitly configured."""
+    settings = await db.app_settings.find_one({}) or {}
+    explicit = (settings.get('auto_fix') or {}).get('agent_operator_id')
+    if explicit:
+        return explicit
+    op = await db.users.find_one({'role': 'operator'}, {'id': 1})
+    return (op or {}).get('id')
+
+
+# ─── Core tick ────────────────────────────────────────────────────────────
+async def run_auto_fix_tick() -> dict:
+    """One pass of the loop. Returns `{processed, opened, skipped, errors}`."""
+    cfg = await _config()
+    out = {'enabled': cfg['enabled'], 'processed': 0, 'opened': 0, 'merged': 0,
+           'skipped_capped': False, 'errors': []}
+    if not cfg['enabled']:
+        return out
+    if not cfg['project_id']:
+        out['errors'].append('auto_fix.project_id not configured')
+        return out
+
+    today_count = await _today_attempt_count()
+    remaining_today = max(0, cfg['per_day_cap'] - today_count)
+    if remaining_today == 0:
+        out['skipped_capped'] = True
+        return out
+
+    operator_id = await _operator_id()
+    if not operator_id:
+        out['errors'].append('No operator account found to attribute auto-fix actions')
+        return out
+
+    since = datetime.now(timezone.utc) - timedelta(hours=_DEFAULT_LOOKBACK_HOURS)
+    cursor = db.runtime_errors.find({
+        'severity': 'critical',
+        'dismissed_at': None,
+        'created_at': {'$gte': since},
+        'auto_fix_attempted_at': None,
+    }).sort('updated_at', -1).limit(min(cfg['per_tick_cap'], remaining_today))
+
+    async for err in cursor:
+        out['processed'] += 1
+        stamp = datetime.now(timezone.utc)
+        plan_id = await _plan_one(err, cfg['project_id'], operator_id)
+        if not plan_id:
+            await db.runtime_errors.update_one(
+                {'id': err.get('id')},
+                {'$set': {'auto_fix_attempted_at': stamp, 'auto_fix_outcome': 'plan_failed'}},
+            )
+            out['errors'].append(f"plan_failed: {err.get('id')}")
+            continue
+
+        # Inspect plan's review verdict before opening a PR — autonomous
+        # mode should only PR when the cross-AI says `ship` (we ignore
+        # ship_with_concerns for autonomy to avoid noisy PRs).
+        plan_doc = await db.ai_build_plans.find_one({'plan_id': plan_id})
+        review = (plan_doc or {}).get('review') or {}
+        if review.get('verdict') != 'ship':
+            await db.runtime_errors.update_one(
+                {'id': err.get('id')},
+                {'$set': {
+                    'auto_fix_attempted_at': stamp,
+                    'auto_fix_outcome': f'review_{review.get("verdict") or "missing"}',
+                    'auto_fix_plan_id': plan_id,
+                }},
+            )
+            continue
+
+        pr_url = await _open_pr_one(plan_id, operator_id)
+        await db.runtime_errors.update_one(
+            {'id': err.get('id')},
+            {'$set': {
+                'auto_fix_attempted_at': stamp,
+                'auto_fix_outcome': 'pr_opened' if pr_url else 'pr_failed',
+                'auto_fix_plan_id': plan_id,
+                'auto_fix_pr_url': pr_url,
+            }},
+        )
+        if pr_url:
+            out['opened'] += 1
+
+    # Optional second sweep: auto-merge clean PRs.
+    if cfg['auto_merge']:
+        out['merged'] = await _auto_merge_sweep()
+    return out
+
+
+async def _auto_merge_sweep() -> int:
+    """Merge any auto-fix PRs whose GitHub `mergeable_state == clean`.
+    Returns count merged. Best-effort — never raises."""
+    settings = await db.payment_settings.find_one({}) or {}
+    gh_token = settings.get('github_token') or os.environ.get('GITHUB_TOKEN')
+    if not gh_token:
+        return 0
+    cursor = db.ai_build_plans.find({
+        'source': 'auto_fix',
+        'status': 'opened',
+        'merged_at': None,
+    }).limit(5)
+    merged = 0
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        async for plan_doc in cursor:
+            repo = plan_doc.get('repo')
+            number = plan_doc.get('pr_number')
+            if not (repo and number):
+                continue
+            try:
+                r = await client.get(
+                    f'{_GITHUB_API}/repos/{repo}/pulls/{number}',
+                    headers={'Authorization': f'Bearer {gh_token}',
+                             'Accept': 'application/vnd.github+json'},
+                )
+                if r.status_code != 200:
+                    continue
+                pr = r.json()
+                if pr.get('mergeable_state') != 'clean' or pr.get('merged'):
+                    continue
+                m = await client.put(
+                    f'{_GITHUB_API}/repos/{repo}/pulls/{number}/merge',
+                    headers={'Authorization': f'Bearer {gh_token}',
+                             'Accept': 'application/vnd.github+json'},
+                    json={'merge_method': 'squash'},
+                )
+                if m.status_code in (200, 201):
+                    await db.ai_build_plans.update_one(
+                        {'plan_id': plan_doc['plan_id']},
+                        {'$set': {'merged_at': datetime.now(timezone.utc), 'auto_merged': True}},
+                    )
+                    merged += 1
+            except Exception as e:
+                logger.warning('auto-merge PR #%s failed: %s', number, e)
+    return merged
+
+
+# ─── HTTP endpoints (operator-only) ───────────────────────────────────────
+class AutoFixConfig(BaseModel):
+    enabled: bool = False
+    auto_merge: bool = False
+    per_day_cap: int = Field(_DEFAULT_PER_DAY, ge=0, le=50)
+    per_tick_cap: int = Field(_DEFAULT_PER_TICK, ge=1, le=10)
+    project_id: Optional[str] = None
+
+
+@router.get('/config')
+async def get_config(op: dict = Depends(get_current_operator)):
+    return await _config()
+
+
+@router.put('/config')
+async def put_config(req: AutoFixConfig, op: dict = Depends(get_current_operator)):
+    if req.enabled and not req.project_id:
+        raise HTTPException(400, 'Choose a default project_id before enabling auto-fix.')
+    await db.app_settings.update_one(
+        {},
+        {'$set': {'auto_fix': req.model_dump()}},
+        upsert=True,
+    )
+    return await _config()
+
+
+@router.post('/run-now')
+async def run_now(op: dict = Depends(get_current_operator)):
+    """Manual one-shot tick — useful for testing or to drain the queue."""
+    return await run_auto_fix_tick()
+
+
+@router.get('/status')
+async def status(op: dict = Depends(get_current_operator)):
+    """Snapshot: today's attempt count, last 5 auto-fix outcomes."""
+    cfg = await _config()
+    today = await _today_attempt_count()
+    cursor = db.runtime_errors.find(
+        {'auto_fix_attempted_at': {'$ne': None}},
+        {'id': 1, 'message': 1, 'auto_fix_attempted_at': 1, 'auto_fix_outcome': 1, 'auto_fix_pr_url': 1},
+    ).sort('auto_fix_attempted_at', -1).limit(5)
+    recent = []
+    async for d in cursor:
+        d.pop('_id', None)
+        ts = d.get('auto_fix_attempted_at')
+        if ts and not isinstance(ts, str):
+            d['auto_fix_attempted_at'] = ts.isoformat()
+        recent.append(d)
+    return {'config': cfg, 'today_count': today, 'recent': recent}

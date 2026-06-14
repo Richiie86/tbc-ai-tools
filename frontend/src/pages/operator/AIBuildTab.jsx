@@ -101,7 +101,15 @@ export default function AIBuildTab() {
         toast.success(`Plan ready · ${data.files.length} file${data.files.length === 1 ? '' : 's'}`);
       }
     } catch (e) {
-      toast.error(e?.response?.data?.detail || 'Plan failed');
+      const msg = e?.response?.data?.detail || 'Plan failed';
+      // The github_token-missing case is the single most common 503 here;
+      // make the toast actionable instead of a dead red message.
+      if (/github_token/i.test(String(msg))) {
+        toast.error('GitHub token not set — opening Settings…', { duration: 2000 });
+        setTimeout(() => { window.location.href = '/operator?tab=settings'; }, 1100);
+      } else {
+        toast.error(msg);
+      }
     } finally {
       setPlanning(false);
     }
