@@ -11,7 +11,12 @@ gold theme. Domain: **tbctools.org**.
 - **End user (member)** — Chats with the AI builder, manages plan, copies referral link.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
-## Implemented — Feb 2026 (latest session, batch 17)
+## Implemented — Feb 2026 (latest session, batch 18)
+- ✅ **Landing footer "All systems operational" pill** — `StatusPill.jsx` fetches `/api/status` every 60s, renders a coloured-dot pill (`operational`=emerald, `degraded`=amber, `outage`=rose) next to the copyright. Pulses softly to signal live data. Click → `/status` page. Gracefully hides on fetch failure (no scary red dot during mid-deploy).
+- ✅ **Footer Company column** now also links to `Changelog` and `Status` (next to Contact / Privacy / Terms).
+- ✅ Live-verified: pill shows amber "Degraded performance" while AI test probes are failing in this preview (matches `/status` page overall verdict).
+
+## Implemented — Feb 2026 (previous session, batch 17)
 - ✅ **Self-heal status widget** on `/status` page footer — `status_ext.py` `_self_heal_stats()` adds `self_heal: {opened_24h, merged_24h, pending}` to the public status response (counts auto-fix / auto-fix-drift / auto-fix-health plan rows in the last 24h). Frontend `Status.jsx` renders an emerald-bordered widget above the footer with the wand icon + counts + amber clock for pending; only displays when there's actual activity (no clutter on quiet weeks).
 - ✅ **Public anonymous bell fix** — `WhatsNewPopover` now skips the authenticated `/api/changelog` fetch when no session cookie/token is present, silencing the harmless 401 in the browser console on `/changelog` and other public pages.
 - ✅ **Footer cross-link** to "What's new" added on the status page.

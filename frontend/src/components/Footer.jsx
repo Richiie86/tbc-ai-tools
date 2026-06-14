@@ -2,6 +2,7 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { Github, Twitter, Linkedin } from 'lucide-react';
 import Logo from './Logo';
+import StatusPill from './StatusPill';
 
 export default function Footer() {
   return (
@@ -36,6 +37,8 @@ export default function Footer() {
           <div className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500">Company</div>
           <ul className="space-y-2 text-sm">
             <li><Link to="/contact" className="text-slate-300 hover:text-tbc-300">Contact</Link></li>
+            <li><Link to="/changelog" className="text-slate-300 hover:text-tbc-300">Changelog</Link></li>
+            <li><Link to="/status" className="text-slate-300 hover:text-tbc-300">Status</Link></li>
             <li><a href="#" className="text-slate-300 hover:text-tbc-300">Privacy</a></li>
             <li><a href="#" className="text-slate-300 hover:text-tbc-300">Terms</a></li>
           </ul>
@@ -50,8 +53,11 @@ export default function Footer() {
           </div>
         </div>
       </div>
-      <div className="mx-auto mt-10 max-w-7xl border-t border-slate-800/60 px-5 pt-6 text-xs text-slate-500 flex flex-col sm:flex-row justify-between gap-2">
-        <div>© {new Date().getFullYear()} TradeBridge Club. All rights reserved.</div>
+      <div className="mx-auto mt-10 max-w-7xl border-t border-slate-800/60 px-5 pt-6 text-xs text-slate-500 flex flex-col sm:flex-row justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <span>© {new Date().getFullYear()} TradeBridge Club. All rights reserved.</span>
+          <StatusPill />
+        </div>
         <div className="flex items-center gap-3">
           <span>tbctools.org</span>
           <span className="text-slate-700">·</span>
