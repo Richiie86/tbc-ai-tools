@@ -248,8 +248,8 @@ export default function AIBuildTab() {
             <div className="mt-3 rounded border border-amber-500/40 bg-amber-500/[0.06] px-3 py-2 text-xs text-amber-200">
               <strong>Blocked paths ({plan.blocked.length}):</strong>
               <ul className="mt-1 space-y-0.5">
-                {plan.blocked.map((b, i) => (
-                  <li key={i} className="font-mono text-[11px]">{b.path} — {b.reason}</li>
+                {plan.blocked.map((b) => (
+                  <li key={b.path} className="font-mono text-[11px]">{b.path} — {b.reason}</li>
                 ))}
               </ul>
             </div>
@@ -258,7 +258,7 @@ export default function AIBuildTab() {
           {plan.files?.length > 0 && (
             <ul className="mt-4 space-y-2" data-testid="ai-build-files">
               {plan.files.map((f, i) => (
-                <li key={i} className="rounded-md border border-tbc-900/60 bg-ink-950 px-3 py-2 text-xs">
+                <li key={f.path} className="rounded-md border border-tbc-900/60 bg-ink-950 px-3 py-2 text-xs">
                   <div className="flex items-center justify-between gap-2">
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
