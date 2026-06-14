@@ -23,6 +23,15 @@ export default function WhatsNewPopover() {
   const markedRef = useRef(false);  // ensure mark-read fires once per open
 
   const load = useCallback(async () => {
+    // Skip the fetch when no auth cookie/header is present — the bell
+    // mounts inside the Navbar which renders on public pages too, and
+    // we'd otherwise emit a noisy 401 in the browser console.
+    if (!document.cookie.includes('session') && !localStorage.getItem('token')) {
+      setLoading(false);
+      setEntries([]);
+      setUnread(0);
+      return;
+    }
     try {
       const { data } = await api.get('/changelog?limit=10');
       setEntries(data?.entries || []);
