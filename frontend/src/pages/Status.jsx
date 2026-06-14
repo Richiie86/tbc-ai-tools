@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  CheckCircle2, AlertTriangle, XCircle, RefreshCw, Clock, Activity, Database, Brain,
+  CheckCircle2, AlertTriangle, XCircle, RefreshCw, Clock, Activity, Database, Brain, GitMerge, Wand2,
 } from 'lucide-react';
 import api from '../lib/api';
 
@@ -172,12 +172,38 @@ export default function Status() {
             </section>
 
             <footer className="border-t border-tbc-900/60 pt-4 text-[11px] text-tbc-200/50">
+              {data.self_heal && (data.self_heal.opened_24h || data.self_heal.merged_24h || data.self_heal.pending) ? (
+                <div
+                  data-testid="status-self-heal-widget"
+                  className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border border-emerald-500/30 bg-emerald-500/[0.04] px-4 py-3"
+                >
+                  <div className="flex items-center gap-2 text-emerald-200">
+                    <Wand2 className="h-4 w-4 text-emerald-300" />
+                    <span className="text-sm font-semibold">Self-healing · last 24h</span>
+                  </div>
+                  <span className="text-tbc-200/80">
+                    <Wand2 className="mr-1 inline h-3 w-3 text-tbc-300" />
+                    {data.self_heal.opened_24h} auto-PR{data.self_heal.opened_24h === 1 ? '' : 's'} opened
+                  </span>
+                  <span className="text-tbc-200/80">
+                    <GitMerge className="mr-1 inline h-3 w-3 text-emerald-300" />
+                    {data.self_heal.merged_24h} auto-merged
+                  </span>
+                  {data.self_heal.pending > 0 && (
+                    <span className="text-tbc-200/80">
+                      <Clock className="mr-1 inline h-3 w-3 text-amber-300" />
+                      {data.self_heal.pending} pending review
+                    </span>
+                  )}
+                </div>
+              ) : null}
               <p>
                 Snapshot taken {data.checked_at && <Relative iso={data.checked_at} />}.
                 Page auto-refreshes every 30 seconds.
               </p>
               <p className="mt-1">
-                Reporting an outage? <Link to="/contact" className="text-tbc-300 hover:text-tbc-100 underline">Contact support</Link>.
+                Reporting an outage? <Link to="/contact" className="text-tbc-300 hover:text-tbc-100 underline">Contact support</Link>{' · '}
+                <Link to="/changelog" className="text-tbc-300 hover:text-tbc-100 underline">What&apos;s new</Link>
               </p>
             </footer>
           </>

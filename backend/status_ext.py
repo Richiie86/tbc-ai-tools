@@ -109,6 +109,26 @@ def _overall(model_health: list[dict], crit_24h: int, db_ok: bool) -> str:
     return 'operational'
 
 
+async def _self_heal_stats() -> dict:
+    """Last-24h autonomy stats — auto-opened PRs, auto-merged PRs, and
+    pending plans. Surfaces the self-healing triangle (errors + drift +
+    health) directly on the public status page so visitors can see
+    that the app fixes itself."""
+    since = datetime.now(timezone.utc) - timedelta(hours=24)
+    src = {'$in': ['auto_fix', 'auto_fix_drift', 'auto_fix_health']}
+    opened_24h = await db.ai_build_plans.count_documents({
+        'source': src, 'status': 'opened',
+        'opened_at': {'$gte': since},
+    })
+    merged_24h = await db.ai_build_plans.count_documents({
+        'source': src, 'merged_at': {'$gte': since},
+    })
+    pending = await db.ai_build_plans.count_documents({
+        'source': src, 'status': 'opened', 'merged_at': None,
+    })
+    return {'opened_24h': opened_24h, 'merged_24h': merged_24h, 'pending': pending}
+
+
 @router.get('')
 async def status(response: Response):
     """One snapshot for the public status page.
@@ -121,6 +141,7 @@ async def status(response: Response):
     model_health = await _latest_per_model() if db_ok else []
     crit_24h = await _critical_count_24h() if db_ok else 0
     incidents = await _recent_incidents() if db_ok else []
+    self_heal = await _self_heal_stats() if db_ok else {'opened_24h': 0, 'merged_24h': 0, 'pending': 0}
     response.headers['Cache-Control'] = 'public, max-age=30'
     return {
         'overall': _overall(model_health, crit_24h, db_ok),
@@ -133,4 +154,5 @@ async def status(response: Response):
         'models': model_health,
         'critical_errors_24h': crit_24h,
         'incidents': incidents,
+        'self_heal': self_heal,
     }

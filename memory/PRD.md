@@ -11,7 +11,12 @@ gold theme. Domain: **tbctools.org**.
 - **End user (member)** — Chats with the AI builder, manages plan, copies referral link.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
-## Implemented — Feb 2026 (latest session, batch 16 — backlog sweep)
+## Implemented — Feb 2026 (latest session, batch 17)
+- ✅ **Self-heal status widget** on `/status` page footer — `status_ext.py` `_self_heal_stats()` adds `self_heal: {opened_24h, merged_24h, pending}` to the public status response (counts auto-fix / auto-fix-drift / auto-fix-health plan rows in the last 24h). Frontend `Status.jsx` renders an emerald-bordered widget above the footer with the wand icon + counts + amber clock for pending; only displays when there's actual activity (no clutter on quiet weeks).
+- ✅ **Public anonymous bell fix** — `WhatsNewPopover` now skips the authenticated `/api/changelog` fetch when no session cookie/token is present, silencing the harmless 401 in the browser console on `/changelog` and other public pages.
+- ✅ **Footer cross-link** to "What's new" added on the status page.
+
+## Implemented — Feb 2026 (previous session, batch 16 — backlog sweep)
 
 - ✅ **Public `/changelog` page** — `ChangelogPage.jsx` + new anonymous `GET /api/changelog/public`. Marketing-trust signal for tbctools.org with "What we've shipped" hero, per-entry cards (title, body, tag pill, "deploy" badge, timestamp), and footer links to `/status` + `/contact`.
 - ✅ **Operator changelog editor** — `ChangelogManagerCard.jsx` in Operator → Settings → "Changelog ('What's new')". Form for title (200 chars), body_md (8000 chars), optional tag, plus a recent-entries list with delete buttons. Reuses existing `POST` / `DELETE` endpoints.
