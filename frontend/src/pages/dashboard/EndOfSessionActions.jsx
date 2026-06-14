@@ -1,8 +1,9 @@
 import React, { useMemo } from 'react';
-import { Rocket, ShieldCheck, Wrench } from 'lucide-react';
+import { Rocket, ShieldCheck, Wrench, HeartPulse } from 'lucide-react';
 
 /**
- * Big end-of-session action bar — Deploy / Run Code Review / Fix Errors.
+ * Big end-of-session action bar — Deploy / Run Code Review /
+ * Run Health Check / Fix Errors.
  *
  * Mirrors the prominent button strip Emergent shows after an agent turn,
  * so the operator can act on a finished chat without scrolling up to find
@@ -11,7 +12,8 @@ import { Rocket, ShieldCheck, Wrench } from 'lucide-react';
  * from the assistant.
  *
  * The "Fix errors" button is conditional — only shows when we detect
- * error/exception/traceback signal in the last assistant message.
+ * error/exception/traceback signal in the last assistant message (or in
+ * a fenced Python traceback inside markdown).
  */
 export default function EndOfSessionActions({ messages, streaming, onAction }) {
   const visible = useMemo(() => {
@@ -21,14 +23,15 @@ export default function EndOfSessionActions({ messages, streaming, onAction }) {
     return last && last.role === 'assistant' && (last.content || '').trim().length > 0;
   }, [messages, streaming]);
 
-  // Heuristic: the operator should be able to one-click "fix errors" only
-  // when the AI clearly described an error/exception/traceback. Pure copy-
-  // hint guard — no API call.
+  // Heuristic: enable "Fix errors" when the assistant clearly described a
+  // failure. Catches plain prose AND fenced Python tracebacks inside
+  // markdown (```python Traceback (most recent call last)...```).
   const hasErrorSignal = useMemo(() => {
     if (!visible) return false;
-    const last = messages[messages.length - 1];
-    const text = (last?.content || '').toLowerCase();
-    return /(error|exception|traceback|stack ?trace|failed|crash|undefined|cannot read)/.test(text);
+    const text = (messages[messages.length - 1]?.content || '');
+    if (/```[\s\S]*?Traceback \(most recent call last\)[\s\S]*?```/i.test(text)) return true;
+    const lc = text.toLowerCase();
+    return /(error|exception|traceback|stack ?trace|failed|crash|undefined|cannot read)/.test(lc);
   }, [visible, messages]);
 
   if (!visible) return null;
@@ -54,6 +57,16 @@ export default function EndOfSessionActions({ messages, streaming, onAction }) {
       >
         <ShieldCheck className="h-4 w-4" />
         Run Code Review
+      </button>
+      <button
+        type="button"
+        onClick={() => onAction('health')}
+        data-testid="eos-action-health"
+        title="Probe the deployed project's public URL"
+        className="inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900 px-5 py-2 text-sm font-bold text-slate-100 shadow-md transition hover:bg-slate-800"
+      >
+        <HeartPulse className="h-4 w-4" />
+        Run Health Check
       </button>
       {hasErrorSignal && (
         <button

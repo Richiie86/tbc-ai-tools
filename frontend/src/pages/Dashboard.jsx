@@ -244,8 +244,18 @@ export default function Dashboard({ variant = 'tbc1' }) {
         ].filter(Boolean).join('\n');
         window.alert(lines || 'Review completed');
       } else if (kind === 'health') {
+        const t = toast.loading('Running health check…');
         const { data } = await api.post(`/operator/deploy/${projectId}/healthcheck`, {});
-        toast.success(`Health: ${data?.status || (data?.ok ? 'OK' : 'unknown')}`);
+        toast.dismiss(t);
+        const okText = data?.ok ? 'OK' : 'FAILED';
+        const lines = [
+          `Health check: ${data?.status || okText}`,
+          data?.url ? `URL: ${data.url}` : '',
+          data?.http_status ? `HTTP: ${data.http_status}` : '',
+          data?.latency_ms ? `Latency: ${data.latency_ms}ms` : '',
+          data?.detail ? `Detail: ${data.detail}` : '',
+        ].filter(Boolean).join('\n');
+        window.alert(lines || `Health: ${okText}`);
       }
     } catch (e) {
       // Specialised handling for the AI code-review ship-gate (412).

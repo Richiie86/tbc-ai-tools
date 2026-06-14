@@ -1,0 +1,41 @@
+{
+  "summary": "Iter28 FINAL verification pass — all 6 batches of work (iter22-iter28) verified end-to-end. Backend: 14/14 PASS in /app/backend/tests/test_iter28_final_verification.py covering public changelog (anonymous), changelog CRUD (operator), auto-fix include_health config toggle, /run-now response shape, healthcheck 404 path, AI Build history regression, operator stats regression, and TTL GC for ai_build_plans (25h-old discarded removed, opened preserved). Frontend Playwright verified: (1) public /changelog renders anonymously with 'What we've shipped' hero + System status + Contact footer links; (2) Operator URL-only single-source-of-truth tabs work — Security tab activates on FIRST click (state=active in 450ms) AND URL synced to ?tab=settings AND external pushState+popstate to ?tab=projects activates Projects tab; (3) ChangelogManagerCard ([data-testid='changelog-manager-card'], 'changelog-post', 'changelog-entries') present in Settings tab; (4) AutoFixCard with [data-testid='auto-fix-health-toggle'] renders in Settings tab; (5) Dashboard loads with Deploy/Review/Health buttons in header bar. EOS bar live click could not be exercised because no chats with assistant messages were available on this preview account and AI keys are empty (graceful degradation — code-reviewed instead).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/changelog (authenticated bell)", "issue": "Returns 401 to anonymous callers — correct by design, but it does fire on the public /changelog page (from the WhatsNewPopover bell mount). Cosmetic console noise only; the public page itself uses /changelog/public and renders fine. Consider gating the bell mount on isAuthenticated to silence the 401 in browser console for anonymous visitors."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter28_final_verification.py",
+    "/app/test_reports/pytest/iter28.xml"
+  ],
+  "action_items": [
+    "(OPTIONAL, cosmetic) Hide WhatsNewPopover bell when user is not authenticated so /api/changelog (auth) is not fetched on the public /changelog page (currently emits a harmless 401 in browser console).",
+    "(INFO) Spec referenced 'Settings tab' — UI labels it 'Security' but the URL value/key IS 'settings' (`?tab=settings`), and SettingsTab.jsx is the rendered component. This is consistent with the codebase; spec language vs UI label is the only delta. No fix needed.",
+    "(INFO) EOS bar live click flow (Health → 'Pick a deploy project first' toast / Health → window.alert with structured output) was NOT exercised live because the test operator's chat sidebar has no opened conversation with an assistant message and no AI key is configured to send a fresh message. Code-reviewed against EndOfSessionActions.jsx + Dashboard.jsx handleInlineAction — selectors, toast text, and alert format match the spec exactly."
+  ],
+  "critical_code_review_comments": [
+    "EndOfSessionActions.jsx (full file, 86 lines): clean. `visible` correctly gates on streaming=false + last.role==='assistant' + non-empty content. `hasErrorSignal` regex catches both prose and fenced Python tracebacks. All 4 testids correct: end-of-session-actions, eos-action-deploy, eos-action-review, eos-action-health, eos-action-fix. Fix button conditionally rendered.",
+    "changelog_ext.py /public (lines 70-84): truly anonymous (no Depends), strips _id, clamps limit to 30. Returns {entries[], count}. Operator-only POST (line 148) + DELETE (line 161) use get_current_operator. Authenticated GET (line 87) computes unread_count against users.last_changelog_read_at. Solid separation.",
+    "auto_fix_loop_ext.py _config (lines 47-57): include_health key correctly added with default False. run_auto_fix_tick (lines 393-403): include_health gate is correct — only invokes _auto_fix_health_sweep when cfg.get('include_health') is True; emits health_processed / health_opened keys ONLY when sweep runs. _auto_fix_health_sweep (lines 228-305) has 60-minute cooldown per project to avoid hammering, uses raw httpx (doesn't trip auth on /healthcheck), only opens PR when review.verdict=='ship'. AutoFixConfig pydantic model (line 459) includes include_health: bool = False — Put endpoint accepts and persists correctly (verified live).",
+    "Operator.jsx (lines 52-74): single-source-of-truth via searchParams confirmed live — no setActiveTab anywhere, activeTab is derived `searchParams.get('tab') || 'users'`. onTabChange uses setSearchParams with replace:true. Verified live: Security tab activates on FIRST click in 450ms despite the 8s stats poll. URL pushState+popstate also drives the UI correctly.",
+    "ChangelogPage.jsx: 110 lines, clean. Loads /changelog/public anonymously, handles loading/error/empty states, renders entries with title/body/tag/deploy badge/timestamp, footer links to /status + /contact. Verified live.",
+    "AutoFixCard.jsx (lines 176-190): auto-fix-health-toggle correctly wired to save({include_health: v}), disabled when !cfg.enabled OR saving. Health toggle is visually distinct (amber border) from the auto-merge toggle (rose border)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter28_final_verification.py (new — 14 tests, all passing)"
+  ],
+  "success_rate": {"backend": "100% (14/14)", "frontend": "100% on rendering + selectors + URL-tab single-click; EOS live click flow code-reviewed only (no chat data + no AI keys to exercise in preview)"},
+  "test_credentials": "Operator rac.investments.swe@gmail.com / 123Admin@98. Login redirects to /setup-2fa per RESET_OPERATOR_PASSWORD=true; cookie session works. No 2FA required this run.",
+  "seed_data_creation": "Inserted + cleaned 1 changelog test entry (TEST_iter28_*), 2 ai_build_plans (TEST_gc_old_*, TEST_gc_opened_*). All cleaned via finally/teardown blocks.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "iter28 regression suite at /app/backend/tests/test_iter28_final_verification.py — 14 tests, all passing. Covers public changelog, changelog CRUD, auto-fix include_health, healthcheck 404, AI Build history, operator stats, TTL GC for ai_build_plans. The EOS bar live flow (4 buttons + Health click → window.alert) has been code-reviewed but not exercised live — to exercise: send a chat message that returns an assistant reply containing error/traceback signal, then click eos-action-health with NO projectId selected → should show red toast 'Pick a deploy project first'; with a projectId selected → should fire POST /api/operator/deploy/{id}/healthcheck and surface result in window.alert. Requires AI key + at least one deploy project configured.",
+  "rca of the issue": "N/A — all iter28 scope verified passing. Live LLM/AI integration paths intentionally not exercised (no keys configured in this preview); all graceful-degradation paths confirmed cleanly in backend tests."
+}
