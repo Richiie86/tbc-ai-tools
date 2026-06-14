@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import api from '../../lib/api';
 import { Button } from '../../components/ui/button';
 import { Textarea } from '../../components/ui/textarea';
@@ -24,6 +25,7 @@ import {
  *     operator can see what was filtered.
  */
 export default function AIBuildTab() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [projects, setProjects] = useState([]);
   const [projectId, setProjectId] = useState('');
   const [prompt, setPrompt] = useState('');
@@ -32,6 +34,8 @@ export default function AIBuildTab() {
   const [plan, setPlan] = useState(null);
   const [history, setHistory] = useState([]);
   const [expandedFile, setExpandedFile] = useState(null);
+  const [sourceErrorId, setSourceErrorId] = useState(null);
+  const formRef = useRef(null);
 
   const loadProjects = useCallback(async () => {
     try {
@@ -52,6 +56,29 @@ export default function AIBuildTab() {
   }, []);
 
   useEffect(() => { loadProjects(); loadHistory(); }, [loadProjects, loadHistory]);
+
+  /** Consume `?prefill_prompt=…&prefill_error_id=…` (set by the Errors tab
+   *  "Generate fix PR" button). We pre-fill once, scroll the form into
+   *  view, then strip both params from the URL so a page-refresh doesn't
+   *  keep replaying the same prefill. The `tab=ai-build` param stays so
+   *  the operator lands here on refresh.
+   */
+  useEffect(() => {
+    const pre = searchParams.get('prefill_prompt');
+    const errId = searchParams.get('prefill_error_id');
+    if (!pre) return;
+    setPrompt(pre);
+    if (errId) setSourceErrorId(errId);
+    const next = new URLSearchParams(searchParams);
+    next.delete('prefill_prompt');
+    next.delete('prefill_error_id');
+    setSearchParams(next, { replace: true });
+    // Scroll after paint so the operator immediately sees the populated form.
+    requestAnimationFrame(() => {
+      formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const submit = async () => {
     if (!projectId) { toast.error('Pick a project first'); return; }
@@ -117,11 +144,19 @@ export default function AIBuildTab() {
       </div>
 
       {/* PROMPT FORM */}
-      <section className="rounded-xl border border-tbc-900/60 bg-ink-900/40 p-5">
+      <section ref={formRef} className="rounded-xl border border-tbc-900/60 bg-ink-900/40 p-5">
         <h3 className="flex items-center gap-2 text-sm font-bold text-tbc-100">
           <Wand2 className="h-4 w-4 text-tbc-300" />
           Describe the change
         </h3>
+        {sourceErrorId && (
+          <div
+            data-testid="ai-build-from-error-banner"
+            className="mt-2 rounded border border-emerald-500/30 bg-emerald-500/[0.05] px-3 py-1.5 text-[11px] text-emerald-200"
+          >
+            Pre-filled from runtime error <code className="font-mono">{sourceErrorId.slice(0, 16)}</code> · review the prompt below, edit if needed, then Plan changes.
+          </div>
+        )}
         <div className="mt-3 space-y-3">
           <div>
             <label className="text-[10px] uppercase tracking-wider text-tbc-300">Project</label>

@@ -11,7 +11,15 @@ gold theme. Domain: **tbctools.org**.
 - **End user (member)** — Chats with the AI builder, manages plan, copies referral link.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
-## Implemented — Feb 2026 (latest session, batch 9)
+## Implemented — Feb 2026 (latest session, batch 10)
+- ✅ **Errors → AI Build self-closing loop** — every runtime error row in the Operator → Errors tab now has a **"Generate fix PR"** button (`data-testid="error-fix-pr-btn-<id>"`). Clicking it:
+  - Extracts the file hint from `rca.suggested_file` if present, otherwise parses the first `frontend/src/...` or `backend/...` frame out of the stack trace.
+  - Builds a structured prompt: error message + source + URL + likely file + RCA root_cause + suggested_change.
+  - Deep-links to `/operator?tab=ai-build&prefill_prompt=<encoded>&prefill_error_id=<id>`.
+  - `AIBuildTab` consumes the params on mount (one-shot), pre-fills the textarea, shows a green "Pre-filled from runtime error X" banner, scrolls the form into view, and strips the prefill params from the URL so a page-refresh doesn't replay.
+  - Smoke-tested live in preview — 203-char prompt populated, banner visible, URL cleaned.
+
+## Implemented — Feb 2026 (previous session, batch 9)
 - ✅ **AI Build — natural-language → PR pipeline (operator-only)**
   - Backend: `ai_build_ext.py` exposes `POST /api/operator/ai-build/plan` (LLM generates a JSON patch plan), `POST /open-pr` (creates branch + commits + opens PR — no direct push to main, ever), `GET /history`, `DELETE /plan/{id}`.
   - **Hard server-side blocklist** (`BLOCKED_PATH_PATTERNS`): `.env`, `backend/auth*`, `backend/*payment*.py`, `backend/*stripe*.py`, `backend/*nowpayments*.py`, `backend/*paypal*.py`, `backend/models.py`, `secrets_ext.py`, `.git/`, `package-lock.json`, `yarn.lock`. Two-tier defence (context-build skip + post-LLM strip) against prompt-injection bypasses.

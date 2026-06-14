@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import api from '../../lib/api';
 import { Button } from '../../components/ui/button';
 import {
@@ -7,7 +8,7 @@ import {
 } from '../../components/ui/alert-dialog';
 import { toast } from 'sonner';
 import {
-  AlertOctagon, Loader2, RefreshCw, Trash2, EyeOff, Wand2, Code2,
+  AlertOctagon, Loader2, RefreshCw, Trash2, EyeOff, Wand2, Code2, GitBranch,
   ChevronDown, ChevronRight,
 } from 'lucide-react';
 
@@ -23,6 +24,7 @@ import {
  *   - "Dismiss" — hides from default view
  */
 export default function ErrorsTab() {
+  const navigate = useNavigate();
   const [errors, setErrors] = useState([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState({}); // id -> bool
@@ -101,6 +103,38 @@ export default function ErrorsTab() {
     window.location.href = url;
   };
 
+  /** Deep-link to AI Build with the error pre-filled as a fix prompt.
+   *  We prefer the RCA's suggested_file (highest-signal hint) but fall
+   *  back to parsing the first non-noise frame out of the stack trace.
+   *  The AIBuildTab consumes `?prefill_prompt=…` on mount and clears it.
+   */
+  const generateFixPR = (err) => {
+    let fileHint = err.rca?.suggested_file || '';
+    if (!fileHint && err.stack) {
+      // First frame that references our repo paths (frontend/src/... or backend/...)
+      const m = err.stack.match(/(frontend\/src\/[^\s):]+|backend\/[^\s):]+\.py)(:\d+)?/);
+      if (m) fileHint = m[1] + (m[2] || '');
+    }
+    const parts = [
+      `Fix this runtime error captured in production:`,
+      ``,
+      `Error: ${err.message?.slice(0, 400) || '(no message)'}`,
+      err.source ? `Source: ${err.source}` : '',
+      err.url ? `URL: ${err.url}` : '',
+      fileHint ? `Likely file: ${fileHint}` : '',
+      err.rca?.root_cause ? `Root cause (LLM RCA): ${err.rca.root_cause}` : '',
+      err.rca?.suggested_change ? `Suggested change: ${err.rca.suggested_change}` : '',
+      ``,
+      `Keep the fix minimal and behaviour-preserving.`,
+    ].filter(Boolean).join('\n');
+    const params = new URLSearchParams({
+      tab: 'ai-build',
+      prefill_prompt: parts,
+      prefill_error_id: err.id,
+    });
+    navigate(`/operator?${params.toString()}`);
+  };
+
   return (
     <div className="space-y-4" data-testid="errors-tab">
       <div className="flex items-start justify-between gap-3">
@@ -157,6 +191,7 @@ export default function ErrorsTab() {
               onDismiss={(opts) => dismiss(err, opts)}
               onDelete={() => setConfirmDelete(err)}
               onOpenInSandbox={() => openInSandbox(err)}
+              onGenerateFixPR={() => generateFixPR(err)}
             />
           ))}
         </ul>
@@ -203,7 +238,7 @@ export default function ErrorsTab() {
   );
 }
 
-function ErrorRow({ err, expanded, onToggle, running, onRunRCA, onDismiss, onDelete, onOpenInSandbox }) {
+function ErrorRow({ err, expanded, onToggle, running, onRunRCA, onDismiss, onDelete, onOpenInSandbox, onGenerateFixPR }) {
   const sourceColor =
     err.source === 'backend' ? 'text-violet-300 border-violet-500/30 bg-violet-500/[0.06]' :
     err.source === 'sandbox' ? 'text-amber-300 border-amber-500/30 bg-amber-500/[0.06]' :
@@ -323,6 +358,16 @@ function ErrorRow({ err, expanded, onToggle, running, onRunRCA, onDismiss, onDel
               className="h-7 border-tbc-900/60 bg-ink-900 text-tbc-100 hover:bg-ink-950"
             >
               <Code2 className="mr-1 h-3 w-3" />Open in Sandbox
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={onGenerateFixPR}
+              data-testid={`error-fix-pr-btn-${err.id}`}
+              title="Pre-fill AI Build with this error and open a PR"
+              className="h-7 border-emerald-500/40 bg-emerald-500/[0.06] text-emerald-200 hover:bg-emerald-500/[0.12]"
+            >
+              <GitBranch className="mr-1 h-3 w-3" />Generate fix PR
             </Button>
             <div className="ml-auto flex items-center gap-1">
               {err.rca?.confidence === 'high' && err.rca?.suggested_change && (
