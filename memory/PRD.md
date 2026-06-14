@@ -11,7 +11,17 @@ gold theme. Domain: **tbctools.org**.
 - **End user (member)** — Chats with the AI builder, manages plan, copies referral link.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
-## Implemented — Feb 2026 (latest session, batch 13)
+## Implemented — Feb 2026 (latest session, batch 14)
+- ✅ **Auto-fix loop extended to AI Test Bench drift** — `auto_fix_loop_ext.py`:
+  - New helper `_plan_one_from_drift()` shapes a drift-specific prompt (failed probes + likely fix areas: probe defs, fallback chain, system-prompt injection).
+  - New helper `_auto_fix_drift_sweep()` runs after the runtime-error sweep, shares the remaining daily-cap budget, plans + reviews + opens PRs identically.
+  - Each failing `ai_model_tests` row gets `auto_fix_attempted_at` + `auto_fix_outcome` + `auto_fix_plan_id` + `auto_fix_pr_url` stamps so it's never retried.
+  - Daily cap counter now includes both `source='auto_fix'` and `source='auto_fix_drift'`. Auto-merge sweep picks up both sources too.
+  - `/status` endpoint merges runtime-error and drift outcomes newest-first with `kind` field (`'error'` | `'drift'`).
+- ✅ **AutoFixCard drift badge** — recent activity rows now show an amber **"drift"** pill next to drift entries so the operator can tell at a glance which kind of fix is in flight.
+- ✅ Live-tested via injected synthetic data + `run-now`: 3 runtime errors + 3 drift alerts processed in one tick, all correctly stamped, no schema regression.
+
+## Implemented — Feb 2026 (previous session, batch 13)
 - ✅ **Autonomous Auto-Fix Loop** — `auto_fix_loop_ext.py` + `AutoFixCard.jsx`:
   - APScheduler job ticks every 5 min. Looks for critical, non-dismissed runtime errors from last 24h that have no `auto_fix_attempted_at` stamp.
   - For each error: builds a structured prompt from the RCA / stack trace → calls AI Build `/plan` (cross-AI reviewed) → if `review.verdict == 'ship'` opens the PR; otherwise stamps the outcome (`review_ship_with_concerns`, `review_do_not_ship`, etc.) and skips.

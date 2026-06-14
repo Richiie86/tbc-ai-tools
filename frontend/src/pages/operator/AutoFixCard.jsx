@@ -196,7 +196,12 @@ export default function AutoFixCard() {
           <ul className="mt-2 space-y-1" data-testid="auto-fix-recent">
             {status.recent.map((r) => (
               <li key={r.id} className="flex items-center justify-between gap-2 text-[11px]">
-                <span className="truncate text-tbc-100">{(r.message || '').slice(0, 80)}</span>
+                <span className="flex min-w-0 items-center gap-1.5">
+                  {r.kind === 'drift' && (
+                    <span className="shrink-0 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[9px] uppercase text-amber-300">drift</span>
+                  )}
+                  <span className="truncate text-tbc-100">{(r.message || '').slice(0, 80)}</span>
+                </span>
                 <span className="flex shrink-0 items-center gap-2">
                   <span className={`rounded px-1.5 py-0.5 text-[9px] uppercase ${r.auto_fix_outcome === 'pr_opened' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-amber-500/15 text-amber-300'}`}>
                     {r.auto_fix_outcome || '?'}

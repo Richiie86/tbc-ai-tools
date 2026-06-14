@@ -60,7 +60,7 @@ async def _today_attempt_count() -> int:
     since = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
     return await db.ai_build_plans.count_documents({
         'created_at': {'$gte': since},
-        'source': 'auto_fix',
+        'source': {'$in': ['auto_fix', 'auto_fix_drift']},
     })
 
 
@@ -90,7 +90,7 @@ async def _plan_one(err: dict, project_id: str, operator_id: str) -> Optional[st
         '',
         'Keep the fix minimal, behaviour-preserving, and well-tested.',
     ]
-    req = PlanRequest(project_id=project_id, prompt='\n'.join(l for l in prompt_lines if l))
+    req = PlanRequest(project_id=project_id, prompt='\n'.join(line for line in prompt_lines if line))
     fake_user = {'id': operator_id, 'sub': operator_id, 'role': 'operator'}
     try:
         resp = await plan(req, user=fake_user)
@@ -126,6 +126,102 @@ async def _operator_id() -> Optional[str]:
         return explicit
     op = await db.users.find_one({'role': 'operator'}, {'id': 1})
     return (op or {}).get('id')
+
+
+async def _plan_one_from_drift(test_doc: dict, project_id: str, operator_id: str) -> Optional[str]:
+    """Same shape as _plan_one but the prompt is shaped for a failing AI
+    Test Bench probe (model drift) rather than a runtime error."""
+    from ai_build_ext import PlanRequest, plan
+
+    model_id = test_doc.get('model') or 'unknown'
+    failed_probes = [p for p in (test_doc.get('probes') or []) if not p.get('pass')]
+    failure_lines = []
+    for p in failed_probes[:5]:
+        failure_lines.append(
+            f"  • probe `{p.get('name')}`: {p.get('error') or 'failed pass-check'} "
+            f"(latency {p.get('latency_ms', 0)}ms)"
+        )
+
+    prompt_lines = [
+        'Auto-fix request for a failing AI Test Bench probe (model drift):',
+        '',
+        f'Model: {model_id}',
+        f'Avg latency: {test_doc.get("avg_latency_ms", 0)}ms',
+        f'Failed probes ({len(failed_probes)}):',
+        *failure_lines,
+        '',
+        'Likely fix areas (check first):',
+        '  - `backend/ai_test_bench_ext.py` — probe definitions / pass-checks',
+        '  - `backend/server.py` chat fallback chain — provider may have moved',
+        '  - System-prompt drift in `backend/ai_learnings_*` injection',
+        '',
+        'Keep the fix minimal and provider-agnostic. Do not loosen the probe '
+        'just to make it pass — only fix real regressions.',
+    ]
+    req = PlanRequest(project_id=project_id, prompt='\n'.join(line for line in prompt_lines if line))
+    fake_user = {'id': operator_id, 'sub': operator_id, 'role': 'operator'}
+    try:
+        resp = await plan(req, user=fake_user)
+    except Exception as e:
+        logger.warning('auto-fix drift plan failed for test=%s: %s', test_doc.get('id'), e)
+        return None
+    await db.ai_build_plans.update_one(
+        {'plan_id': resp.plan_id},
+        {'$set': {'source': 'auto_fix_drift', 'model_test_id': test_doc.get('id')}},
+    )
+    return resp.plan_id
+
+
+async def _auto_fix_drift_sweep(cfg: dict, operator_id: str, budget: int) -> dict:
+    """Find recent failing `ai_model_tests` rows that haven't been auto-fixed
+    yet and run them through plan → review → PR (same gate as the runtime-
+    error path). Returns `{processed, opened, errors[]}`. `budget` is the
+    remaining daily cap shared with the runtime-error sweep."""
+    out = {'processed': 0, 'opened': 0, 'errors': []}
+    if budget <= 0:
+        return out
+    since = datetime.now(timezone.utc) - timedelta(hours=_DEFAULT_LOOKBACK_HOURS)
+    cursor = db.ai_model_tests.find({
+        'pass': False,
+        'created_at': {'$gte': since},
+        'auto_fix_attempted_at': None,
+    }).sort('created_at', -1).limit(min(cfg['per_tick_cap'], budget))
+    async for t in cursor:
+        out['processed'] += 1
+        stamp = datetime.now(timezone.utc)
+        plan_id = await _plan_one_from_drift(t, cfg['project_id'], operator_id)
+        if not plan_id:
+            await db.ai_model_tests.update_one(
+                {'id': t.get('id')},
+                {'$set': {'auto_fix_attempted_at': stamp, 'auto_fix_outcome': 'plan_failed'}},
+            )
+            out['errors'].append(f"drift_plan_failed: {t.get('id')}")
+            continue
+        plan_doc = await db.ai_build_plans.find_one({'plan_id': plan_id})
+        review = (plan_doc or {}).get('review') or {}
+        if review.get('verdict') != 'ship':
+            await db.ai_model_tests.update_one(
+                {'id': t.get('id')},
+                {'$set': {
+                    'auto_fix_attempted_at': stamp,
+                    'auto_fix_outcome': f'review_{review.get("verdict") or "missing"}',
+                    'auto_fix_plan_id': plan_id,
+                }},
+            )
+            continue
+        pr_url = await _open_pr_one(plan_id, operator_id)
+        await db.ai_model_tests.update_one(
+            {'id': t.get('id')},
+            {'$set': {
+                'auto_fix_attempted_at': stamp,
+                'auto_fix_outcome': 'pr_opened' if pr_url else 'pr_failed',
+                'auto_fix_plan_id': plan_id,
+                'auto_fix_pr_url': pr_url,
+            }},
+        )
+        if pr_url:
+            out['opened'] += 1
+    return out
 
 
 # ─── Core tick ────────────────────────────────────────────────────────────
@@ -200,6 +296,19 @@ async def run_auto_fix_tick() -> dict:
         if pr_url:
             out['opened'] += 1
 
+    # ─── Drift sweep ─────────────────────────────────────────────────
+    # Same plan→review→PR pipeline, but seeded from failing
+    # `ai_model_tests` rows (nightly drift alerts). Shares the remaining
+    # daily cap with the runtime-error sweep so we never exceed it.
+    remaining = max(0, cfg['per_day_cap'] - (await _today_attempt_count()))
+    drift = await _auto_fix_drift_sweep(cfg, operator_id, remaining)
+    out['drift_processed'] = drift['processed']
+    out['drift_opened'] = drift['opened']
+    if drift['errors']:
+        out['errors'].extend(drift['errors'])
+    out['opened'] += drift['opened']
+    out['processed'] += drift['processed']
+
     # Optional second sweep: auto-merge clean PRs.
     if cfg['auto_merge']:
         out['merged'] = await _auto_merge_sweep()
@@ -214,7 +323,7 @@ async def _auto_merge_sweep() -> int:
     if not gh_token:
         return 0
     cursor = db.ai_build_plans.find({
-        'source': 'auto_fix',
+        'source': {'$in': ['auto_fix', 'auto_fix_drift']},
         'status': 'opened',
         'merged_at': None,
     }).limit(5)
@@ -287,9 +396,10 @@ async def run_now(op: dict = Depends(get_current_operator)):
 
 @router.get('/status')
 async def status(op: dict = Depends(get_current_operator)):
-    """Snapshot: today's attempt count, last 5 auto-fix outcomes."""
+    """Snapshot: today's attempt count, last 5 outcomes (runtime + drift)."""
     cfg = await _config()
     today = await _today_attempt_count()
+
     cursor = db.runtime_errors.find(
         {'auto_fix_attempted_at': {'$ne': None}},
         {'id': 1, 'message': 1, 'auto_fix_attempted_at': 1, 'auto_fix_outcome': 1, 'auto_fix_pr_url': 1},
@@ -300,5 +410,27 @@ async def status(op: dict = Depends(get_current_operator)):
         ts = d.get('auto_fix_attempted_at')
         if ts and not isinstance(ts, str):
             d['auto_fix_attempted_at'] = ts.isoformat()
+        d['kind'] = 'error'
         recent.append(d)
-    return {'config': cfg, 'today_count': today, 'recent': recent}
+
+    drift_cursor = db.ai_model_tests.find(
+        {'auto_fix_attempted_at': {'$ne': None}},
+        {'id': 1, 'model': 1, 'auto_fix_attempted_at': 1, 'auto_fix_outcome': 1, 'auto_fix_pr_url': 1},
+    ).sort('auto_fix_attempted_at', -1).limit(5)
+    async for d in drift_cursor:
+        d.pop('_id', None)
+        ts = d.get('auto_fix_attempted_at')
+        if ts and not isinstance(ts, str):
+            d['auto_fix_attempted_at'] = ts.isoformat()
+        recent.append({
+            'id': d.get('id'),
+            'message': f'Drift: {d.get("model")}',
+            'auto_fix_attempted_at': d.get('auto_fix_attempted_at'),
+            'auto_fix_outcome': d.get('auto_fix_outcome'),
+            'auto_fix_pr_url': d.get('auto_fix_pr_url'),
+            'kind': 'drift',
+        })
+
+    # Merge both lists newest-first.
+    recent.sort(key=lambda r: r.get('auto_fix_attempted_at') or '', reverse=True)
+    return {'config': cfg, 'today_count': today, 'recent': recent[:10]}
