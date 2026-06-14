@@ -34,11 +34,15 @@ What is NOT exported
 """
 from __future__ import annotations
 
+import json
 import logging
-from datetime import datetime, timezone
+import os
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from auth_utils import get_current_operator
@@ -188,3 +192,187 @@ async def import_backup(
         'written': counts,
         'restored_at': datetime.now(timezone.utc).isoformat(),
     }
+
+
+# ---------- Local-disk snapshot rotation (30-day history) ----------------
+#
+# A daily-rotated copy of `/export` written to local disk so the operator
+# can restore from any of the last 30 days without manually re-pasting
+# JSON. Storage is at `/app/data/backups/` so it survives container
+# restarts but lives inside the persistent volume.
+#
+# A scheduled job (registered in server.py) calls `_run_snapshot()` once
+# a day. The operator can also trigger one manually from the UI.
+
+_BACKUP_DIR = Path(os.environ.get('BACKUP_SNAPSHOT_DIR', '/app/data/backups'))
+_BACKUP_RETENTION_DAYS = int(os.environ.get('BACKUP_SNAPSHOT_RETENTION_DAYS', '30'))
+
+
+def _ensure_backup_dir() -> Path:
+    _BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    return _BACKUP_DIR
+
+
+async def _build_snapshot_payload(operator_email: str | None = None) -> dict:
+    """Re-uses the same shape as `/export` so a snapshot file is a drop-in
+    replacement for a freshly downloaded backup. Kept inline rather than
+    delegating to the endpoint so the scheduled job doesn't need an HTTP
+    round-trip."""
+    deploy_projects = [_no_id(d) async for d in db.deploy_projects.find({})]
+    promo_codes     = [_no_id(d) async for d in db.promo_codes.find({})]
+    kyc_bypass      = [_no_id(d) async for d in db.kyc_bypass_emails.find({})]
+    vanished        = [_no_id(d) async for d in db.vanished_emails.find({})]
+    app_settings    = [_no_id(d) async for d in db.app_settings.find({})]
+    payment_doc     = await db.settings.find_one({'_id': 'payment_settings'}) or {}
+    payment_safe    = _strip_secrets(payment_doc) if payment_doc else {}
+    return {
+        'version': 1,
+        'exported_at': datetime.now(timezone.utc).isoformat(),
+        'exported_by': operator_email or 'scheduler',
+        'counts': {
+            'deploy_projects': len(deploy_projects),
+            'promo_codes': len(promo_codes),
+            'kyc_bypass_emails': len(kyc_bypass),
+            'vanished_emails': len(vanished),
+            'app_settings': len(app_settings),
+        },
+        'deploy_projects': deploy_projects,
+        'promo_codes': promo_codes,
+        'kyc_bypass_emails': kyc_bypass,
+        'vanished_emails': vanished,
+        'app_settings': app_settings,
+        'payment_settings_no_secrets': payment_safe,
+    }
+
+
+def _list_snapshots() -> list[dict]:
+    """Returns the snapshot files newest-first with `{id, created_at,
+    size_bytes}`. `id` is the filename minus suffix — used by the
+    download endpoint to look the file back up safely (no path
+    traversal)."""
+    d = _ensure_backup_dir()
+    out = []
+    for p in sorted(d.glob('snapshot-*.json'), reverse=True):
+        try:
+            stat = p.stat()
+            out.append({
+                'id': p.stem,
+                'filename': p.name,
+                'created_at': datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+                'size_bytes': stat.st_size,
+            })
+        except OSError:
+            continue
+    return out
+
+
+def _prune_old_snapshots() -> int:
+    """Drop any snapshot file older than the retention window. Returns
+    the number of files removed."""
+    d = _ensure_backup_dir()
+    cutoff = datetime.now(timezone.utc) - timedelta(days=_BACKUP_RETENTION_DAYS)
+    removed = 0
+    for p in d.glob('snapshot-*.json'):
+        try:
+            mtime = datetime.fromtimestamp(p.stat().st_mtime, tz=timezone.utc)
+            if mtime < cutoff:
+                p.unlink()
+                removed += 1
+        except OSError:
+            continue
+    return removed
+
+
+async def _run_snapshot(operator_email: str | None = None) -> dict:
+    """Write a snapshot to disk + prune old ones. Returns metadata about
+    the new file. Used by both the scheduler job and the manual UI."""
+    payload = await _build_snapshot_payload(operator_email)
+    stamp = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H-%M-%SZ')
+    fname = f'snapshot-{stamp}.json'
+    path = _ensure_backup_dir() / fname
+    path.write_text(json.dumps(payload, indent=2, default=str))
+    pruned = _prune_old_snapshots()
+    logger.info('backup snapshot written %s (%s bytes); pruned %s old files',
+                path.name, path.stat().st_size, pruned)
+    return {
+        'id': path.stem,
+        'filename': path.name,
+        'size_bytes': path.stat().st_size,
+        'created_at': datetime.now(timezone.utc).isoformat(),
+        'pruned': pruned,
+        'retention_days': _BACKUP_RETENTION_DAYS,
+    }
+
+
+@router.get('/snapshots')
+async def list_snapshots(_op: dict = Depends(get_current_operator)):
+    """List on-disk snapshots (newest first). 30-day rolling window."""
+    return {
+        'snapshots': _list_snapshots(),
+        'retention_days': _BACKUP_RETENTION_DAYS,
+        'directory': str(_BACKUP_DIR),
+    }
+
+
+@router.post('/snapshots')
+async def create_snapshot(op: dict = Depends(get_current_operator)):
+    """Force a snapshot now (in addition to the daily scheduled one).
+    Useful right before a risky import-replace or during a migration."""
+    meta = await _run_snapshot(op.get('email'))
+    return meta
+
+
+@router.get('/snapshots/{snap_id}/download')
+async def download_snapshot(snap_id: str, _op: dict = Depends(get_current_operator)):
+    """Stream a snapshot file back to the operator. `snap_id` is the
+    filename stem (no .json) — we resolve it through pathlib so a path-
+    traversal attempt can never escape the backup directory."""
+    # Strip anything other than the snapshot stem chars to be safe.
+    safe_id = snap_id.replace('..', '').replace('/', '').strip()
+    path = (_ensure_backup_dir() / f'{safe_id}.json').resolve()
+    try:
+        path.relative_to(_BACKUP_DIR.resolve())
+    except ValueError:
+        raise HTTPException(400, 'invalid snapshot id')
+    if not path.is_file():
+        raise HTTPException(404, 'snapshot not found')
+    return FileResponse(
+        path,
+        media_type='application/json',
+        filename=f'{safe_id}.json',
+    )
+
+
+@router.post('/snapshots/{snap_id}/restore')
+async def restore_snapshot(
+    snap_id: str,
+    mode: str = 'merge',
+    op: dict = Depends(get_current_operator),
+):
+    """Restore a saved snapshot file by id. `mode` follows the same
+    semantics as `/import` (merge | replace). Operator-only."""
+    if mode not in ('merge', 'replace'):
+        raise HTTPException(400, "mode must be 'merge' or 'replace'")
+    safe_id = snap_id.replace('..', '').replace('/', '').strip()
+    path = (_ensure_backup_dir() / f'{safe_id}.json').resolve()
+    try:
+        path.relative_to(_BACKUP_DIR.resolve())
+    except ValueError:
+        raise HTTPException(400, 'invalid snapshot id')
+    if not path.is_file():
+        raise HTTPException(404, 'snapshot not found')
+    try:
+        payload = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError) as e:
+        raise HTTPException(500, f'could not read snapshot: {e}')
+    # Reuse the same import pipeline as the JSON-paste flow.
+    req = ImportRequest(
+        version=payload.get('version', 1),
+        deploy_projects=payload.get('deploy_projects', []),
+        promo_codes=payload.get('promo_codes', []),
+        kyc_bypass_emails=payload.get('kyc_bypass_emails', []),
+        vanished_emails=payload.get('vanished_emails', []),
+        app_settings=payload.get('app_settings', []),
+        mode=mode,
+    )
+    return await import_backup(req, op)

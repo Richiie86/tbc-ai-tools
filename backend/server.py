@@ -490,6 +490,23 @@ async def startup():
             _ai_build_gc_job, 'interval', hours=6,
             next_run_time=datetime.now(timezone.utc) + timedelta(minutes=20),
         )
+
+        # Daily operator backup snapshot — writes a JSON file to
+        # /app/data/backups/ and prunes anything older than 30 days.
+        # First run sits 7 min out so it doesn't compete with the other
+        # boot-time jobs for the event loop.
+        async def _backup_snapshot_job():
+            try:
+                from operator_backup_ext import _run_snapshot
+                meta = await _run_snapshot('scheduler')
+                logger.info('backup snapshot job ok: %s', meta.get('filename'))
+            except Exception:
+                logger.exception('backup snapshot job failed')
+
+        scheduler.add_job(
+            _backup_snapshot_job, 'interval', hours=24,
+            next_run_time=datetime.now(timezone.utc) + timedelta(minutes=7),
+        )
         scheduler.start()
         app.state.scheduler = scheduler
         logger.info('Trial-email scheduler started (hourly).')

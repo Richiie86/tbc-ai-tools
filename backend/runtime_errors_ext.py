@@ -153,19 +153,53 @@ async def _maybe_page_operator(doc: dict) -> None:
 # ---------- public ingest ----------
 
 # Per-IP throttle. In-memory dict — fine for a single-pod preview. For
-# multi-pod prod we'd swap in Redis, but the worst case is a noisy
-# attacker spamming `runtime_errors` and we deal with that in the read
-# path with a hash-based dedupe.
+# multi-pod prod we use Redis (configured via REDIS_URL env var). When
+# REDIS_URL is set we INCR + EXPIRE per IP per minute. If the Redis call
+# fails for any reason we fall back to the in-memory bucket so the
+# ingest endpoint never hard-fails on a rate-limit lookup.
 _RATE_BUCKET: dict[str, list[float]] = defaultdict(list)
 _RATE_WINDOW_S = 60
 _RATE_MAX = 30  # 30 reports / minute / IP
 
+_REDIS_URL = os.environ.get('REDIS_URL')
+_redis_client = None  # lazy-init
 
-def _rate_limited(ip: str) -> bool:
+
+async def _get_redis():
+    """Lazy-init the shared Redis client. Returns None if no REDIS_URL is
+    configured (in which case callers fall back to the in-memory bucket).
+    """
+    global _redis_client
+    if not _REDIS_URL:
+        return None
+    if _redis_client is not None:
+        return _redis_client
+    try:
+        from redis.asyncio import from_url
+        _redis_client = from_url(
+            _REDIS_URL,
+            socket_connect_timeout=2,
+            socket_timeout=2,
+            decode_responses=True,
+        )
+        # Ping once so we surface mis-configured URLs at first use rather
+        # than on every request.
+        await _redis_client.ping()
+        logger.info('runtime-errors rate-limiter: Redis backend ready (%s)', _REDIS_URL.split('@')[-1][:40])
+    except Exception as e:  # noqa: BLE001
+        logger.warning('Redis rate-limiter unavailable, falling back to in-memory: %s', e)
+        _redis_client = None
+        # Stop trying for the rest of this process — REDIS_URL is bad.
+        # (A restart will retry; that's the right granularity.)
+        globals()['_REDIS_URL'] = None
+    return _redis_client
+
+
+def _rate_limited_inmem(ip: str) -> bool:
+    """Local fallback — single-pod accurate, multi-pod undercounts."""
     import time
     now = time.time()
     bucket = _RATE_BUCKET[ip]
-    # Drop stale entries
     bucket[:] = [t for t in bucket if now - t < _RATE_WINDOW_S]
     if len(bucket) >= _RATE_MAX:
         return True
@@ -173,13 +207,36 @@ def _rate_limited(ip: str) -> bool:
     return False
 
 
+async def _rate_limited(ip: str) -> bool:
+    """Cross-pod-correct rate limiter. Tries Redis first; falls back to
+    the in-memory bucket if Redis is unset or unreachable so the ingest
+    endpoint stays available even when Vercel KV is having a bad day.
+    """
+    client = await _get_redis()
+    if client is None:
+        return _rate_limited_inmem(ip)
+    try:
+        # Fixed-window counter: key expires after _RATE_WINDOW_S, so the
+        # worst case is a 2x burst across a boundary — acceptable for
+        # spam protection. Sliding-window would need a sorted set + ZADD
+        # and the extra round-trips aren't worth it here.
+        key = f'rl:rt_err:{ip}'
+        count = await client.incr(key)
+        if count == 1:
+            await client.expire(key, _RATE_WINDOW_S)
+        return count > _RATE_MAX
+    except Exception as e:  # noqa: BLE001
+        logger.warning('Redis rate-limit call failed, falling back to in-memory: %s', e)
+        return _rate_limited_inmem(ip)
+
+
 @public_router.post('', status_code=202)
 async def ingest(report: ErrorReport, request: Request):
     """Open ingest — frontend ErrorBoundary calls this. Rate-limited by
-    IP. Stores raw + signature so the operator dashboard can group by
-    fingerprint."""
+    IP (Redis when REDIS_URL is set, in-memory otherwise). Stores raw +
+    signature so the operator dashboard can group by fingerprint."""
     ip = request.client.host if request.client else 'unknown'
-    if _rate_limited(ip):
+    if await _rate_limited(ip):
         # Soft-fail — we don't want to break the page rendering an error
         # toast because we rate-limited the error report itself.
         return {'accepted': False, 'reason': 'rate_limited'}

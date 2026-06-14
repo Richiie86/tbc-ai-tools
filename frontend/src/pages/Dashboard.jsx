@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import api, { streamChat } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
@@ -16,22 +16,8 @@ import { OutOfCreditsDialog } from './dashboard/OutOfCreditsDialog';
 import { DashboardGuideTour } from './dashboard/DashboardGuideTour';
 import { PostAiDeploySuggestion } from './dashboard/PostAiDeploySuggestion';
 import { useInlineChatActions } from './dashboard/useInlineChatActions';
-
-// Anything within this many pixels from the bottom counts as "still at the
-// end" so a stray scroll-wheel nudge doesn't unstick the stream. Module-level
-// so the constant isn't reallocated every render.
-const STICK_TO_BOTTOM_THRESHOLD_PX = 80;
-
-function sidebarTimeLabel(iso) {
-  try {
-    const d = new Date(iso);
-    const diffH = (Date.now() - d.getTime()) / 36e5;
-    if (diffH < 24) return 'Today';
-    if (diffH < 48) return 'Yesterday';
-    if (diffH < 24 * 7) return 'This week';
-    return 'Older';
-  } catch { return ''; }
-}
+import { useStickToBottom } from './dashboard/useStickToBottom';
+import { useChatSessionsCrud } from './dashboard/useChatSessionsCrud';
 
 export default function Dashboard({ variant = 'tbc1' }) {
   const { user, logout, refresh } = useAuth();
@@ -42,7 +28,6 @@ export default function Dashboard({ variant = 'tbc1' }) {
   const basePath = isTbc2 ? '/tbc2' : '/dashboard';
   const brandTitle = isTbc2 ? 'TBC2 AI Control' : 'TBC AI Tools';
 
-  const [sessions, setSessions] = useState([]);
   const [currentId, setCurrentId] = useState(paramSession || null);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
@@ -57,49 +42,51 @@ export default function Dashboard({ variant = 'tbc1' }) {
   // Show the "AI is done — redeploy?" banner each time the AI finishes
   // a stream. The operator can dismiss; it re-shows on the next reply.
   const [showDeploySuggest, setShowDeploySuggest] = useState(false);
-  // "Stick to bottom" = follow new tokens. Flips OFF the moment the user
-  // scrolls up so they can read older messages without the stream yanking
-  // them back; flips back ON when they scroll to the bottom themselves or
-  // click the floating "Jump to latest" button.
-  const [stickToBottom, setStickToBottom] = useState(true);
-  const scrollRef = useRef(null);
   const taRef = useRef(null);
   const streamTextRef = useRef('');
 
-  const loadSessions = useCallback(async () => {
-    try {
-      const { data } = await api.get('/chat/sessions', { params: { variant } });
-      setSessions(data);
-    } catch (err) { console.error('Failed to load sessions', err); }
-  }, [variant]);
+  // Session CRUD + grouped sidebar list — extracted into a hook so this
+  // file stays focused on streaming + rendering.
+  const { loadSessions, newChat, deleteSession, renameSession, grouped } =
+    useChatSessionsCrud({
+      variant, basePath, navigate,
+      currentId, setCurrentId,
+      setMessages, setStreamText, setInput,
+      model, taRef,
+    });
 
-  const loadMessages = useCallback(async (id) => {
-    try {
-      const { data } = await api.get(`/chat/sessions/${id}/messages`);
-      setMessages(data.messages || []);
-      setModel(data.session?.model || 'claude-opus-4-7');
-    } catch (e) {
-      console.error('Failed to load messages', e);
-      toast.error('Could not load session');
-      navigate('/dashboard');
+  // Stick-to-bottom scroll behaviour — also lifted into a hook.
+  const { scrollRef, stickToBottom, onScrollContainer, jumpToLatest } =
+    useStickToBottom([messages, streamText]);
+
+  // Load messages when session changes
+  useEffect(() => {
+    let cancelled = false;
+    async function loadMessages(id) {
+      try {
+        const { data } = await api.get(`/chat/sessions/${id}/messages`);
+        if (cancelled) return;
+        setMessages(data.messages || []);
+        setModel(data.session?.model || 'claude-opus-4-7');
+      } catch (e) {
+        console.error('Failed to load messages', e);
+        toast.error('Could not load session');
+        navigate('/dashboard');
+      }
     }
-  }, [navigate]);
+    if (currentId) loadMessages(currentId);
+    else setMessages([]);
+    return () => { cancelled = true; };
+  }, [currentId, navigate]);
 
-  // Load models + sessions on mount/variant change
+  // Load models list on mount/variant change
   useEffect(() => {
     api.get('/chat/models').then((r) => setModels(r.data)).catch((err) => {
       // models endpoint is best-effort — log so we can spot upstream outages
       // in the browser console without breaking the chat UI.
       console.warn('Failed to load chat models', err);
     });
-    loadSessions();
-  }, [variant, loadSessions]);
-
-  // Load messages when session changes
-  useEffect(() => {
-    if (currentId) loadMessages(currentId);
-    else setMessages([]);
-  }, [currentId, loadMessages]);
+  }, [variant]);
 
   // Sync sessionId from URL — functional setState so we don't depend on
   // `currentId` (would re-fire every time it changed and create a loop).
@@ -108,90 +95,12 @@ export default function Dashboard({ variant = 'tbc1' }) {
     setCurrentId((prev) => (paramSession !== prev ? paramSession : prev));
   }, [paramSession]);
 
-  // Anything within this many pixels from the bottom counts as "still at
-  // the end" so a stray scroll-wheel nudge doesn't unstick the stream.
-  // Lifted to a named constant per code-review #4.
-
-  // Conditional auto-scroll: only follow the bottom when the user is already
-  // pinned there. Once they scroll up `stickToBottom` flips off (see the
-  // onScroll handler on the scroller) and we leave their viewport alone.
-  useEffect(() => {
-    if (!stickToBottom) return;
-    const el = scrollRef.current;
-    if (el) requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
-  }, [messages, streamText, stickToBottom]);
-
-  // Detect user scroll position to toggle the follow flag.
-  const onScrollContainer = useCallback((e) => {
-    const el = e.currentTarget;
-    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_TO_BOTTOM_THRESHOLD_PX;
-    setStickToBottom(atBottom);
-  }, []);
-
-  const jumpToLatest = useCallback(() => {
-    const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-    setStickToBottom(true);
-  }, []);
-
   // Inline "Quick actions" handler used by assistant message bubbles
-  // and the End-of-Session bar. Lifted out to its own hook to keep
-  // Dashboard.jsx tractable — behaviour is identical.
+  // and the End-of-Session bar.
   const handleInlineAction = useInlineChatActions({ navigate, messages, currentId });
 
   // Mirror live stream text so the final-message commit doesn't lose the tail.
   useEffect(() => { streamTextRef.current = streamText; }, [streamText]);
-
-  async function newChat() {
-    // Reset UI first so the empty-state shows immediately even on slow connections.
-    setMessages([]);
-    setStreamText('');
-    setInput('');
-    try {
-      const { data } = await api.post('/chat/sessions', {
-        title: 'New Chat',
-        model,
-        variant,
-      });
-      // Prepend so it sits at the top of "Today" in the sidebar.
-      setSessions((prev) => [data, ...prev.filter((s) => s.id !== data.id)]);
-      setCurrentId(data.id);
-      navigate(`${basePath}/${data.id}`);
-      setTimeout(() => taRef.current?.focus(), 100);
-    } catch (e) {
-      // Fallback to the lazy-create flow so chatting still works even if the API hiccups.
-      console.error('Create session failed, falling back to lazy create', e);
-      toast.error('Could not create session — type a message to start one');
-      setCurrentId(null);
-      navigate(basePath);
-      setTimeout(() => taRef.current?.focus(), 100);
-    }
-  }
-
-  async function deleteSession(id, e) {
-    e?.stopPropagation();
-    try {
-      await api.delete(`/chat/sessions/${id}`);
-      toast.success('Chat deleted');
-      setSessions((s) => s.filter((x) => x.id !== id));
-      if (currentId === id) { setCurrentId(null); setMessages([]); navigate(basePath); }
-    } catch (err) {
-      console.error('Chat delete failed', err);
-      toast.error('Could not delete');
-    }
-  }
-
-  async function renameSession(id) {
-    const title = window.prompt('Rename chat:');
-    if (!title) return;
-    try {
-      await api.patch(`/chat/sessions/${id}`, { title });
-      setSessions((s) => s.map((x) => x.id === id ? { ...x, title } : x));
-    } catch (err) {
-      console.error('Rename failed', err);
-      toast.error('Rename failed');
-    }
-  }
 
   async function send() {
     const text = input.trim();
@@ -205,7 +114,8 @@ export default function Dashboard({ variant = 'tbc1' }) {
     }
     setInput('');
     setStreaming(true);
-    setStreamText('');    setShowDeploySuggest(false);
+    setStreamText('');
+    setShowDeploySuggest(false);
     // Optimistic user message
     const userMsg = { id: 'tmp-' + Date.now(), role: 'user', content: text };
     setMessages((m) => [...m, userMsg]);
@@ -218,8 +128,6 @@ export default function Dashboard({ variant = 'tbc1' }) {
           setStreamText((t) => t + (ev.content || ''));
         } else if (ev.type === 'fallback_used') {
           // The primary model failed but a fallback caught the stream.
-          // Surface a small "I retried with X after Y failed" pill — uses
-          // sonner so it lives only as long as the user reads it.
           const failed = (ev.attempted || []).slice(-1)[0] || 'primary model';
           const finalModel = ev.final_model || 'fallback';
           toast.info(`Retried with ${finalModel} after ${failed} failed`, {
@@ -258,15 +166,6 @@ export default function Dashboard({ variant = 'tbc1' }) {
       setStreamText('');
     }
   }
-
-  const grouped = useMemo(() => {
-    const map = {};
-    for (const s of sessions) {
-      const k = sidebarTimeLabel(s.updated_at);
-      (map[k] ||= []).push(s);
-    }
-    return map;
-  }, [sessions]);
 
   return (
     <div className="flex h-screen overflow-hidden bg-ink-950 text-slate-100">

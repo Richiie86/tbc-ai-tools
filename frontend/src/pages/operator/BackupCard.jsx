@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Loader2, Download, Upload, Database, AlertTriangle } from 'lucide-react';
+import { Loader2, Download, Upload, Database, AlertTriangle, History, Camera, RotateCcw } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '../../components/ui/button';
 import api from '../../lib/api';
@@ -25,6 +25,29 @@ export default function BackupCard() {
   const [pasted, setPasted] = useState('');
   const [mode, setMode] = useState('merge');
   const [counts, setCounts] = useState(null);
+  // Snapshot history (30-day rolling, local disk). Server keeps the
+  // files on `/app/data/backups/`; this list is fetched on mount and
+  // again after every manual snapshot / restore so the operator sees
+  // their action reflected immediately.
+  const [snapshots, setSnapshots] = useState([]);
+  const [snapshotsLoading, setSnapshotsLoading] = useState(false);
+  const [snapshotting, setSnapshotting] = useState(false);
+  const [restoringId, setRestoringId] = useState(null);
+  const [retentionDays, setRetentionDays] = useState(30);
+
+  const loadSnapshots = useCallback(async () => {
+    setSnapshotsLoading(true);
+    try {
+      const { data } = await api.get('/operator/backup/snapshots');
+      setSnapshots(data?.snapshots || []);
+      setRetentionDays(data?.retention_days || 30);
+    } catch (e) {
+      // Don't toast on first load — the card still works without history.
+      console.warn('snapshots fetch failed', e);
+    } finally {
+      setSnapshotsLoading(false);
+    }
+  }, []);
 
   // Show a quick "what's currently here" summary so the operator can
   // gut-check whether they're about to import into an empty env (safe)
@@ -37,7 +60,61 @@ export default function BackupCard() {
         if (alive) setCounts(data?.counts || null);
       } catch { /* swallow — card still works without the preview */ }
     })();
+    loadSnapshots();
     return () => { alive = false; };
+  }, [loadSnapshots]);
+
+  const snapshotNow = useCallback(async () => {
+    setSnapshotting(true);
+    try {
+      const { data } = await api.post('/operator/backup/snapshots');
+      toast.success(`Snapshot ${data.filename} saved · ${(data.size_bytes / 1024).toFixed(1)} KB`);
+      loadSnapshots();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Snapshot failed');
+    } finally {
+      setSnapshotting(false);
+    }
+  }, [loadSnapshots]);
+
+  const downloadSnapshot = useCallback(async (snap) => {
+    try {
+      const { data } = await api.get(`/operator/backup/snapshots/${snap.id}/download`, {
+        responseType: 'blob',
+      });
+      const url = URL.createObjectURL(data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = snap.filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Download failed');
+    }
+  }, []);
+
+  const restoreSnapshot = useCallback(async (snap, restoreMode) => {
+    const verb = restoreMode === 'replace' ? 'REPLACE current data with' : 'merge';
+    if (!window.confirm(`${verb === 'merge' ? 'Merge' : verb} snapshot ${snap.filename}?${restoreMode === 'replace' ? '\n\nThis will WIPE existing rows before importing.' : ''}`)) return;
+    setRestoringId(snap.id);
+    try {
+      const { data } = await api.post(`/operator/backup/snapshots/${snap.id}/restore`, null, {
+        params: { mode: restoreMode },
+      });
+      const total = Object.values(data?.written || {}).reduce((a, b) => a + b, 0);
+      toast.success(`Restored ${total} items from ${snap.filename}`);
+      // Refresh the "currently in env" counts strip.
+      try {
+        const { data: fresh } = await api.get('/operator/backup/export');
+        setCounts(fresh?.counts || null);
+      } catch { /* non-fatal */ }
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Restore failed');
+    } finally {
+      setRestoringId(null);
+    }
   }, []);
 
   const exportNow = useCallback(async () => {
@@ -192,6 +269,95 @@ export default function BackupCard() {
           {importing ? <Loader2 className="mr-2 h-3 w-3 animate-spin" /> : <Upload className="mr-2 h-3 w-3" />}
           Import {mode === 'replace' ? '(REPLACE)' : '(merge)'}
         </Button>
+      </div>
+
+      {/* ── Snapshot history (30-day rolling, local disk) ─────────── */}
+      <div className="rounded-lg border border-tbc-900/60 bg-ink-950/60 p-3" data-testid="backup-snapshots-card">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-tbc-100">
+            <History className="h-3 w-3 text-amber-300" />
+            Snapshot history
+            <span className="rounded-full border border-amber-500/30 bg-amber-500/[0.08] px-1.5 py-0.5 text-[9px] font-bold uppercase text-amber-200">
+              {retentionDays}-day rolling
+            </span>
+          </p>
+          <Button
+            size="sm"
+            onClick={snapshotNow}
+            disabled={snapshotting}
+            data-testid="backup-snapshot-now"
+            className="h-7 bg-amber-500 px-2 text-[11px] font-semibold text-ink-950 hover:bg-amber-400"
+          >
+            {snapshotting
+              ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
+              : <Camera className="mr-1.5 h-3 w-3" />}
+            Snapshot now
+          </Button>
+        </div>
+        <p className="mb-2 text-[11px] leading-relaxed text-tbc-200/60">
+          A daily scheduled job writes a snapshot to <code>/app/data/backups/</code>.
+          Files older than {retentionDays} days are automatically pruned. Restore from any
+          listed snapshot below without re-uploading the JSON.
+        </p>
+
+        {snapshotsLoading && snapshots.length === 0 ? (
+          <p className="text-[11px] text-tbc-200/50">Loading…</p>
+        ) : snapshots.length === 0 ? (
+          <p className="text-[11px] text-tbc-200/50" data-testid="backup-snapshots-empty">
+            No snapshots yet. Tap <strong>Snapshot now</strong> or wait for the daily job to fire.
+          </p>
+        ) : (
+          <ul className="space-y-1.5" data-testid="backup-snapshots-list">
+            {snapshots.map((s) => (
+              <li
+                key={s.id}
+                data-testid={`backup-snapshot-row-${s.id}`}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-tbc-900/60 bg-ink-900/40 px-2.5 py-1.5"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[11px] font-mono text-tbc-100" title={s.filename}>{s.filename}</p>
+                  <p className="text-[10px] text-tbc-200/50">
+                    {new Date(s.created_at).toLocaleString()} · {(s.size_bytes / 1024).toFixed(1)} KB
+                  </p>
+                </div>
+                <div className="flex shrink-0 items-center gap-1.5">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => downloadSnapshot(s)}
+                    data-testid={`backup-snapshot-download-${s.id}`}
+                    className="h-7 border-tbc-700/60 bg-ink-900 px-2 text-[10px] text-tbc-200 hover:bg-ink-950"
+                  >
+                    <Download className="mr-1 h-3 w-3" />
+                    Download
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={() => restoreSnapshot(s, 'merge')}
+                    disabled={restoringId === s.id}
+                    data-testid={`backup-snapshot-restore-merge-${s.id}`}
+                    className="h-7 bg-emerald-500 px-2 text-[10px] font-semibold text-ink-950 hover:bg-emerald-400"
+                  >
+                    {restoringId === s.id
+                      ? <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                      : <RotateCcw className="mr-1 h-3 w-3" />}
+                    Merge
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => restoreSnapshot(s, 'replace')}
+                    disabled={restoringId === s.id}
+                    data-testid={`backup-snapshot-restore-replace-${s.id}`}
+                    className="h-7 border-rose-500/40 bg-ink-900 px-2 text-[10px] text-rose-300 hover:bg-rose-500/10"
+                  >
+                    Replace
+                  </Button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
     </div>
   );

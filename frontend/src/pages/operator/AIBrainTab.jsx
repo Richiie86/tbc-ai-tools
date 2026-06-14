@@ -1,11 +1,13 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import api from '../../lib/api';
 import {
-  Brain, Loader2, Sparkles, TrendingUp, Network, Bot,
+  Brain, Loader2, Sparkles, TrendingUp, Network, Bot, GitBranch, LayoutGrid,
 } from 'lucide-react';
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
 } from 'recharts';
+import ReactFlow, { Background, Controls, MarkerType } from 'reactflow';
+import 'reactflow/dist/style.css';
 
 /**
  * AI Brain — three views on top of the shared `ai_learnings` collection.
@@ -23,6 +25,13 @@ export default function AIBrainTab() {
   const [timeline, setTimeline] = useState(null);
   const [skills, setSkills] = useState(null);
   const [loading, setLoading] = useState(true);
+  // Toggle between the simple bucket grid (original) and the react-flow
+  // "skill tree" graph. Persist in localStorage so the operator's
+  // preference survives a refresh.
+  const [skillView, setSkillView] = useState(() => {
+    try { return localStorage.getItem('ai-brain-skill-view') || 'grid'; }
+    catch { return 'grid'; }
+  });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -43,6 +52,11 @@ export default function AIBrainTab() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  const setSkillViewPersisted = useCallback((v) => {
+    setSkillView(v);
+    try { localStorage.setItem('ai-brain-skill-view', v); } catch { /* private mode */ }
+  }, []);
 
   if (loading) {
     return (
@@ -121,13 +135,44 @@ export default function AIBrainTab() {
 
       {/* 3. Skill buckets */}
       <section data-testid="ai-brain-skills">
-        <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-tbc-300">
-          <Sparkles className="h-3 w-3" /> Skill map · {skills?.total || 0} active learnings
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-tbc-300">
+            <Sparkles className="h-3 w-3" /> Skill map · {skills?.total || 0} active learnings
+          </div>
+          {/* View toggle: grid (original) vs. graph (react-flow). */}
+          <div className="flex items-center gap-1 rounded-md border border-tbc-900/60 bg-ink-900/60 p-0.5">
+            <button
+              data-testid="ai-brain-skill-view-grid"
+              onClick={() => setSkillViewPersisted('grid')}
+              className={`flex items-center gap-1 rounded px-2 py-1 text-[10px] font-semibold uppercase tracking-wider transition ${
+                skillView === 'grid'
+                  ? 'bg-tbc-500/20 text-tbc-100'
+                  : 'text-tbc-200/60 hover:text-tbc-100'
+              }`}
+            >
+              <LayoutGrid className="h-3 w-3" />
+              Grid
+            </button>
+            <button
+              data-testid="ai-brain-skill-view-graph"
+              onClick={() => setSkillViewPersisted('graph')}
+              className={`flex items-center gap-1 rounded px-2 py-1 text-[10px] font-semibold uppercase tracking-wider transition ${
+                skillView === 'graph'
+                  ? 'bg-tbc-500/20 text-tbc-100'
+                  : 'text-tbc-200/60 hover:text-tbc-100'
+              }`}
+            >
+              <GitBranch className="h-3 w-3" />
+              Graph
+            </button>
+          </div>
         </div>
         {(skills?.buckets?.length || 0) === 0 ? (
           <div className="rounded-lg border border-dashed border-tbc-900/60 bg-ink-900/30 p-6 text-center text-xs text-tbc-200/50">
             No active learnings yet. Visit the <strong>AI Learnings</strong> tab to add or approve some.
           </div>
+        ) : skillView === 'graph' ? (
+          <SkillTreeGraph buckets={skills?.buckets || []} />
         ) : (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {(skills?.buckets || []).map((b) => (
@@ -221,6 +266,182 @@ function SkillBucket({ bucket }) {
           <li className="text-[10px] text-tbc-200/40">+ {bucket.items.length - 6} more in this skill</li>
         )}
       </ul>
+    </div>
+  );
+}
+
+/* -------------- Skill-tree graph (react-flow) -------------- */
+//
+// Layout: a "Brain" root node at the top, with each skill-bucket node
+// connected below it, and the top 4 learnings of each bucket arranged
+// as a column under their bucket. Pure CSS positioning — no fancy auto-
+// layout because the dataset is small (~6 buckets × 4 items = 24 nodes)
+// and a deterministic grid reads better than a force-directed sprawl.
+
+const BUCKET_COLORS = {
+  deploy:   { border: '#34d399', bg: 'rgba(16,185,129,0.10)' },
+  code:     { border: '#f4cf6a', bg: 'rgba(244,207,106,0.10)' },
+  voice:    { border: '#b48cff', bg: 'rgba(180,140,255,0.10)' },
+  security: { border: '#f87171', bg: 'rgba(248,113,113,0.10)' },
+  ux:       { border: '#60a5fa', bg: 'rgba(96,165,250,0.10)' },
+  money:    { border: '#fbbf24', bg: 'rgba(251,191,36,0.10)' },
+  general:  { border: '#94a3b8', bg: 'rgba(148,163,184,0.10)' },
+};
+
+function SkillTreeGraph({ buckets }) {
+  // Compute nodes + edges once per `buckets` change. The buckets array
+  // is small and stable so a useMemo keyed on its length + total item
+  // count is enough — no need for a deep compare.
+  const itemCount = useMemo(
+    () => buckets.reduce((a, b) => a + (b.items?.length || 0), 0),
+    [buckets],
+  );
+
+  const { nodes, edges } = useMemo(() => {
+    const colW = 220;          // horizontal spacing between bucket columns
+    const itemH = 56;          // vertical spacing between items
+    const bucketY = 130;
+    const firstItemY = bucketY + 90;
+    const xStart = 40;
+
+    const n = [];
+    const e = [];
+
+    // Root "Brain" node — centred above the bucket row.
+    const rootX = xStart + (buckets.length - 1) * colW / 2;
+    n.push({
+      id: 'brain',
+      data: { label: 'AI Brain' },
+      position: { x: rootX, y: 20 },
+      style: {
+        background: 'rgba(244,207,106,0.12)',
+        border: '1px solid #f4cf6a',
+        color: '#fef3c7',
+        fontWeight: 700,
+        fontSize: 12,
+        padding: 8,
+        borderRadius: 10,
+        width: 120,
+        textAlign: 'center',
+      },
+    });
+
+    buckets.forEach((b, bi) => {
+      const x = xStart + bi * colW;
+      const colour = BUCKET_COLORS[b.bucket] || BUCKET_COLORS.general;
+      n.push({
+        id: `b-${b.bucket}`,
+        data: { label: `${b.bucket.toUpperCase()} · ${b.count}` },
+        position: { x, y: bucketY },
+        style: {
+          background: colour.bg,
+          border: `1.5px solid ${colour.border}`,
+          color: '#f5f5f5',
+          fontSize: 11,
+          fontWeight: 700,
+          padding: 6,
+          borderRadius: 8,
+          width: 160,
+          textAlign: 'center',
+        },
+      });
+      e.push({
+        id: `e-brain-${b.bucket}`,
+        source: 'brain',
+        target: `b-${b.bucket}`,
+        style: { stroke: colour.border, strokeWidth: 1.5 },
+        markerEnd: { type: MarkerType.ArrowClosed, color: colour.border },
+      });
+
+      // Top 4 learnings of each bucket — anything beyond shows as
+      // "+N more" so the graph never explodes vertically.
+      const top = (b.items || []).slice(0, 4);
+      top.forEach((it, ii) => {
+        n.push({
+          id: `i-${b.bucket}-${it.id}`,
+          data: {
+            label: (
+              <div style={{ textAlign: 'left' }}>
+                <div style={{ fontSize: 10, color: '#f5f5f5', lineHeight: 1.25 }}>
+                  {(it.text || '').slice(0, 64)}{(it.text || '').length > 64 ? '…' : ''}
+                </div>
+                <div style={{ fontSize: 8, color: '#94a3b8', marginTop: 2 }}>
+                  {it.model} · {(it.created_at || '').slice(0, 10)}
+                </div>
+              </div>
+            ),
+          },
+          position: { x, y: firstItemY + ii * itemH },
+          style: {
+            background: '#0e0e10',
+            border: '1px solid #2a2a2e',
+            borderRadius: 6,
+            padding: 4,
+            width: 160,
+          },
+        });
+        e.push({
+          id: `e-${b.bucket}-${it.id}`,
+          source: `b-${b.bucket}`,
+          target: `i-${b.bucket}-${it.id}`,
+          style: { stroke: colour.border, strokeWidth: 1, opacity: 0.65 },
+        });
+      });
+
+      // "+N more" footer node when the bucket has more than 4 items.
+      if ((b.items || []).length > top.length) {
+        const moreId = `m-${b.bucket}`;
+        n.push({
+          id: moreId,
+          data: { label: `+ ${b.items.length - top.length} more` },
+          position: { x, y: firstItemY + top.length * itemH },
+          style: {
+            background: 'transparent',
+            border: '1px dashed #2a2a2e',
+            color: '#94a3b8',
+            fontSize: 10,
+            padding: 4,
+            borderRadius: 6,
+            width: 160,
+            textAlign: 'center',
+          },
+        });
+        e.push({
+          id: `e-${moreId}`,
+          source: `b-${b.bucket}`,
+          target: moreId,
+          style: { stroke: colour.border, strokeWidth: 1, opacity: 0.35, strokeDasharray: '4 4' },
+        });
+      }
+    });
+
+    return { nodes: n, edges: e };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [buckets, itemCount]);
+
+  return (
+    <div
+      data-testid="ai-brain-skill-graph"
+      className="h-[600px] w-full overflow-hidden rounded-lg border border-tbc-900/60 bg-ink-950/60"
+    >
+      <ReactFlow
+        nodes={nodes}
+        edges={edges}
+        fitView
+        fitViewOptions={{ padding: 0.2 }}
+        nodesDraggable
+        nodesConnectable={false}
+        elementsSelectable
+        panOnDrag
+        zoomOnScroll
+        proOptions={{ hideAttribution: true }}
+      >
+        <Background color="#1f1f23" gap={20} />
+        <Controls
+          showInteractive={false}
+          className="!bg-ink-900 !border-tbc-900/60"
+        />
+      </ReactFlow>
     </div>
   );
 }
