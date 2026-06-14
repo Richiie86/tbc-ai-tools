@@ -229,7 +229,7 @@ async def do_initial_push(project: dict, *, source: str = 'operator_manual') -> 
     if not repo:
         raise HTTPException(412, 'Project has no GitHub repo configured.')
 
-    settings = await db.payment_settings.find_one({}) or {}
+    settings = await db.settings.find_one({'_id': 'payment_settings'}) or {}
     token = settings.get('github_token') or os.environ.get('GITHUB_TOKEN')
     if not token:
         raise HTTPException(503, 'github_token not set in Operator → Security.')

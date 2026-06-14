@@ -87,7 +87,7 @@ async def export_backup(op: dict = Depends(get_current_operator)):
     kyc_bypass      = [_no_id(d) async for d in db.kyc_bypass_emails.find({})]
     vanished        = [_no_id(d) async for d in db.vanished_emails.find({})]
     app_settings    = [_no_id(d) async for d in db.app_settings.find({})]
-    payment_doc     = await db.payment_settings.find_one({}) or {}
+    payment_doc     = await db.settings.find_one({'_id': 'payment_settings'}) or {}
     payment_safe    = _strip_secrets(payment_doc) if payment_doc else {}
 
     return {
