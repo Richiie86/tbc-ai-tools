@@ -11,6 +11,19 @@ gold theme. Domain: **tbctools.org**.
 - **End user (member)** — Chats with the AI builder, manages plan, copies referral link.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
+## Implemented — Feb 2026 (latest session, batch 19 — credit-burn loop killer)
+- ✅ **Empty-repo deploy block fixed** — `deploy/code_review.py` short-circuits to `verdict='repo_empty'` BEFORE any LLM call when the configured GitHub repo contains only README/LICENSE/.gitignore-class placeholders. No more cross-AI calls (and no more credit burn) on empty repos. Verdict body carries `can_auto_push: true` so the frontend can render a one-click push dialog.
+- ✅ **`POST /api/operator/deploy/{id}/initial-push`** (`deploy_initial_push_ext.py`) — uploads `/app/{backend,frontend}` + curated top-level files (README, package.json, vercel.json, etc.) to the configured GitHub repo via the Contents API. Hard caps: 1 MB/file, 800 files/push, 4-way parallel. Excludes `.git`, `node_modules`, `.env*`, build artefacts. Tries `main` → `master` fallback. Returns `{pushed, skipped, errors[], next_step}`.
+- ✅ **`_trigger_deploy` `repo_empty` branch** — checked BEFORE `do_not_ship`, returns 412 with `{error:'repo_empty', initial_push_url, can_auto_push:true}` so the frontend skips the useless fix-chat path and renders the push dialog.
+- ✅ **One-click push UX** — `useInlineChatActions.js` `runInitialPush` helper + `repo_empty` branch in `previewReview`. Operator clicks Deploy → repo empty → "Click OK to push your code now" confirm → backend pushes → re-runs review → deploy proceeds. Zero manual GitHub uploads.
+- ✅ **Sidebar "Fix review:" cleanup** — `_create_fix_review_chat` now stamps `kind='fix_review'` on the inserted `chat_sessions` doc; `GET /api/chat/sessions` adds `kind: {$ne:'fix_review'}` filter. Backfilled 3 existing fix-review chats for the operator account. Sidebar shows only chats the user started themselves; fix-review chats still reachable via the deep-link returned in the 412 deploy body.
+- ✅ **Cross-AI VISUAL verification (`ai_visual_verify_ext.py`)** — after a PR opens, a background task polls for the Vercel preview URL (≤3 min), shells out to Playwright CLI for a 1280×800 screenshot, sends it to GPT-4o-mini vision with the operator's prompt as context, parses a strict `{verdict:pass/warn/fail, summary, concerns[]}` and stamps it on the `ai_build_plans` doc. Auto-merge sweep in `auto_fix_loop_ext.py` blocks merges when `visual_verify.verdict=='fail'` — visual regressions never auto-ship.
+- ✅ **`VisualVerifyChip` in AI Build history** — pill next to each PreviewButton showing the visual verdict (emerald/amber/rose). Click to re-run a fresh screenshot + verification.
+- ✅ **Floating "View Preview" button rendered** — Dashboard.jsx imports `ViewPreviewButton` and now actually renders it (fix from previous session where it was imported but never mounted). Positioned `bottom-20` so it sits above the "Made with Emergent" badge instead of being obscured.
+- ✅ **Dashboard.jsx decomposition (Task 2)** — extracted the ~170-line `handleInlineAction` into `useInlineChatActions.js` hook. Byte-for-byte identical behaviour; cleaner Dashboard.jsx.
+- ✅ **Tested live**: iter27 — 11/11 backend tests green, all frontend flows live-verified (sidebar filter end-to-end, FAB position+href, VisualVerifyChip in history).
+
+
 ## Implemented — Feb 2026 (latest session, batch 18)
 - ✅ **Landing footer "All systems operational" pill** — `StatusPill.jsx` fetches `/api/status` every 60s, renders a coloured-dot pill (`operational`=emerald, `degraded`=amber, `outage`=rose) next to the copyright. Pulses softly to signal live data. Click → `/status` page. Gracefully hides on fetch failure (no scary red dot during mid-deploy).
 - ✅ **Footer Company column** now also links to `Changelog` and `Status` (next to Contact / Privacy / Terms).
