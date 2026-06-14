@@ -11,7 +11,20 @@ gold theme. Domain: **tbctools.org**.
 - **End user (member)** — Chats with the AI builder, manages plan, copies referral link.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
-## Implemented — Feb 2026 (latest session, batch 8)
+## Implemented — Feb 2026 (latest session, batch 9)
+- ✅ **AI Build — natural-language → PR pipeline (operator-only)**
+  - Backend: `ai_build_ext.py` exposes `POST /api/operator/ai-build/plan` (LLM generates a JSON patch plan), `POST /open-pr` (creates branch + commits + opens PR — no direct push to main, ever), `GET /history`, `DELETE /plan/{id}`.
+  - **Hard server-side blocklist** (`BLOCKED_PATH_PATTERNS`): `.env`, `backend/auth*`, `backend/*payment*.py`, `backend/*stripe*.py`, `backend/*nowpayments*.py`, `backend/*paypal*.py`, `backend/models.py`, `secrets_ext.py`, `.git/`, `package-lock.json`, `yarn.lock`. Two-tier defence (context-build skip + post-LLM strip) against prompt-injection bypasses.
+  - Per-request caps: 12 files, 80 KB / file, 4 KB prompt — sane guards against hallucinated mega-refactors.
+  - Frontend: `AIBuildTab.jsx` — project dropdown, prompt box (4000-char limit), Plan button → diff preview with per-file collapse, Open PR / Discard buttons, recent-requests history with PR links.
+  - Model: Claude Sonnet 4.5 (via Emergent LLM key + `emergentintegrations`).
+  - Tested iter23: 12/12 effective BE (2 skips are by-design 503s when github_token/EMERGENT_LLM_KEY absent on this preview) + AI Build UI 100% on rendering, disabled-state, dropdown, 503-handling.
+- ✅ **Inline-deploy UX fix** — `Dashboard.jsx handleInlineAction`:
+  - When the AI code-review ship-gate returns 412 `review_blocked`, the chat's inline Deploy button now offers `fix` (navigate to `fix_chat_session_id`) / `force` (re-POST with `bypass_review=true`) / blank-cancel instead of a useless red toast.
+
+**To unblock AI Build end-to-end:** set `github_token` (PAT with Contents:Write + Pull Requests:Write) and `emergent_llm_key` in Operator → Security. Until then `/plan` returns a clean 503 with the instruction.
+
+## Implemented — Feb 2026 (previous session, batch 8)
 - ✅ **Production hotfixes (3)** — preview-only fixes; user must redeploy:
   - `Dashboard.jsx` — `handleInlineAction` restored as a `useCallback` after an interrupted commit removed it (fixes `handleInlineAction is not defined` ×24 on /dashboard).
   - `AuditTab.jsx` — `r.target` rendered raw crashed React #31 when audit logger wrote an object (e.g. `operator.purge_test_data` writes `{sessions, messages}` as `target`). Now stringified.
