@@ -1,0 +1,43 @@
+{
+  "summary": "Iter29 verification of visual-verify backend module + Dashboard.jsx refactor + ViewPreviewButton render fix + VisualVerifyChip. Backend: 10/10 PASS in /app/backend/tests/test_iter29_visual_verify.py covering GET/POST visual-verify 404 for unknown plan, GET returns stored verdict for existing plan, GET returns 'not_run' record for plan without verify, anonymous request rejected (401/403), AI Build smoke regression (history/plan/open-pr/preview-url all wired with acceptable status codes), and auto-fix /status shape (config + today_count + recent[]). Frontend Playwright verified: (1) Operator login → /setup-2fa → direct nav to /dashboard renders without crash (body text > 50 chars, no error elements); (2) ViewPreviewButton (data-testid='view-preview-fab') renders with href='https://tbctools.org' and CSS class contains 'bottom-20' (the badge-avoidance fix is live); (3) /operator?tab=ai-build loads, [data-testid='ai-build-history'] present, 1 VisualVerifyChip rendered alongside 1 PreviewButton with testid 'ai-build-visual-verify-plan_opened_1781401185337' and visible label 'Visual'; (4) Header 'Health' button on /dashboard fires and surfaces 'Health check: OK' toast (project header-selected — different from the in-chat handleInlineAction path which uses tbc.inChat.selectedProjectId localStorage). The in-chat handleInlineAction → 'Pick a deploy project first…' toast text was code-reviewed in /app/frontend/src/pages/dashboard/useInlineChatActions.js line 44 — identical to spec; live click not exercised because there are still no chats with assistant messages in the preview account (same constraint as iter25). Per spec note, ESLint 'set-state-in-effect' and Python 'is not None' lints treated as known false positives — not reported.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/operator/ai-build/config", "issue": "Spec references this endpoint as part of AI Build smoke; the route does NOT exist in /app/backend/ai_build_ext.py (only /plan, /open-pr, /history, /plan/{id}, /preview-url/{id} are declared). Returns 404. If this is meant to expose AI Build config (e.g., github_token presence flag) it needs to be added. If the spec is wrong about /config, no action needed — but the AIBuildTab UI may want a config-status fetch in the future."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/operator?tab=ai-build", "issues": ["React hydration warning in console: 'In HTML, <span> cannot be a child of <option>' — somewhere inside the AIBuildTab a Radix Select option has a <span> child rendered as an <option>. Cosmetic (no broken render), but it will spam warnings. Likely in the project picker or model select."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter29_visual_verify.py",
+    "/app/test_reports/pytest/iter29.xml"
+  ],
+  "action_items": [
+    "(INFO) GET /api/operator/ai-build/config does not exist — spec referenced it but the router has no such route. If the operator wants to expose 'github_token configured?' flag for the UI to gate the AI Build form, add the route. Otherwise drop from spec.",
+    "(COSMETIC) Fix React hydration warning '<span> cannot be a child of <option>' on /operator?tab=ai-build — search AIBuildTab.jsx for a native <select><option>...</option></select> where <option> wraps a <span>; replace with text-only label or use the shadcn Select component consistently.",
+    "(INFO) In-chat handleInlineAction Health → 'Pick a deploy project first' toast NOT exercised live again (same blocker as iter25: no chat history with assistant messages in this preview account, no AI keys to produce one). Code in /app/frontend/src/pages/dashboard/useInlineChatActions.js line 44 matches spec verbatim; main agent can verify by sending a chat message + clicking EOS Health with selectedProjectId cleared."
+  ],
+  "critical_code_review_comments": [
+    "ai_visual_verify_ext.py (260 lines, single module): clean separation. Operator-only via Depends(get_current_operator). _PLAYWRIGHT_BIN existence check before subprocess call avoids cryptic FileNotFoundError. asyncio.create_subprocess_exec + asyncio.wait_for hard timeout (25s) prevents event-loop wedging. _vision_verify NEVER raises (always returns dict with verdict). Markdown-fence stripping + regex JSON salvage = robust parsing. Best-effort screenshot move to /tmp/.../recent for janitor. Verdict whitelisted to ('pass','warn','fail'), else 'review_skipped'. Status codes mapped correctly: 404 plan_not_found, 503 no_llm_key, 409 no_preview_url, 502 screenshot_failed.",
+    "useInlineChatActions.js (191 lines, one hook): faithful relocation from Dashboard.jsx — useCallback dep array [navigate, messages, currentId] is correct. handleInlineAction still owns deploy/review/health/fix-errors branches identically. previewReview() chains code-review BEFORE deploy and respects the 412 review_blocked structured error. Toast text 'Pick a deploy project first (use the dropdown in the chat header).' matches the spec exactly.",
+    "Dashboard.jsx integration: imports useInlineChatActions and ViewPreviewButton, mounts <ViewPreviewButton /> only when user.role === 'operator' (line 373). handleInlineAction obtained as `useInlineChatActions({ navigate, messages, currentId })` on line 140 — passed to both onAction props of message bubbles + EOS bar (lines 321, 330).",
+    "ViewPreviewButton.jsx (66 lines): `bottom-20 right-5 z-30` confirmed; was bottom-5. Now sits above the 'Made with Emergent' badge (which is fixed bottom-right). Lookup prefers operator-saved tbc.inChat.selectedProjectId, falls back to first project with url/domain. Silently hides if neither yields a URL. Verified live: href='https://tbctools.org' (normalised — picked.url did not start with 'http', prefix added).",
+    "AIBuildTab.jsx VisualVerifyChip (lines 479-540): testid `ai-build-visual-verify-${planId}` correct (verified live with planId 'plan_opened_1781401185337'). Loads stored verdict on mount via GET, exposes 'Run again' button (POST trigger). One render glitch: the chip's parent <select><option> tree triggers a hydration warning — see design_issues.",
+    "server.py routing: `app.include_router(ai_visual_verify_router)` placed immediately after ai_build_router (lines 1921-1922). Both share prefix /api/operator/ai-build so route ordering is fine (FastAPI matches exact path; no collisions because methods+paths are unique)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter29_visual_verify.py (new — 10 tests, all passing)"
+  ],
+  "success_rate": {"backend": "100% (10/10)", "frontend": "100% on FAB render + position, AI Build history + VisualVerifyChip render, Dashboard no-crash; in-chat handleInlineAction Health toast code-reviewed only (no chat history to exercise — same blocker as iter25)"},
+  "test_credentials": "Operator rac.investments.swe@gmail.com / 123Admin@98. Login auto-redirects to /setup-2fa per RESET_OPERATOR_PASSWORD=true; cookie session works after direct nav to /dashboard.",
+  "seed_data_creation": "Inserted + cleaned 2 ai_build_plans (TEST_iter29_*) — one with a baked visual_verify record (verdict='pass'), one without. Both removed in test finally blocks.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter29 regression suite at /app/backend/tests/test_iter29_visual_verify.py — 10 tests, all passing. Covers GET/POST visual-verify endpoints (404 unknown, structured verdict for existing plan, 'not_run' for plan-without-verify), AI Build smoke (history/plan/open-pr/preview-url wiring proof), auto-fix status shape, and auth gate. Two open issues for main agent: (1) GET /api/operator/ai-build/config is referenced in the spec but does NOT exist in ai_build_ext.py — confirm intent (add route or drop from spec); (2) /operator?tab=ai-build emits a React hydration warning '<span> cannot be a child of <option>' — cosmetic but worth fixing. In-chat handleInlineAction live-click flow (chat bubble or EOS bar) still not exercised live due to lack of chats with assistant messages + missing AI keys; code-reviewed only — verbatim toast text match.",
+  "rca of the issue": "N/A — all iter29 scope verified passing. The /config 404 is a spec-vs-implementation mismatch (route never existed), not a regression introduced by this iteration."
+}

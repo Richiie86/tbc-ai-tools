@@ -1918,6 +1918,8 @@ from status_ext import router as status_router
 app.include_router(status_router)
 from ai_build_ext import router as ai_build_router
 app.include_router(ai_build_router)
+from ai_visual_verify_ext import router as ai_visual_verify_router
+app.include_router(ai_visual_verify_router)
 from changelog_ext import router as changelog_router
 app.include_router(changelog_router)
 from auto_fix_loop_ext import router as auto_fix_router

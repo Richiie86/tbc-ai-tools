@@ -544,6 +544,14 @@ async def open_pr(req: OpenPRRequest, user: dict = Depends(get_current_operator)
             'opened_at': datetime.now(timezone.utc),
         }},
     )
+
+    # Kick off visual verification in the background. Vercel needs ~30–90s
+    # to build the preview; we poll up to ~3 minutes for a URL and then
+    # screenshot + vision-review it. Fire-and-forget — never blocks the PR
+    # response. Failures are logged + stamped on the plan doc.
+    import asyncio as _asyncio
+    _asyncio.create_task(_schedule_visual_verify(req.plan_id))
+
     return {
         'pr_url': pr.get('html_url'),
         'pr_number': pr.get('number'),
@@ -640,3 +648,46 @@ async def preview_url(plan_id: str, user: dict = Depends(get_current_operator)):
                 'created_at': d.get('createdAt'),
             }
     return {'url': None, 'status': 'no_deployment'}
+
+
+
+async def _schedule_visual_verify(plan_id: str) -> None:
+    """Background task: poll the preview URL until ready (≤3 minutes),
+    then run the vision verify. Safe to fire-and-forget — every error
+    is logged, never raised, and the plan doc records the outcome.
+    """
+    import asyncio
+    from ai_visual_verify_ext import run_visual_verify
+
+    # Poll preview URL up to 18 times × 10s = 180s.
+    plan_doc = await db.ai_build_plans.find_one({'plan_id': plan_id})
+    if not plan_doc:
+        return
+    fake_user = {'id': plan_doc.get('operator_id') or 'system', 'role': 'operator'}
+    preview = None
+    for _ in range(18):
+        try:
+            res = await preview_url(plan_id, user=fake_user)
+        except Exception as e:
+            logger.warning('preview-url poll for %s raised: %s', plan_id, e)
+            res = None
+        if isinstance(res, dict) and res.get('url'):
+            preview = res['url']
+            break
+        await asyncio.sleep(10)
+    if not preview:
+        # Stamp pending so the UI shows "waiting for preview" rather than
+        # silently leaving visual_verify empty forever.
+        await db.ai_build_plans.update_one(
+            {'plan_id': plan_id},
+            {'$set': {'visual_verify': {
+                'verdict': 'pending',
+                'summary': 'Preview URL not available after 3 minutes — re-run from the AI Build tab when Vercel finishes building.',
+                'attempted_at': datetime.now(timezone.utc).isoformat(),
+            }}},
+        )
+        return
+    try:
+        await run_visual_verify(plan_id)
+    except Exception as e:
+        logger.warning('Visual verify task crashed for %s: %s', plan_id, e)

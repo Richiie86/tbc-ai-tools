@@ -438,6 +438,14 @@ async def _auto_merge_sweep() -> int:
                 pr = r.json()
                 if pr.get('mergeable_state') != 'clean' or pr.get('merged'):
                     continue
+                # Extra gate: the cross-AI vision verdict must NOT be fail.
+                # `pass`/`warn`/missing all proceed; `fail` blocks auto-merge
+                # so a visual regression never auto-ships. Same plan doc.
+                vv = (plan_doc.get('visual_verify') or {})
+                if vv.get('verdict') == 'fail':
+                    logger.info('auto-merge skipped PR #%s — visual_verify=fail (%s)',
+                                number, vv.get('summary'))
+                    continue
                 m = await client.put(
                     f'{_GITHUB_API}/repos/{repo}/pulls/{number}/merge',
                     headers={'Authorization': f'Bearer {gh_token}',

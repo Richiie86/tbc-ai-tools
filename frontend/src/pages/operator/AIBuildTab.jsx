@@ -6,7 +6,7 @@ import { Textarea } from '../../components/ui/textarea';
 import { toast } from 'sonner';
 import {
   Wand2, Loader2, GitBranch, AlertTriangle, FileText, ExternalLink, X, History, ShieldAlert,
-  ShieldCheck, ShieldX, Eye,
+  ShieldCheck, ShieldX, Eye, ScanEye,
 } from 'lucide-react';
 
 /**
@@ -344,6 +344,7 @@ export default function AIBuildTab() {
                 </div>
                 {h.pr_url ? (
                   <div className="flex shrink-0 items-center gap-3">
+                    <VisualVerifyChip planId={h.plan_id} />
                     <PreviewButton planId={h.plan_id} />
                     <a
                       href={h.pr_url}
@@ -466,6 +467,71 @@ function PreviewButton({ planId }) {
         ? <Loader2 className="h-3 w-3 animate-spin" />
         : <Eye className="h-3 w-3" />}
       Preview{status === 'no_deployment' ? '…' : ''}
+    </button>
+  );
+}
+
+
+/** Cross-AI VISUAL verdict — shows pass/warn/fail after the vision LLM
+ *  inspects a screenshot of the live preview. Auto-fetches on mount;
+ *  clicking re-runs the verify (takes a fresh screenshot).
+ */
+function VisualVerifyChip({ planId }) {
+  const [vv, setVv] = useState(null);
+  const [running, setRunning] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const { data } = await api.get(`/operator/ai-build/visual-verify/${planId}`);
+      setVv(data || null);
+    } catch { /* swallow — chip just renders a "run now" state */ }
+  }, [planId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const rerun = async () => {
+    setRunning(true);
+    try {
+      const { data } = await api.post(`/operator/ai-build/visual-verify/${planId}`);
+      setVv(data || null);
+      const v = data?.verdict;
+      if (v === 'pass') toast.success('Visual verify: pass');
+      else if (v === 'warn') toast.warning(`Visual verify: warn — ${data?.summary || ''}`);
+      else if (v === 'fail') toast.error(`Visual verify: FAIL — ${data?.summary || ''}`);
+      else toast.message(`Visual verify: ${v || 'unknown'}`);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Visual verify failed');
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  const v = vv?.verdict;
+  const tone = v === 'pass'
+    ? 'border-emerald-500/40 bg-emerald-500/[0.08] text-emerald-300 hover:bg-emerald-500/[0.14]'
+    : v === 'warn'
+      ? 'border-amber-500/40 bg-amber-500/[0.08] text-amber-300 hover:bg-amber-500/[0.14]'
+      : v === 'fail'
+        ? 'border-rose-500/40 bg-rose-500/[0.08] text-rose-300 hover:bg-rose-500/[0.14]'
+        : 'border-tbc-900/60 bg-ink-900 text-tbc-200/70 hover:bg-ink-950';
+  const label = v === 'pass' ? 'Visual ✓'
+    : v === 'warn' ? 'Visual ⚠'
+    : v === 'fail' ? 'Visual ✗'
+    : v === 'pending' ? 'Visual…'
+    : 'Visual';
+  return (
+    <button
+      type="button"
+      onClick={rerun}
+      disabled={running}
+      data-testid={`ai-build-visual-verify-${planId}`}
+      title={vv?.summary || 'Run the cross-AI visual verification on the live preview'}
+      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider transition ${tone}`}
+    >
+      {running
+        ? <Loader2 className="h-3 w-3 animate-spin" />
+        : <ScanEye className="h-3 w-3" />}
+      {label}
     </button>
   );
 }
