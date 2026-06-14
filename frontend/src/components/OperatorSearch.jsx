@@ -131,7 +131,24 @@ export default function OperatorSearch({ onTabChange }) {
   // "find anything in this app" shortcut.
   const [remote, setRemote] = useState({ users: [], projects: [], contacts: [], audit: [] });
   const [loadingRemote, setLoadingRemote] = useState(false);
+  // Recent queries — last 5 the operator actually used. Persisted in
+  // localStorage so they survive a page reload. Surfaced as a quick-pick
+  // list when the palette opens with an empty input.
+  const [recent, setRecent] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('tbc.operator.recent_searches') || '[]'); }
+    catch { return []; }
+  });
   const inputRef = useRef(null);
+
+  const rememberQuery = useCallback((query) => {
+    const v = (query || '').trim();
+    if (v.length < 2) return;
+    setRecent((prev) => {
+      const next = [v, ...prev.filter((p) => p.toLowerCase() !== v.toLowerCase())].slice(0, 5);
+      try { localStorage.setItem('tbc.operator.recent_searches', JSON.stringify(next)); } catch { /* ignore */ }
+      return next;
+    });
+  }, []);
 
   // ── Debounced universal search ──────────────────────────────────────
   useEffect(() => {
@@ -202,6 +219,9 @@ export default function OperatorSearch({ onTabChange }) {
 
   const pick = useCallback((entry) => {
     if (!entry) return;
+    // Stamp the active query as "recently used" — the strongest signal
+    // it was a search the operator actually cared about.
+    rememberQuery(q);
     setOpen(false);
     // Static tab/setting → existing tab + anchor flow.
     if (entry._kind === 'static') {
