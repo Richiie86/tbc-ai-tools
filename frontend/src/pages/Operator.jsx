@@ -188,7 +188,8 @@ export default function Operator() {
             {/* Build badge — a clearly visible marker that proves this
                 bundle reached production. If you can see this pill on
                 tbctools.org, the latest deploy worked. Tap to see what
-                shipped in this build. */}
+                shipped in this build. (The operator search lives in
+                the navbar now, between Contact and the credits pill.) */}
             <div className="mt-4 flex justify-start">
               <BuildBadge />
             </div>

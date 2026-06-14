@@ -83,27 +83,27 @@ export default function SettingsTab() {
 
   return (
     <div className="grid gap-5">
-      <Section icon={Megaphone} title="Public banner & lockdown">
+      <Section icon={Megaphone} title="Public banner & lockdown" anchor="public-banner">
         <AppSettingsCard />
       </Section>
 
-      <Section icon={Webhook} title="Slack / Discord alert webhook">
+      <Section icon={Webhook} title="Slack / Discord alert webhook" anchor="webhook">
         <WebhookSettingsCard />
       </Section>
 
-      <Section icon={Sparkles} title="Autonomous Auto-Fix Loop">
+      <Section icon={Sparkles} title="Autonomous Auto-Fix Loop" anchor="auto-fix">
         <AutoFixCard />
       </Section>
 
-      <Section icon={Lock} title="Account approvals & KYC bypass (operator-only)">
+      <Section icon={Lock} title="Account approvals & KYC bypass (operator-only)" anchor="security">
         <SecurityCard />
       </Section>
 
-      <Section icon={Megaphone} title="Changelog ('What's new')">
+      <Section icon={Megaphone} title="Changelog ('What's new')" anchor="changelog">
         <ChangelogManagerCard />
       </Section>
 
-      <Section icon={UserPlus} title="New user defaults">
+      <Section icon={UserPlus} title="New user defaults" anchor="new-user-defaults">
         <div className="rounded-md border border-tbc-900/40 bg-ink-950/60 p-3 text-xs text-tbc-200/70">
           Every newly-registered user is automatically placed on the plan you choose here. No manual action needed.
         </div>
@@ -126,7 +126,7 @@ export default function SettingsTab() {
         </div>
       </Section>
 
-      <Section icon={KeyRound} title="Stripe (cards, Apple Pay, Google Pay)">
+      <Section icon={KeyRound} title="Stripe (cards, Apple Pay, Google Pay)" anchor="stripe">
         <KeyRow
           label="Stripe secret key"
           fieldKey="stripe_secret_key"
@@ -164,7 +164,7 @@ export default function SettingsTab() {
         </div>
       </Section>
 
-      <Section icon={KeyRound} title="NOWPayments (crypto auto)">
+      <Section icon={KeyRound} title="NOWPayments (crypto auto)" anchor="nowpayments">
         <KeyRow
           label="API key"
           fieldKey="nowpayments_api_key"
@@ -191,7 +191,7 @@ export default function SettingsTab() {
         />
       </Section>
 
-      <Section icon={KeyRound} title="PayPal">
+      <Section icon={KeyRound} title="PayPal" anchor="paypal">
         <KeyRow
           label="Client ID"
           fieldKey="paypal_client_id"
@@ -240,7 +240,7 @@ export default function SettingsTab() {
         </div>
       </Section>
 
-      <Section icon={Mail} title="Resend (transactional emails)">
+      <Section icon={Mail} title="Resend (transactional emails)" anchor="resend">
         <div className="rounded-md border border-tbc-900/40 bg-ink-950/60 p-3 text-xs text-tbc-200/70">
           API key + sender can also be set via backend env vars (<code className="text-tbc-300">RESEND_API_KEY</code>, <code className="text-tbc-300">SENDER_EMAIL</code>). Anything set here in the database overrides env values.
         </div>
@@ -291,7 +291,7 @@ export default function SettingsTab() {
         </div>
       </Section>
 
-      <Section icon={Sparkles} title="Emergent LLM key (AI chat)">
+      <Section icon={Sparkles} title="Emergent LLM key (AI chat)" anchor="llm-key">
         <div className="rounded-md border border-tbc-900/40 bg-ink-950/60 p-3 text-xs text-tbc-200/70">
           Powers GPT, Claude and Gemini in the Builder. Anything set here overrides the env var <code className="text-tbc-300">EMERGENT_LLM_KEY</code>. Rotate at <a href="https://app.emergent.sh" target="_blank" rel="noreferrer" className="text-tbc-300 hover:underline">Emergent → Profile → Universal Key</a>.
         </div>
@@ -309,7 +309,7 @@ export default function SettingsTab() {
         />
       </Section>
 
-      <Section icon={Lock} title="Enabled payment methods">
+      <Section icon={Lock} title="Enabled payment methods" anchor="payment-methods">
         <MasterPaymentsToggle settings={settings} save={save} />
         <div className="grid gap-2 md:grid-cols-2">
           {[
@@ -327,7 +327,7 @@ export default function SettingsTab() {
         </div>
       </Section>
 
-      <Section icon={Rocket} title="Vercel deploy & AI integration">
+      <Section icon={Rocket} title="Vercel deploy & AI integration" anchor="vercel">
         <p className="text-xs text-tbc-200/60">
           Settings live in one place. They power the Deploy / Redeploy /
           Preview buttons, the per-project Health Check, and the Bearer-token
@@ -477,9 +477,16 @@ export default function SettingsTab() {
   );
 }
 
-function Section({ icon: Icon, title, children }) {
+function Section({ icon: Icon, title, anchor, children }) {
+  // `anchor` is the deep-link target used by the OperatorSearch palette
+  // (e.g. `section-vercel`). When omitted we slugify the title so a row
+  // is still discoverable even if no explicit anchor was passed.
+  const slug = anchor || title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
   return (
-    <div className="rounded-xl border border-tbc-900/60 bg-ink-900/40 p-5">
+    <div
+      id={`section-${slug}`}
+      className="scroll-mt-24 rounded-xl border border-tbc-900/60 bg-ink-900/40 p-5 transition-shadow"
+    >
       <div className="mb-4 flex items-center gap-2">
         <Icon className="h-4 w-4 text-tbc-300" />
         <h3 className="text-sm font-bold uppercase tracking-wider text-tbc-100">{title}</h3>

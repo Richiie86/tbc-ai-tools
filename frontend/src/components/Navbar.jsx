@@ -7,6 +7,7 @@ import { LayoutDashboard, LogOut, ShieldCheck, Sparkles, Bot, Coins, Receipt, Lo
 import Logo from './Logo';
 import CreditsBadge from './CreditsBadge';
 import WhatsNewPopover from './WhatsNewPopover';
+import OperatorSearch from './OperatorSearch';
 import api from '../lib/api';
 import { toast } from 'sonner';
 import {
@@ -85,6 +86,11 @@ export default function Navbar({ minimal = false }) {
         <div className="flex items-center gap-2">
           {user ? (
             <>
+              {/* Operator-only command palette — sits between the nav
+                  links (Contact) and the credits pill. Hidden for
+                  everyone else (zero visual noise for regular users).
+                  Keyboard: `/` or ⌘K from anywhere on the page. */}
+              {user.role === 'operator' && <OperatorSearch />}
               {/* Always-visible credit chip so users never lose sight of their
                   budget. Tapping it jumps to the Pricing page for a top-up. */}
               <CreditsBadge user={user} testid="nav-credits-badge" />
