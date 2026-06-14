@@ -173,12 +173,21 @@ export default function Dashboard({ variant = 'tbc1' }) {
       if (kind === 'deploy' && isReviewBlock) {
         const findings = detail.review?.findings || [];
         const summary = detail.review?.summary || '';
+        const second = detail.review?.second_opinion;
+        const promotedBy = detail.review?.verdict_promoted_by;
         const fixSession = detail.fix_chat_session_id;
         const choice = window.prompt(
           `AI code review blocked this production deploy.\n\n`
           + (summary ? `Summary: ${summary}\n` : '')
-          + (findings.length ? `Findings: ${findings.length}\n\n` : '\n')
-          + `Type one and press OK:\n`
+          + (findings.length ? `Findings: ${findings.length}\n` : '')
+          + (second && second.verdict !== 'review_skipped'
+            ? `Cross-AI second opinion (${second.reviewer_model || 'second model'}): ${second.verdict}`
+              + (second.summary ? ` — ${second.summary}` : '') + '\n'
+              + (second.concerns?.length ? `  • ${second.concerns.slice(0,3).join('\n  • ')}\n` : '')
+            : '')
+          + (promotedBy === 'second_opinion'
+            ? `⚠ Block escalated by the second reviewer (primary said ship).\n` : '')
+          + `\nType one and press OK:\n`
           + `  fix   → open the AI fix chat\n`
           + `  force → deploy anyway (override the gate)\n`
           + `  (blank) → cancel`,

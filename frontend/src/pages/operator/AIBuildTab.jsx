@@ -6,6 +6,7 @@ import { Textarea } from '../../components/ui/textarea';
 import { toast } from 'sonner';
 import {
   Wand2, Loader2, GitBranch, AlertTriangle, FileText, ExternalLink, X, History, ShieldAlert,
+  ShieldCheck, ShieldX, Eye,
 } from 'lucide-react';
 
 /**
@@ -236,6 +237,13 @@ export default function AIBuildTab() {
             </div>
           )}
 
+          {/* Cross-AI review verdict — a second model (different provider)
+              independently audits the patch. Surfaced before "Open PR" so
+              the operator can spot hallucinations before they ship. */}
+          {plan.review && (
+            <ReviewPanel review={plan.review} />
+          )}
+
           {plan.blocked?.length > 0 && (
             <div className="mt-3 rounded border border-amber-500/40 bg-amber-500/[0.06] px-3 py-2 text-xs text-amber-200">
               <strong>Blocked paths ({plan.blocked.length}):</strong>
@@ -327,14 +335,18 @@ export default function AIBuildTab() {
                   </div>
                 </div>
                 {h.pr_url ? (
-                  <a
-                    href={h.pr_url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex shrink-0 items-center gap-1 text-tbc-300 hover:text-tbc-100"
-                  >
-                    PR #{h.pr_number} <ExternalLink className="h-3 w-3" />
-                  </a>
+                  <div className="flex shrink-0 items-center gap-3">
+                    <PreviewButton planId={h.plan_id} />
+                    <a
+                      href={h.pr_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      data-testid={`ai-build-history-pr-${h.plan_id}`}
+                      className="inline-flex items-center gap-1 text-tbc-300 hover:text-tbc-100"
+                    >
+                      PR #{h.pr_number} <ExternalLink className="h-3 w-3" />
+                    </a>
+                  </div>
                 ) : (
                   <span className="shrink-0 text-[10px] uppercase text-tbc-200/40">{h.status}</span>
                 )}
@@ -344,5 +356,108 @@ export default function AIBuildTab() {
         )}
       </section>
     </div>
+  );
+}
+
+/** Cross-AI review verdict surfaced under the plan, before "Open PR". */
+function ReviewPanel({ review }) {
+  const v = review?.verdict;
+  const tone = v === 'ship'
+    ? { Icon: ShieldCheck, label: 'Reviewer says ship', cls: 'border-emerald-500/40 bg-emerald-500/[0.06] text-emerald-200', iconCls: 'text-emerald-300' }
+    : v === 'ship_with_concerns'
+      ? { Icon: AlertTriangle, label: 'Ship with concerns', cls: 'border-amber-500/40 bg-amber-500/[0.06] text-amber-200', iconCls: 'text-amber-300' }
+      : v === 'do_not_ship'
+        ? { Icon: ShieldX, label: 'Reviewer says do NOT ship', cls: 'border-rose-500/40 bg-rose-500/[0.06] text-rose-200', iconCls: 'text-rose-300' }
+        : { Icon: AlertTriangle, label: 'Review skipped', cls: 'border-tbc-900/60 bg-ink-950 text-tbc-200/70', iconCls: 'text-tbc-200/50' };
+  const { Icon, label, cls, iconCls } = tone;
+  return (
+    <div
+      data-testid={`ai-build-review-${v || 'unknown'}`}
+      className={`mt-3 rounded border px-3 py-2.5 text-xs ${cls}`}
+    >
+      <div className="flex items-center gap-2">
+        <Icon className={`h-4 w-4 ${iconCls}`} />
+        <span className="font-semibold">{label}</span>
+        <span className="ml-auto text-[10px] opacity-60">via {review.reviewer_model}</span>
+      </div>
+      {review.summary && (
+        <p className="mt-1 text-[11px] opacity-90">{review.summary}</p>
+      )}
+      {review.concerns?.length > 0 && (
+        <ul className="mt-2 space-y-0.5">
+          {review.concerns.map((c, i) => (
+            <li key={`c-${i}`} className="text-[11px]">• {c}</li>
+          ))}
+        </ul>
+      )}
+      {review.missing_imports?.length > 0 && (
+        <div className="mt-2 text-[10px] uppercase tracking-wider opacity-60">Possibly missing imports:</div>
+      )}
+      {review.missing_imports?.map((m, i) => (
+        <div key={`mi-${i}`} className="font-mono text-[10px] opacity-90">{m}</div>
+      ))}
+      {review.security_flags?.length > 0 && (
+        <div className="mt-2 text-[10px] uppercase tracking-wider opacity-60">Security flags:</div>
+      )}
+      {review.security_flags?.map((s, i) => (
+        <div key={`sf-${i}`} className="text-[10px] opacity-90">⚠ {s}</div>
+      ))}
+    </div>
+  );
+}
+
+/** "Preview" button — polls /api/operator/ai-build/preview-url/{plan_id}
+ *  until Vercel has a deployment URL for the branch. Becomes a normal link
+ *  once available. Clicks the chip when not yet ready trigger one fetch
+ *  rather than auto-polling forever to save bandwidth.
+ */
+function PreviewButton({ planId }) {
+  const [url, setUrl] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [status, setStatus] = useState(null);
+
+  const probe = async () => {
+    setLoading(true);
+    try {
+      const { data } = await api.get(`/operator/ai-build/preview-url/${planId}`);
+      setStatus(data?.status || null);
+      if (data?.url) setUrl(data.url);
+      else if (data?.status === 'no_vercel_token') toast.error('Set vercel_token in Operator → Security to enable previews');
+      else if (data?.status === 'vercel_error') toast.error('Vercel API error — check token scopes');
+      else if (data?.status === 'no_deployment') toast.message('Preview still building — try again in a few seconds');
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Preview lookup failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (url) {
+    return (
+      <a
+        href={url}
+        target="_blank"
+        rel="noreferrer"
+        data-testid={`ai-build-preview-link-${planId}`}
+        className="inline-flex items-center gap-1 rounded-full border border-emerald-500/40 bg-emerald-500/[0.06] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-emerald-300 hover:bg-emerald-500/[0.12]"
+      >
+        <Eye className="h-3 w-3" /> Preview
+      </a>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={probe}
+      disabled={loading}
+      data-testid={`ai-build-preview-probe-${planId}`}
+      title={status === 'no_deployment' ? 'Vercel is still building this preview' : 'Look up the Vercel preview URL for this PR'}
+      className="inline-flex items-center gap-1 rounded-full border border-tbc-900/60 bg-ink-900 px-2 py-0.5 text-[10px] uppercase tracking-wider text-tbc-200/70 hover:bg-ink-950"
+    >
+      {loading
+        ? <Loader2 className="h-3 w-3 animate-spin" />
+        : <Eye className="h-3 w-3" />}
+      Preview{status === 'no_deployment' ? '…' : ''}
+    </button>
   );
 }

@@ -200,6 +200,65 @@ _SYSTEM_PROMPT = (
 )
 
 
+_SECOND_OPINION_PROMPT = (
+    "You are a second senior code reviewer auditing another AI's review of a "
+    "production repo. Return STRICT JSON only:\n"
+    "{\n"
+    '  "verdict": "ship" | "ship_with_concerns" | "do_not_ship",\n'
+    '  "summary": "<one-line>",\n'
+    '  "concerns": ["<short>", ...]\n'
+    "}\n"
+    "Focus ONLY on what the first reviewer might have missed: hallucinated "
+    "files, missing imports, security regressions, auth/payment misuse. Be "
+    "concise — max 6 concerns. If you broadly agree, return `ship` with empty "
+    "concerns. If the first reviewer marked do_not_ship, agree with them."
+)
+
+
+async def _second_opinion(snapshot: dict, first_review: dict, llm_key: str) -> dict:
+    """Run a DIFFERENT-provider reviewer (Claude) over the same snapshot
+    + first reviewer's verdict. Cheap audit pass — catches hallucinations
+    the primary GPT-4o reviewer might miss. Always returns a dict.
+    """
+    from emergentintegrations.llm.chat import LlmChat, UserMessage
+
+    blocks = [f"--- {f['path']} ---\n{f['content'][:6_000]}" for f in snapshot['files'][:20]]
+    user_msg = (
+        f"Repo: {snapshot.get('repo')}@{snapshot.get('ref')}\n"
+        f"First reviewer (GPT-4o) verdict: {first_review.get('verdict')}\n"
+        f"First reviewer summary: {(first_review.get('summary') or '')[:600]}\n\n"
+        f"Files reviewed:\n" + "\n\n".join(blocks)
+        + "\n\nReturn the second-opinion JSON now."
+    )
+    chat = LlmChat(
+        api_key=llm_key,
+        session_id=f'code-review-second-{datetime.now(timezone.utc).timestamp():.0f}',
+        system_message=_SECOND_OPINION_PROMPT,
+    ).with_model('anthropic', 'claude-sonnet-4-5-20250929')
+    try:
+        raw = await chat.send_message(UserMessage(text=user_msg))
+    except Exception as e:
+        return {'verdict': 'review_skipped', 'summary': f'Second-opinion failed: {str(e)[:200]}', 'concerns': [], 'reviewer_model': 'claude-sonnet-4-5'}
+    text = (raw or '').strip()
+    if text.startswith('```'):
+        text = re.sub(r'^```[a-zA-Z]*\n?', '', text)
+        text = re.sub(r'\n?```$', '', text)
+    try:
+        parsed = json.loads(text)
+    except Exception:
+        m = re.search(r'\{.*\}', text, re.DOTALL)
+        try:
+            parsed = json.loads(m.group(0)) if m else {}
+        except Exception:
+            parsed = {}
+    return {
+        'verdict': parsed.get('verdict') or 'review_skipped',
+        'summary': (parsed.get('summary') or '')[:280],
+        'concerns': [str(c)[:280] for c in (parsed.get('concerns') or [])][:8],
+        'reviewer_model': 'claude-sonnet-4-5',
+    }
+
+
 async def run_code_review(project: dict, settings: dict) -> dict:
     """Fetch the repo snapshot, hand it to the LLM, parse JSON. Always returns
     a dict — even on parse failure we surface the raw text so the operator can
@@ -288,6 +347,19 @@ async def run_code_review(project: dict, settings: dict) -> dict:
     review['ref'] = snapshot['ref']
     review['files_sampled'] = [f['path'] for f in snapshot['files']]
     review['reviewed_at'] = datetime.now(timezone.utc).isoformat()
+
+    # Cross-AI second opinion — Claude audits GPT-4o's verdict. Catches
+    # hallucinations + security regressions the primary reviewer missed.
+    # Escalation rule: if Claude says `do_not_ship`, we promote the verdict
+    # to `do_not_ship` so the existing 412 ship-gate triggers automatically
+    # (this is the operator-requested "gate the deploy button in chat"
+    #  enforcement layer — same gate, two independent reviewers).
+    snapshot_for_review = {**snapshot, 'repo': project['repo']}
+    second = await _second_opinion(snapshot_for_review, review, llm_key)
+    review['second_opinion'] = second
+    if second.get('verdict') == 'do_not_ship' and review.get('verdict') != 'do_not_ship':
+        review['verdict_promoted_by'] = 'second_opinion'
+        review['verdict'] = 'do_not_ship'
 
     await db.deploy_projects.update_one(
         {'id': project['id']},
