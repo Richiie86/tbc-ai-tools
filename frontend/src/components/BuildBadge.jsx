@@ -9,9 +9,9 @@ import { Rocket } from 'lucide-react';
  * Bump `BUILD_TAG` whenever we cut a meaningful release. If you can see
  * the tag on tbctools.org, the deploy worked.
  */
-const BUILD_TAG = 'v2.2 · Feb 2026';
+const BUILD_TAG = 'v2.3 · Feb 2026';
 const BUILD_HIGHLIGHTS = [
-  'Operator command palette: ⌘K / "/" to search any setting',
+  'Universal operator search: ⌘K finds tabs, settings, users, projects, contacts, audit',
   'One-click "Push Code" button (Ops tab)',
   'AI improvement suggestions (per project)',
   'Operator Security card: re-registration approvals + KYC bypass',

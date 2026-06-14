@@ -1969,6 +1969,8 @@ from operator_security_ext import router as operator_security_router
 app.include_router(operator_security_router)
 from ai_build_tests_ext import router as ai_build_tests_router
 app.include_router(ai_build_tests_router)
+from operator_search_ext import router as operator_search_router
+app.include_router(operator_search_router)
 from changelog_ext import router as changelog_router
 app.include_router(changelog_router)
 from auto_fix_loop_ext import router as auto_fix_router

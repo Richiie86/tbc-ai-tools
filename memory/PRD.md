@@ -11,6 +11,19 @@ gold theme. Domain: **tbctools.org**.
 - **End user (member)** — Chats with the AI builder, manages plan, copies referral link.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
+## Implemented — Feb 2026 (batch 21 — universal operator search)
+- ✅ **`GET /api/operator/search?q=…`** new universal-search endpoint (`operator_search_ext.py`) — fans out across `db.users` (email/name), `db.deploy_projects` (projectName/repo/domain), `db.contacts` (subject/email/name), `db.audit_log` (kind/target/actor). Hard cap 8 hits/collection. Operator-only.
+- ✅ **OperatorSearch.jsx upgraded** — debounced 250ms fetch into `/operator/search`, merges with the static tab/setting INDEX. Per-kind icons (user=sky, project=emerald, contact=violet, audit=slate, static=amber) + per-kind body layouts. ⌘K / `/` keyboard shortcuts unchanged.
+- ✅ **Click routing per result kind**:
+  - `user` → `/operator?tab=users&open_user=<id>`
+  - `project` → `/operator?tab=ops&project=<id>`
+  - `contact` → `/operator?tab=contacts&open=<id>`
+  - `audit` → `/operator?tab=audit`
+- ✅ **Operator nav layout preserved** — Home / About / Pricing / Contact untouched; search pill collapses to icon-only on tablets so links never lose their space.
+- ✅ **Build badge v2.3** so the operator can spot once production deploys.
+- ✅ **Curl smoke test**: `/operator/search?q=test` returned 21 hits (8 users, 4 projects, 3 contacts, 6 audit entries).
+
+
 ## Implemented — Feb 2026 (batch 20 — security + AI automation)
 - ✅ **Re-registration approval flow** — operator vanishing a user now stamps `db.vanished_emails`. A subsequent `/auth/register` with that email is held (`pending_approval=true, status='pending'`); login returns 403 with a "pending operator approval" message. Operator surface at `/api/operator/security/pending-users[/approve|/reject]`.
 - ✅ **KYC-bypass allowlist** — operator-only `GET/POST/DELETE /api/operator/security/kyc-bypass`. Lives in `db.kyc_bypass_emails`. Public helper `is_kyc_bypassed(email)` exposed. 2FA is unchanged — that gate lives in auth.

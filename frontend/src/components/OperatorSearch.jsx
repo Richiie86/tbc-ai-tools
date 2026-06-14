@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Search, ArrowRight, Command } from 'lucide-react';
+import { Search, ArrowRight, Command, User, Rocket, MessageSquare, History } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import api from '../lib/api';
 
 /**
  * Operator-only command palette / search.
@@ -125,19 +126,57 @@ export default function OperatorSearch({ onTabChange }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
   const [hi, setHi] = useState(0);
+  // Dynamic results from /api/operator/search — users/projects/contacts/audit.
+  // Refetched on every keystroke (debounced 250ms) so the palette becomes a
+  // "find anything in this app" shortcut.
+  const [remote, setRemote] = useState({ users: [], projects: [], contacts: [], audit: [] });
+  const [loadingRemote, setLoadingRemote] = useState(false);
   const inputRef = useRef(null);
 
-  const results = useMemo(() => {
+  // ── Debounced universal search ──────────────────────────────────────
+  useEffect(() => {
+    if (!open) return undefined;
+    const handle = setTimeout(async () => {
+      setLoadingRemote(true);
+      try {
+        const { data } = await api.get('/operator/search', { params: { q } });
+        setRemote({
+          users: data?.users || [],
+          projects: data?.projects || [],
+          contacts: data?.contacts || [],
+          audit: data?.audit || [],
+        });
+      } catch { /* swallow — static results still render */ }
+      finally { setLoadingRemote(false); }
+    }, 250);
+    return () => clearTimeout(handle);
+  }, [q, open]);
+
+  // ── Static results (tabs + settings cards) ──────────────────────────
+  const staticResults = useMemo(() => {
     if (!q.trim()) {
-      // Empty query → surface the most common destinations.
-      return INDEX.slice(0, 8).map((e) => ({ ...e, _s: 0 }));
+      return INDEX.slice(0, 6).map((e) => ({ ...e, _kind: 'static', _s: 0 }));
     }
     return INDEX
-      .map((e) => ({ ...e, _s: score(q, e) }))
+      .map((e) => ({ ...e, _kind: 'static', _s: score(q, e) }))
       .filter((e) => e._s > 0)
       .sort((a, b) => b._s - a._s)
-      .slice(0, 12);
+      .slice(0, 10);
   }, [q]);
+
+  // ── Merged result list — order: static (tabs/settings) → users →
+  //    projects → contacts → audit. Each item carries a `_kind` so the
+  //    keyboard handler + pick() know how to render and navigate.
+  const results = useMemo(() => {
+    const merged = [
+      ...staticResults,
+      ...remote.users.map((u) => ({ ...u, _kind: 'user' })),
+      ...remote.projects.map((p) => ({ ...p, _kind: 'project' })),
+      ...remote.contacts.map((c) => ({ ...c, _kind: 'contact' })),
+      ...remote.audit.map((a) => ({ ...a, _kind: 'audit' })),
+    ];
+    return merged;
+  }, [staticResults, remote]);
 
   // Global keyboard: `/` or Ctrl/Cmd+K opens.
   useEffect(() => {
@@ -164,23 +203,37 @@ export default function OperatorSearch({ onTabChange }) {
   const pick = useCallback((entry) => {
     if (!entry) return;
     setOpen(false);
-    if (entry.tab && onTabChange) {
-      onTabChange(entry.tab);
-    } else if (entry.tab) {
-      navigate(`/operator?tab=${entry.tab}`);
+    // Static tab/setting → existing tab + anchor flow.
+    if (entry._kind === 'static') {
+      if (entry.tab && onTabChange) onTabChange(entry.tab);
+      else if (entry.tab) navigate(`/operator?tab=${entry.tab}`);
+      if (entry.anchor) {
+        requestAnimationFrame(() => {
+          setTimeout(() => {
+            const el = document.getElementById(`section-${entry.anchor}`);
+            if (el) {
+              el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              el.classList.add('ring-2', 'ring-amber-400/60');
+              setTimeout(() => el.classList.remove('ring-2', 'ring-amber-400/60'), 1800);
+            }
+          }, 300);
+        });
+      }
+      return;
     }
-    // Anchor scroll after the tab content mounts.
-    if (entry.anchor) {
-      requestAnimationFrame(() => {
-        setTimeout(() => {
-          const el = document.getElementById(`section-${entry.anchor}`);
-          if (el) {
-            el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            el.classList.add('ring-2', 'ring-amber-400/60');
-            setTimeout(() => el.classList.remove('ring-2', 'ring-amber-400/60'), 1800);
-          }
-        }, 300);
-      });
+    // Dynamic results — each carries its own destination:
+    //   user    → Users tab with the email pre-filtered + auto-open
+    //   project → Ops tab with the project pre-selected
+    //   contact → Contacts tab
+    //   audit   → Audit tab (no row deep-link yet — surface the tab)
+    if (entry._kind === 'user') {
+      navigate(`/operator?tab=users&open_user=${encodeURIComponent(entry.id)}`);
+    } else if (entry._kind === 'project') {
+      navigate(`/operator?tab=ops&project=${encodeURIComponent(entry.id)}`);
+    } else if (entry._kind === 'contact') {
+      navigate(`/operator?tab=contacts&open=${encodeURIComponent(entry.id)}`);
+    } else if (entry._kind === 'audit') {
+      navigate(`/operator?tab=audit`);
     }
   }, [navigate, onTabChange]);
 
@@ -226,7 +279,7 @@ export default function OperatorSearch({ onTabChange }) {
                 value={q}
                 onChange={(e) => { setQ(e.target.value); setHi(0); }}
                 onKeyDown={onKey}
-                placeholder='Try "github token", "push code", "kyc bypass", "auto-fix"…'
+                placeholder='Search anything: "github", "kyc", a user email, a project name…'
                 data-testid="operator-search-input"
                 className="grow bg-transparent text-sm text-tbc-100 placeholder:text-tbc-200/40 focus:outline-none"
               />
@@ -235,12 +288,12 @@ export default function OperatorSearch({ onTabChange }) {
             <div className="max-h-80 overflow-y-auto py-1">
               {results.length === 0 ? (
                 <p className="px-4 py-6 text-center text-xs text-tbc-200/50">
-                  Nothing matches. Try a tab name ("ops", "users") or a setting ("github", "stripe", "vercel").
+                  {loadingRemote ? 'Searching…' : 'Nothing matches. Try a tab name ("ops"), a setting ("github"), a user email, or a project name.'}
                 </p>
               ) : (
                 results.map((r, i) => (
                   <button
-                    key={`${r.tab}-${r.label}-${i}`}
+                    key={`${r._kind}-${r.id || r.label || r.email || r.kind || i}-${i}`}
                     type="button"
                     onMouseEnter={() => setHi(i)}
                     onClick={() => pick(r)}
@@ -251,11 +304,9 @@ export default function OperatorSearch({ onTabChange }) {
                         : 'text-tbc-100/90 hover:bg-ink-900/60'
                     }`}
                   >
-                    <div className="grow">
-                      <div className="font-semibold">{r.label}</div>
-                      <div className="text-[10px] uppercase tracking-wider text-tbc-200/50">
-                        {r.tab} {r.section ? `· ${r.section}` : ''}
-                      </div>
+                    <ResultIcon kind={r._kind} />
+                    <div className="grow min-w-0">
+                      <ResultBody entry={r} />
                     </div>
                     <ArrowRight className={`h-3.5 w-3.5 shrink-0 ${i === hi ? 'text-amber-300' : 'text-tbc-200/30'}`} />
                   </button>
@@ -270,6 +321,79 @@ export default function OperatorSearch({ onTabChange }) {
           </div>
         </div>
       )}
+    </>
+  );
+}
+
+
+/** Per-kind icon — one glance tells the operator what bucket the
+ *  result came from. Matches the colour language used elsewhere
+ *  (amber = settings/static, sky = users, emerald = projects,
+ *  violet = contacts, slate = audit). */
+function ResultIcon({ kind }) {
+  const cls = 'h-3.5 w-3.5 shrink-0';
+  if (kind === 'user')    return <User    className={`${cls} text-sky-300`} />;
+  if (kind === 'project') return <Rocket  className={`${cls} text-emerald-300`} />;
+  if (kind === 'contact') return <MessageSquare className={`${cls} text-violet-300`} />;
+  if (kind === 'audit')   return <History className={`${cls} text-slate-300`} />;
+  return <Search className={`${cls} text-amber-300`} />;
+}
+
+/** Per-kind body — different fields surface depending on what the
+ *  operator is looking at. */
+function ResultBody({ entry }) {
+  if (entry._kind === 'user') {
+    const status = (entry.status || 'active').toLowerCase();
+    return (
+      <>
+        <div className="truncate font-semibold">{entry.email}</div>
+        <div className="text-[10px] uppercase tracking-wider text-tbc-200/50">
+          User · {entry.role || 'user'} · plan {entry.plan || 'free'}
+          {status !== 'active' ? ` · ${status}` : ''}
+          {entry.name ? ` · ${entry.name}` : ''}
+        </div>
+      </>
+    );
+  }
+  if (entry._kind === 'project') {
+    return (
+      <>
+        <div className="truncate font-semibold">{entry.projectName || entry.id}</div>
+        <div className="truncate text-[10px] uppercase tracking-wider text-tbc-200/50">
+          Project · {entry.repo || '—'}{entry.domain ? ` · ${entry.domain}` : ''}
+        </div>
+      </>
+    );
+  }
+  if (entry._kind === 'contact') {
+    return (
+      <>
+        <div className="truncate font-semibold">{entry.subject || '(no subject)'}</div>
+        <div className="truncate text-[10px] uppercase tracking-wider text-tbc-200/50">
+          Contact · from {entry.name || entry.email}
+        </div>
+      </>
+    );
+  }
+  if (entry._kind === 'audit') {
+    return (
+      <>
+        <div className="truncate font-semibold">
+          {entry.kind} {entry.target ? `→ ${entry.target}` : ''}
+        </div>
+        <div className="truncate text-[10px] uppercase tracking-wider text-tbc-200/50">
+          Audit · by {entry.actor_email || 'system'}
+        </div>
+      </>
+    );
+  }
+  // static
+  return (
+    <>
+      <div className="truncate font-semibold">{entry.label}</div>
+      <div className="text-[10px] uppercase tracking-wider text-tbc-200/50">
+        {entry.tab}{entry.section ? ` · ${entry.section}` : ''}
+      </div>
     </>
   );
 }
