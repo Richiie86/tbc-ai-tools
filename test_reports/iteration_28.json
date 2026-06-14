@@ -1,0 +1,41 @@
+{
+  "summary": "Iter28: Backend 19/19 PASS + iter27 regression 11/11 PASS. UI testing BLOCKED by a CRITICAL pre-existing regression in /api/operator/deploy/projects returning 500 (KeyError: 'domain' in _project_to_out at /app/backend/deploy_projects_ext.py:140). The Ops tab cannot render any project rows, so the new push-initial/suggestions/review-status-dot/review-dots testids cannot be verified live in the UI. The new feature code itself looks correct in source review; once the deploy/projects 500 is fixed, the UI testids should appear.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "/api/operator/deploy/projects", "issue": "Returns 500 with KeyError: 'domain'. _project_to_out at deploy_projects_ext.py:140 uses doc['domain'] (bracket access) — a single doc missing the field breaks the whole list. Also fragile: doc['projectName'], doc['repo'], doc['created_at'], doc['updated_at'] (lines 137-152) have the same bracket-access pattern. This blocks the entire Ops tab UI from rendering ANY project row, including the new push-initial / suggestions / review-status-dot / review-dots UI for iter28.", "priority": "CRITICAL"}
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Ops tab project list", "issue": "BLOCKED — backend 500 on /api/operator/deploy/projects prevents the project list from rendering. data-testid=push-initial-<id>, suggestions-<id>, suggestions-refresh-<id>, suggestion-<id>-<idx>, suggestion-implement-<id>-<idx>, review-status-dot-<id>, review-dots-<id> could NOT be verified live. Source review of SuggestionsPanel.jsx / ProjectRow.jsx / CodeReviewDialog.jsx shows the testids exist in the JSX.", "selector": "[data-testid^='push-initial-'], [data-testid^='suggestions-']", "priority": "BLOCKED-BY-BACKEND"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter28_suggestions_autopush.py",
+    "/app/test_reports/pytest/iter28_v2.xml"
+  ],
+  "action_items": [
+    "(CRITICAL) Fix /app/backend/deploy_projects_ext.py:140 — _project_to_out uses doc['domain'] which 500s when ANY project doc is missing the field. Replace doc['domain'] with doc.get('domain','') and similarly defensively access doc.get('projectName',''), doc.get('repo',''), doc.get('created_at'), doc.get('updated_at') (lines 137-152). This is REGRESSION not caused by iter28 but it blocks all iter28 UI verification.",
+    "(RETEST) After the 500 fix, re-run the UI portion of iter28 to confirm push-initial/suggestions/review-status-dot/review-dots testids render — seed a deploy_projects doc with last_suggestions + last_code_review (sample seed in /app/test_reports/iteration_28.json seed_data_creation field) and verify on /operator?tab=ops."
+  ],
+  "critical_code_review_comments": [
+    "deploy_suggestions_ext.py: clean contract — POST gates on 404 (no project), 412 (no repo), 503 (no EMERGENT_LLM_KEY), 502 (snapshot/LLM failure). Cache check at line 153-161 correctly skips LLM when ref matches AND reviewed_at < 30min. The cache TTL is enforced via timestamp diff, not Mongo TTL — fine for the 30-min window. GET returns the no-op `{suggestions:[]}` shape when missing, so the SuggestionsPanel auto-fetch on mount won't error for fresh projects.",
+    "deploy_initial_push_ext.py: refactor is clean — do_initial_push(project, source=...) takes a pre-fetched project doc (so auto_fix_loop avoids a double Mongo read). source field stamped on project doc as last_initial_push_source for audit. HTTP endpoint at line 200-220 reads the doc and delegates. Importable from any module without router side effects.",
+    "auto_fix_loop_ext.py: _auto_fix_empty_repo_sweep correctly placed FIRST in run_auto_fix_tick (line 387, before runtime-errors cursor at line 393). Guarded by cfg['auto_push_empty_repo'] default false (line 326). 6-hour cooldown via last_initial_push_at prevents flapping. Mongo filter requires auto_heal=true AND last_code_review.verdict='repo_empty' — narrow, correct scope. AutoFixConfig pydantic model at line 529-535 still defaults all flags to false; auto_push_empty_repo is NOT in the pydantic model fields but IS in _config(): the PUT /config endpoint will silently drop the field on a round-trip update. RECOMMENDATION: add `auto_push_empty_repo: bool = False` to AutoFixConfig.",
+    "ai_build_ext.py: PlanRequest.source field added correctly with default 'manual' and max_length=32. Stamped on the ai_build_plans doc at line 434. Plan endpoint does NOT 422 on {source:'suggestion'} — verified live (test_plan_endpoint_does_not_422_on_source returned 404 as expected, not 422).",
+    "deploy_projects_ext.py:140 — UNRELATED CRITICAL BUG (not iter28 scope): _project_to_out uses bracket access on doc['domain'] / doc['projectName'] / doc['repo'] / doc['created_at'] / doc['updated_at']. Any project doc missing one of these (e.g. a partial seed, a half-migrated record) raises KeyError and 500s the entire list. Fix: doc.get() everywhere."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter28_suggestions_autopush.py (NEW — 19 tests, all passing)"
+  ],
+  "success_rate": {"backend": "100% (19/19 iter28 + 11/11 iter27 regression)", "frontend": "0% — BLOCKED by /api/operator/deploy/projects 500"},
+  "test_credentials": "Operator rac.investments.swe@gmail.com / 123Admin@98",
+  "seed_data_creation": "All inserted+cleaned by tests (TEST_iter28_* prefixed). One UI-test seed TEST_iter28_ui_suggestions_seed was inserted with last_suggestions (3 priorities) + last_code_review (1 high/2 medium/1 low findings) then DELETED before finish. After main agent fixes the /deploy/projects 500, re-seed via: db.deploy_projects.insert_one({id:'TEST_iter28_ui_suggestions_seed', projectName:'TEST', repo:'fake/fake', domain:'test.example.com', gitRef:'main', last_suggestions:{suggestions:[{priority:'high',title:'...',rationale:'...',files:['x'],implementation_prompt:'...',effort:'medium'},...]}, last_code_review:{verdict:'ship_with_concerns',findings:[{severity:'high',...},{severity:'medium',...},{severity:'medium',...},{severity:'low',...}]}, created_at, updated_at}).",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend portion (suggestions endpoints, PlanRequest.source, auto_push_empty_repo config, _auto_fix_empty_repo_sweep ordering, do_initial_push helper importable) is FULLY VERIFIED (19/19) in /app/backend/tests/test_iter28_suggestions_autopush.py. iter27 regression suite still GREEN (11/11). The frontend portion is BLOCKED by a pre-existing /api/operator/deploy/projects 500 (KeyError 'domain' in _project_to_out @ deploy_projects_ext.py:140). Once main agent patches that with .get() defaults, the UI testids should be live (the iter28 JSX code itself looks correct on source review). Re-test plan: (1) curl /api/operator/deploy/projects with Bearer token — expect 200 with array; (2) seed a project per the seed_data_creation hint above; (3) open /operator?tab=ops and verify push-initial-<id>, suggestions-<id>, suggestion-<id>-0, suggestion-implement-<id>-0, review-status-dot-<id> testids; (4) click Code Review and verify review-dots-<id> testid.",
+  "rca of the issue": "deploy_projects_ext._project_to_out (lines 134-153) uses bracket access doc['domain'] (and similar for 'projectName','repo','created_at','updated_at'). When _list_projects iterates the cursor and hits a project doc missing one of those fields, KeyError propagates → FastAPI returns 500. Console showed back-to-back 500s on /api/operator/deploy/projects with backend log Traceback: 'KeyError: domain' at the doc['domain'] line. This blocks every project from rendering on the Ops tab and hence blocks every iter28 frontend testid. Fix is one-line per field: replace doc['domain'] → doc.get('domain','') and similarly. After the fix, all iter28 UI testids should appear once a project is seeded with last_suggestions + last_code_review."
+}

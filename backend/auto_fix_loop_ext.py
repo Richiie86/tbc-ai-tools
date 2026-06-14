@@ -51,6 +51,11 @@ async def _config() -> dict:
         'enabled': bool(cfg.get('enabled', False)),
         'auto_merge': bool(cfg.get('auto_merge', False)),
         'include_health': bool(cfg.get('include_health', False)),
+        # New: auto-push the live /app source to deploy projects whose
+        # configured GitHub repo is empty (verdict='repo_empty'). Opt-in
+        # because it WRITES to the operator's GitHub repo — no surprises.
+        # Only fires for projects with `auto_heal: true`.
+        'auto_push_empty_repo': bool(cfg.get('auto_push_empty_repo', False)),
         'per_day_cap': int(cfg.get('per_day_cap') or _DEFAULT_PER_DAY),
         'per_tick_cap': int(cfg.get('per_tick_cap') or _DEFAULT_PER_TICK),
         'project_id': cfg.get('project_id'),
@@ -306,6 +311,55 @@ async def _auto_fix_health_sweep(cfg: dict, operator_id: str, budget: int) -> di
 
 
 # ─── Core tick ────────────────────────────────────────────────────────────
+async def _auto_fix_empty_repo_sweep(cfg: dict) -> dict:
+    """When `auto_push_empty_repo` is on, push /app source to every
+    deploy project that (a) has a configured GitHub repo, (b) opted in
+    via `auto_heal: true`, and (c) has a recent code review verdict of
+    `repo_empty`. This closes the last manual step in the credit-burn
+    loop fix — operator never even sees the "Push code now" button when
+    they don't want to.
+
+    Hard guard: never pushes twice within 6 hours to the same project
+    (prevents flapping if the review is re-run mid-build).
+    """
+    out = {'processed': 0, 'pushed': 0, 'errors': []}
+    if not cfg.get('auto_push_empty_repo'):
+        return out
+
+    # Find candidate projects.
+    six_hours_ago = datetime.now(timezone.utc) - timedelta(hours=6)
+    cursor = db.deploy_projects.find({
+        'repo': {'$exists': True, '$ne': ''},
+        'auto_heal': True,
+        'last_code_review.verdict': 'repo_empty',
+        '$or': [
+            {'last_initial_push_at': {'$exists': False}},
+            {'last_initial_push_at': {'$lt': six_hours_ago}},
+        ],
+    })
+
+    from deploy_initial_push_ext import do_initial_push
+    async for project in cursor:
+        out['processed'] += 1
+        try:
+            result = await do_initial_push(project, source='auto_fix_empty_repo')
+            if result.get('pushed', 0) > 0:
+                out['pushed'] += 1
+                logger.info(
+                    'auto-push: %s files → %s@%s (project=%s)',
+                    result['pushed'], result['repo'], result['branch'], project['id'],
+                )
+            else:
+                out['errors'].append(
+                    f"empty_push:{project['id']}: {len(result.get('errors') or [])} api errors"
+                )
+        except HTTPException as e:
+            out['errors'].append(f"auto_push_failed:{project.get('id')}: {e.detail}")
+        except Exception as e:
+            out['errors'].append(f"auto_push_crashed:{project.get('id')}: {e}")
+    return out
+
+
 async def run_auto_fix_tick() -> dict:
     """One pass of the loop. Returns `{processed, opened, skipped, errors}`."""
     cfg = await _config()
@@ -327,6 +381,14 @@ async def run_auto_fix_tick() -> dict:
     if not operator_id:
         out['errors'].append('No operator account found to attribute auto-fix actions')
         return out
+
+    # Empty-repo auto-push sweep runs FIRST — other sweeps assume the
+    # deploy project's repo actually has source code in it.
+    empty = await _auto_fix_empty_repo_sweep(cfg)
+    out['empty_repo_processed'] = empty['processed']
+    out['empty_repo_pushed'] = empty['pushed']
+    if empty['errors']:
+        out['errors'].extend(empty['errors'])
 
     since = datetime.now(timezone.utc) - timedelta(hours=_DEFAULT_LOOKBACK_HOURS)
     cursor = db.runtime_errors.find({

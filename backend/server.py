@@ -1927,6 +1927,8 @@ from ai_visual_verify_ext import router as ai_visual_verify_router
 app.include_router(ai_visual_verify_router)
 from deploy_initial_push_ext import router as deploy_initial_push_router
 app.include_router(deploy_initial_push_router)
+from deploy_suggestions_ext import router as deploy_suggestions_router
+app.include_router(deploy_suggestions_router)
 from changelog_ext import router as changelog_router
 app.include_router(changelog_router)
 from auto_fix_loop_ext import router as auto_fix_router

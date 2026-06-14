@@ -10,11 +10,12 @@ import {
 import {
   Rocket, Globe, Loader2, Copy, Check, GitBranch, ExternalLink, RotateCw, Save,
   Sparkles, Activity, AlertCircle, CheckCircle2, GitFork, Pencil, ShieldCheck, Bot,
-  Cog, BadgeCheck, Zap, ArrowUpCircle,
+  Cog, BadgeCheck, Zap, ArrowUpCircle, UploadCloud,
 } from 'lucide-react';
 
 import { CodeReviewDialog } from './CodeReviewDialog';
 import { CloneProjectDialog } from './CloneProjectDialog';
+import { SuggestionsPanel } from './SuggestionsPanel';
 import { ShipGateDialog } from './ShipGateDialog';
 import { AutopilotDialog } from './AutopilotDialog';
 import { useInlineDomain } from './useInlineDomain';
@@ -271,10 +272,26 @@ export function ProjectRow({ project, onDeployed }) {
             disabled={a.busy !== null}
             variant="outline"
             title="Run AI code review on this repo"
-            className="border-violet-500/40 bg-ink-900 text-violet-300 hover:bg-violet-500/10"
+            className="relative border-violet-500/40 bg-ink-900 text-violet-300 hover:bg-violet-500/10"
           >
             {a.busy === 'review' ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : <ShieldCheck className="mr-1.5 h-3 w-3" />}
             Code Review
+            {/* Status dot — emerald=ship, amber=concerns/fixes, rose=block,
+                slate=never run. Pulses on amber/rose so the eye catches
+                pending problems before opening the dialog. */}
+            <ReviewStatusDot review={a.review} testid={`review-status-dot-${project.id}`} />
+          </Button>
+          <Button
+            size="sm"
+            data-testid={`push-initial-${project.id}`}
+            onClick={() => a.pushInitial()}
+            disabled={a.busy !== null}
+            variant="outline"
+            title={`Push the live /app source to ${project.repo || 'this project\'s GitHub repo'} (one-click, no manual upload)`}
+            className="border-sky-500/40 bg-ink-900 text-sky-300 hover:bg-sky-500/10"
+          >
+            {a.busy === 'push' ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : <UploadCloud className="mr-1.5 h-3 w-3" />}
+            Push Code
           </Button>
           <Button
             size="sm"
@@ -356,6 +373,12 @@ export function ProjectRow({ project, onDeployed }) {
           <span className="text-violet-300/50">— click to view</span>
         </button>
       )}
+
+      {/* Forward-looking AI suggestions — separate from the gating Code
+          Review. Shows priority-coloured dot pills + a one-click
+          "Implement this" button per item that fires the AI Build
+          planner. Cached server-side for 30 min to not double-bill. */}
+      <SuggestionsPanel project={project} />
 
       <CodeReviewDialog
         open={a.reviewOpen}
@@ -439,5 +462,32 @@ export function ProjectRow({ project, onDeployed }) {
         </AlertDialogContent>
       </AlertDialog>
     </div>
+  );
+}
+
+
+/** Tiny coloured dot that mirrors the last code-review verdict so the
+ * operator sees the status without opening the dialog. Emerald=ship,
+ * amber=concerns/fixes, rose=block/empty, slate=never run.
+ */
+function ReviewStatusDot({ review, testid }) {
+  if (!review) return null;
+  const v = (review.verdict || '').toLowerCase();
+  let tone = 'bg-slate-500/40';
+  let pulse = '';
+  if (v === 'ship') tone = 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.7)]';
+  else if (v === 'ship_with_concerns' || v === 'ship_with_fixes') {
+    tone = 'bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.7)]';
+    pulse = 'animate-pulse';
+  } else if (v === 'do_not_ship' || v === 'repo_empty') {
+    tone = 'bg-rose-400 shadow-[0_0_6px_rgba(244,63,94,0.7)]';
+    pulse = 'animate-pulse';
+  }
+  return (
+    <span
+      data-testid={testid}
+      className={`ml-2 inline-block h-2 w-2 rounded-full ${tone} ${pulse}`}
+      title={`Last review: ${v || 'unknown'}`}
+    />
   );
 }

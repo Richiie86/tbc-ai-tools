@@ -148,6 +148,39 @@ export function useProjectActions(project, onDeployed) {
     }
   };
 
+  // --- one-click initial push (NEW) -----------------------------------
+  // Sends the live /app/{backend,frontend} source to this project's
+  // configured GitHub repo via /api/operator/deploy/{id}/initial-push.
+  // Operator's primary use-case is unblocking a fresh empty repo without
+  // having to go to github.com, but it's also useful for force-pushing
+  // local changes that haven't been committed via "Save to GitHub" yet.
+  const pushInitial = async () => {
+    setBusy('push');
+    try {
+      const { data } = await api.post(`/operator/deploy/${project.id}/initial-push`, {});
+      const errs = (data?.errors || []).length;
+      if (data?.pushed > 0) {
+        toast.success(
+          `Pushed ${data.pushed} file${data.pushed === 1 ? '' : 's'} → ${data.repo}@${data.branch}`
+          + (errs ? ` (${errs} error${errs === 1 ? '' : 's'})` : ''),
+          { duration: 8000 },
+        );
+        onDeployed();
+      } else {
+        toast.error(`Push completed but 0 files uploaded · ${errs} error${errs === 1 ? '' : 's'}`);
+      }
+    } catch (e) {
+      const detail = e?.response?.data?.detail;
+      const status = e?.response?.status;
+      const msg = typeof detail === 'string'
+        ? detail
+        : (detail?.message || `Push failed${status ? ` (HTTP ${status})` : ''}`);
+      toast.error(msg, { duration: 10000 });
+    } finally {
+      setBusy(null);
+    }
+  };
+
   // --- promote-to-prod (separate from runDeploy to avoid the gate path) ---
   // Driven by an AlertDialog (no window.confirm). Caller opens the dialog
   // by flipping `promoteOpen`; this runs once the dialog's confirm is hit.
@@ -265,7 +298,7 @@ export function useProjectActions(project, onDeployed) {
     // setters (for dialogs)
     setReviewOpen, setCloneOpen, setPromoteOpen, setAutopilotOpen, setGateBlock,
     // actions
-    trigger, promote, toggleAutoPromote, toggleAutoHeal,
+    trigger, promote, toggleAutoPromote, toggleAutoHeal, pushInitial,
     openFixChat, bypassAndShip, submitClone, copyUrl,
   };
 }

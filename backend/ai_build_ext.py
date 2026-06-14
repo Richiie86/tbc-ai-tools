@@ -135,6 +135,10 @@ _REVIEWER_SYSTEM_PROMPT = (
 class PlanRequest(BaseModel):
     project_id: str = Field(..., description='Operator deploy_projects.id')
     prompt: str = Field(..., min_length=4, max_length=_MAX_PROMPT_CHARS)
+    # Optional audit tag — `suggestion` when the plan came from the AI
+    # improvement-suggestions panel, `manual` (default) when typed in
+    # the AI Build form. Stamped on the ai_build_plans doc.
+    source: Optional[str] = Field(default='manual', max_length=32)
 
 
 class PlanResponse(BaseModel):
@@ -427,6 +431,7 @@ async def plan(req: PlanRequest, user: dict = Depends(get_current_operator)):
         'status': 'planned' if safe else 'refused',
         'model': 'claude-sonnet-4-5',
         'review': review,
+        'source': req.source or 'manual',
         'created_at': datetime.now(timezone.utc),
     }
     await db.ai_build_plans.insert_one(doc)

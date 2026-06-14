@@ -24,6 +24,15 @@ export function CodeReviewDialog({ open, onOpenChange, review, project }) {
   if (!review) return null;
   const findings = Array.isArray(review.findings) ? review.findings : [];
   const missing = Array.isArray(review.missing_files) ? review.missing_files : [];
+  // Per-severity dot counts so the operator gets an at-a-glance "traffic
+  // light" before they scan the full findings list. Matches the
+  // colour-coded dots the Emergent agent shows when it runs its own
+  // review — operator asked explicitly for the same visual language.
+  const counts = findings.reduce((acc, f) => {
+    const sev = (f.severity || 'low').toLowerCase();
+    acc[sev] = (acc[sev] || 0) + 1;
+    return acc;
+  }, {});
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
@@ -44,12 +53,37 @@ export function CodeReviewDialog({ open, onOpenChange, review, project }) {
 
         <div className="space-y-4">
           <div>
-            <span
-              data-testid={`review-verdict-${project.id}`}
-              className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs uppercase tracking-wider ${VERDICT_TONE[review.verdict] || VERDICT_TONE.ship_with_fixes}`}
-            >
-              {review.verdict || 'unknown'}
-            </span>
+            <div className="flex flex-wrap items-center gap-3">
+              <span
+                data-testid={`review-verdict-${project.id}`}
+                className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs uppercase tracking-wider ${VERDICT_TONE[review.verdict] || VERDICT_TONE.ship_with_fixes}`}
+              >
+                {review.verdict || 'unknown'}
+              </span>
+              {/* Traffic-light dot summary — same visual language the Emergent
+                  agent uses when it runs its own review. Each dot pulses if
+                  the count > 0 so the eye is drawn to high severities. */}
+              {findings.length > 0 && (
+                <div
+                  data-testid={`review-dots-${project.id}`}
+                  className="inline-flex items-center gap-2 rounded-full border border-tbc-900/60 bg-ink-900/60 px-2.5 py-0.5"
+                  title={`high: ${counts.high || 0} · medium: ${counts.medium || 0} · low: ${counts.low || 0}`}
+                >
+                  <span className="inline-flex items-center gap-1 text-[11px] text-tbc-200/90">
+                    <span className={`h-2 w-2 rounded-full ${counts.high ? 'bg-rose-400 animate-pulse shadow-[0_0_6px_rgba(244,63,94,0.7)]' : 'bg-rose-500/20'}`} />
+                    {counts.high || 0}
+                  </span>
+                  <span className="inline-flex items-center gap-1 text-[11px] text-tbc-200/90">
+                    <span className={`h-2 w-2 rounded-full ${counts.medium ? 'bg-amber-400 animate-pulse shadow-[0_0_6px_rgba(251,191,36,0.7)]' : 'bg-amber-500/20'}`} />
+                    {counts.medium || 0}
+                  </span>
+                  <span className="inline-flex items-center gap-1 text-[11px] text-tbc-200/90">
+                    <span className={`h-2 w-2 rounded-full ${counts.low ? 'bg-emerald-400' : 'bg-emerald-500/20'}`} />
+                    {counts.low || 0}
+                  </span>
+                </div>
+              )}
+            </div>
             {review.summary && (
               <p className="mt-2 text-sm leading-relaxed text-tbc-100/90">{review.summary}</p>
             )}

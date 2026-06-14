@@ -217,6 +217,14 @@ async def initial_push(
     project = await db.deploy_projects.find_one({'id': project_id})
     if not project:
         raise HTTPException(404, 'Project not found')
+    return await do_initial_push(project, source='operator_manual')
+
+
+async def do_initial_push(project: dict, *, source: str = 'operator_manual') -> dict:
+    """Reusable engine for the one-click push. Used by the HTTP endpoint
+    above AND by the auto-fix loop's empty-repo sweep. `source` is
+    stamped on the project doc for audit ("operator_manual" /
+    "auto_fix_empty_repo")."""
     repo = (project.get('repo') or '').strip()
     if not repo:
         raise HTTPException(412, 'Project has no GitHub repo configured.')
@@ -227,6 +235,7 @@ async def initial_push(
         raise HTTPException(503, 'github_token not set in Operator → Security.')
 
     branch = (project.get('gitRef') or 'main').strip() or 'main'
+    project_id = project['id']
 
     files = _gather_files()
     if not files:
@@ -288,6 +297,7 @@ async def initial_push(
         {'$set': {
             'last_initial_push_at': datetime.now(timezone.utc),
             'last_initial_push_count': pushed,
+            'last_initial_push_source': source,
             'updated_at': datetime.now(timezone.utc),
         }},
     )
