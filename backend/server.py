@@ -1903,6 +1903,8 @@ from changelog_ext import router as changelog_router
 app.include_router(changelog_router)
 from auto_fix_loop_ext import router as auto_fix_router
 app.include_router(auto_fix_router)
+from user_analytics_ext import router as user_analytics_router
+app.include_router(user_analytics_router)
 # app.include_router(marketplace_router)  # Marketplace deferred — skipped per user.
 # CORS — proven FastAPI built-in CORSMiddleware first (handles cookie
 # credentials correctly, battle-tested). The `DynamicCORSMiddleware`

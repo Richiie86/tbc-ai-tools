@@ -11,7 +11,15 @@ gold theme. Domain: **tbctools.org**.
 - **End user (member)** — Chats with the AI builder, manages plan, copies referral link.
 - **Operator** — Configures plans, treasury, payment gateways, licenses, royalties, projects.
 
-## Implemented — Feb 2026 (latest session, batch 14)
+## Implemented — Feb 2026 (latest session, batch 15)
+- ✅ **End-of-Session action bar in chat** — `EndOfSessionActions.jsx` renders BIG pill buttons under the last assistant message of every completed session, matching the Emergent-style strip the operator showed in the screenshot:
+  - 🚀 **Deploy** (blue→tbc gradient)
+  - 🛡️ **Run Code Review** (emerald gradient)
+  - 🛠️ **Fix Errors** (amber→rose gradient) — only visible when the assistant's last message contains `error / exception / traceback / failed / crash / undefined / cannot read`. Click → deep-links to `/operator?tab=ai-build` with the assistant's text pre-filled as a fix prompt.
+- ✅ **`handleInlineAction('fix-errors')`** — bypasses the projectId guard (AI Build has its own picker), reads the last assistant message, builds a structured fix prompt, navigates to AI Build with `prefill_prompt` + `prefill_error_id=chat_<sessionId>` so the existing AIBuildTab consumer pre-fills the form + shows the green "Pre-filled from runtime error X" banner.
+- ✅ **Per-user analytics drill-down** — `user_analytics_ext.py` exposes `GET /api/operator/users/{id}/analytics` returning messages (total / 30d / 7d), active_days (distinct + 30d sparkline), sessions (total / 30d), payments (total_usd, completed_count, last_payment_at). UI: `UserAnalyticsModal.jsx` opens on click of any user's email in the Operator → Users table; 4-stat header, 30-day sparkline, key-value detail grid. Pause + credit-adjust actions remain in the existing table row (no duplication).
+
+## Implemented — Feb 2026 (previous session, batch 14)
 - ✅ **Auto-fix loop extended to AI Test Bench drift** — `auto_fix_loop_ext.py`:
   - New helper `_plan_one_from_drift()` shapes a drift-specific prompt (failed probes + likely fix areas: probe defs, fallback chain, system-prompt injection).
   - New helper `_auto_fix_drift_sweep()` runs after the runtime-error sweep, shares the remaining daily-cap budget, plans + reviews + opens PRs identically.

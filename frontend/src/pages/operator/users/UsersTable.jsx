@@ -13,6 +13,7 @@ import {
 } from '../../../components/ui/alert-dialog';
 import { Sparkles, AlertTriangle } from 'lucide-react';
 import { CreditsAdjuster } from './CreditsAdjuster';
+import UserAnalyticsModal from './UserAnalyticsModal';
 
 const PLANS = ['free', 'starter', 'pro', 'enterprise'];
 
@@ -91,6 +92,8 @@ export function UsersTable({
   // forward to it when the operator confirms they really mean it.
   // shape: { id, email, kind: 'delete' | 'vanish' }
   const [seedWarn, setSeedWarn] = useState(null);
+  // Per-user analytics drill-down modal target. null = closed.
+  const [analyticsUser, setAnalyticsUser] = useState(null);
 
   // Click handlers that intercept the protected-account cases. Per-row
   // buttons call these instead of onDelete/setVanishTarget directly.
@@ -167,7 +170,15 @@ export function UsersTable({
               <TableCell className="font-medium text-tbc-100">
                 <span className="inline-flex items-center gap-2">
                   <OnlinePulse user={u} />
-                  {u.email}
+                  <button
+                    type="button"
+                    onClick={() => setAnalyticsUser(u)}
+                    data-testid={`user-row-analytics-${u.id}`}
+                    title="View per-user analytics drill-down"
+                    className="text-left text-tbc-100 hover:text-tbc-300 hover:underline"
+                  >
+                    {u.email}
+                  </button>
                 </span>
               </TableCell>
               <TableCell className="text-tbc-200/80">{u.name || '—'}</TableCell>
@@ -410,6 +421,9 @@ export function UsersTable({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Per-user analytics drill-down — opened by clicking a user's email. */}
+      <UserAnalyticsModal user={analyticsUser} onClose={() => setAnalyticsUser(null)} />
     </div>
   );
 }

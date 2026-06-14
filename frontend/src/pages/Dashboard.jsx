@@ -9,6 +9,7 @@ import { DashboardSidebar } from './dashboard/DashboardSidebar';
 import { DashboardHeader } from './dashboard/DashboardHeader';
 import { TrialBanner } from './dashboard/TrialBanner';
 import { EmptyState, MessageBubble } from './dashboard/ChatMessages';
+import EndOfSessionActions from './dashboard/EndOfSessionActions';
 import { ChatComposer } from './dashboard/ChatComposer';
 import { OutOfCreditsDialog } from './dashboard/OutOfCreditsDialog';
 import { DashboardGuideTour } from './dashboard/DashboardGuideTour';
@@ -137,6 +138,24 @@ export default function Dashboard({ variant = 'tbc1' }) {
   // for the production "handleInlineAction is not defined" crash: an
   // earlier commit wired the prop without ever defining the handler.
   const handleInlineAction = useCallback(async (kind) => {
+    // `fix-errors` deep-links to AI Build (which has its own project
+    // picker) — no need to enforce projectId here. The other actions
+    // hit `/operator/deploy/{id}/*` and DO need a project selected.
+    if (kind === 'fix-errors') {
+      const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
+      const body = (lastAssistant?.content || '').slice(0, 2_000);
+      const prompt =
+        'Fix the issue described by the assistant in this chat:\n\n'
+        + body
+        + '\n\nKeep the change minimal and behaviour-preserving.';
+      const params = new URLSearchParams({
+        tab: 'ai-build',
+        prefill_prompt: prompt,
+        prefill_error_id: `chat_${currentId || 'session'}`,
+      });
+      navigate(`/operator?${params.toString()}`);
+      return;
+    }
     let projectId = '';
     try { projectId = localStorage.getItem('tbc.inChat.selectedProjectId') || ''; } catch { /* ignore */ }
     if (!projectId) {
@@ -275,7 +294,7 @@ export default function Dashboard({ variant = 'tbc1' }) {
       const msg = (detail && typeof detail === 'object' && detail.message) || detail || `Quick ${kind} failed`;
       toast.error(typeof msg === 'string' ? msg : `Quick ${kind} failed`);
     }
-  }, [navigate]);
+  }, [navigate, messages, currentId]);
 
   // Mirror live stream text so the final-message commit doesn't lose the tail.
   useEffect(() => { streamTextRef.current = streamText; }, [streamText]);
@@ -462,6 +481,11 @@ export default function Dashboard({ variant = 'tbc1' }) {
                 {streaming && (
                   <MessageBubble role="assistant" content={streamText} streaming />
                 )}
+                <EndOfSessionActions
+                  messages={messages}
+                  streaming={streaming}
+                  onAction={handleInlineAction}
+                />
               </div>
             )}
           </div>
