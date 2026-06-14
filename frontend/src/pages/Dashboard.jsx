@@ -143,10 +143,18 @@ export default function Dashboard({ variant = 'tbc1' }) {
       toast.error('Pick a deploy project first (use the dropdown in the chat header).');
       return;
     }
+
+    // Internal helper so we can re-run /deploy with bypass_review=true
+    // when the operator overrides the AI code review gate without
+    // duplicating the success/failure handling.
+    const runDeploy = async (bypass) => {
+      const { data } = await api.post(`/operator/deploy/${projectId}/deploy`, bypass ? { bypass_review: true } : {});
+      toast.success(`Deploy queued — ${data?.url || data?.deployment_id || 'OK'}`);
+    };
+
     try {
       if (kind === 'deploy') {
-        const { data } = await api.post(`/operator/deploy/${projectId}/deploy`, {});
-        toast.success(`Deploy queued — ${data?.url || data?.id || 'OK'}`);
+        await runDeploy(false);
       } else if (kind === 'review') {
         const { data } = await api.post(`/operator/deploy/${projectId}/code-review`, {});
         toast.success(`Code review: ${data?.verdict || data?.summary || 'completed'}`);
@@ -155,9 +163,44 @@ export default function Dashboard({ variant = 'tbc1' }) {
         toast.success(`Health: ${data?.status || (data?.ok ? 'OK' : 'unknown')}`);
       }
     } catch (e) {
-      toast.error(e?.response?.data?.detail || `Quick ${kind} failed`);
+      // Specialised handling for the AI code-review ship-gate (412).
+      // The backend returns a structured body — surface it as actionable
+      // choices instead of a raw red toast saying "pass bypass_review=true".
+      const detail = e?.response?.data?.detail;
+      const isReviewBlock = e?.response?.status === 412
+        && detail && typeof detail === 'object'
+        && detail.error === 'review_blocked';
+      if (kind === 'deploy' && isReviewBlock) {
+        const findings = detail.review?.findings || [];
+        const summary = detail.review?.summary || '';
+        const fixSession = detail.fix_chat_session_id;
+        const choice = window.prompt(
+          `AI code review blocked this production deploy.\n\n`
+          + (summary ? `Summary: ${summary}\n` : '')
+          + (findings.length ? `Findings: ${findings.length}\n\n` : '\n')
+          + `Type one and press OK:\n`
+          + `  fix   → open the AI fix chat\n`
+          + `  force → deploy anyway (override the gate)\n`
+          + `  (blank) → cancel`,
+          'fix',
+        );
+        const c = (choice || '').trim().toLowerCase();
+        if (c === 'force') {
+          try {
+            await runDeploy(true);
+          } catch (e2) {
+            toast.error(e2?.response?.data?.detail?.message || e2?.response?.data?.detail || 'Forced deploy failed');
+          }
+        } else if (c === 'fix' && fixSession) {
+          navigate(`/dashboard/${fixSession}`);
+        }
+        return;
+      }
+      // Generic path: detail may be a string OR a structured object.
+      const msg = (detail && typeof detail === 'object' && detail.message) || detail || `Quick ${kind} failed`;
+      toast.error(typeof msg === 'string' ? msg : `Quick ${kind} failed`);
     }
-  }, []);
+  }, [navigate]);
 
   // Mirror live stream text so the final-message commit doesn't lose the tail.
   useEffect(() => { streamTextRef.current = streamText; }, [streamText]);
