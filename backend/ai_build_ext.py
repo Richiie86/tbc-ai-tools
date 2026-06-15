@@ -50,6 +50,15 @@ router = APIRouter(prefix='/api/operator/ai-build', tags=['ai-build'])
 GITHUB_API = 'https://api.github.com'
 _MAX_PATCH_BYTES = 80 * 1024
 _MAX_FILES_PER_REQUEST = 12
+
+# Model used for the cross-AI patch reviewer. The old hardcoded
+# "claude-opus-4-5" is NOT a real model id and the Emergent/litellm gateway
+# rejected it ("Invalid model name passed in model=claude-opus-4-5"),
+# crashing every cross-AI review. Default to the proven-working Sonnet 4.5;
+# operators can override with the SECOND_OPINION_MODEL env var.
+_CROSS_AI_REVIEW_MODEL = (
+    os.environ.get('SECOND_OPINION_MODEL') or 'claude-sonnet-4-5-20250929'
+)
 _MAX_PROMPT_CHARS = 4_000
 _CONTEXT_FILES_LIMIT = 8         # how many existing files we hand the LLM as grounding
 _CONTEXT_BYTES_PER_FILE = 8_000
@@ -274,15 +283,13 @@ async def _cross_ai_review(llm_key: str, prompt: str, summary: str, files: list[
         f'Proposed files ({len(files)}):\n{files_blob}\n\n'
         'Return the review JSON now.'
     )
-    # Reviewer = Claude Opus (different model from the Sonnet generator) so
-    # we still get cross-model diversity while staying on the operator's
-    # BYO Anthropic key. Previously this hit gpt-4o-mini through Emergent's
-    # budget which exhausted in production.
+    # Reviewer stays on the operator's BYO Anthropic key when set (no Emergent
+    # spend). Uses a VALID model id (see _CROSS_AI_REVIEW_MODEL).
     chat = LlmChat(
         api_key=llm_key,
         session_id=f'ai-build-review-{datetime.now(timezone.utc).timestamp():.0f}',
         system_message=_REVIEWER_SYSTEM_PROMPT,
-    ).with_model('anthropic', 'claude-opus-4-5')
+    ).with_model('anthropic', _CROSS_AI_REVIEW_MODEL)
     try:
         raw = await chat.send_message(UserMessage(text=user_msg))
     except Exception as e:
@@ -291,7 +298,7 @@ async def _cross_ai_review(llm_key: str, prompt: str, summary: str, files: list[
             'verdict': 'review_skipped',
             'summary': f'Reviewer call failed: {str(e)[:200]}',
             'concerns': [], 'missing_imports': [], 'security_flags': [],
-            'reviewer_model': 'claude-opus-4-5',
+            'reviewer_model': _CROSS_AI_REVIEW_MODEL,
         }
     text = _strip_codefences(raw or '')
     try:
@@ -304,7 +311,7 @@ async def _cross_ai_review(llm_key: str, prompt: str, summary: str, files: list[
                 'summary': 'Reviewer returned non-JSON',
                 'concerns': [text[:200]] if text else [],
                 'missing_imports': [], 'security_flags': [],
-                'reviewer_model': 'claude-opus-4-5',
+                'reviewer_model': _CROSS_AI_REVIEW_MODEL,
             }
         try:
             parsed = json.loads(m.group(0))
@@ -316,7 +323,7 @@ async def _cross_ai_review(llm_key: str, prompt: str, summary: str, files: list[
         'concerns': [str(c)[:280] for c in (parsed.get('concerns') or [])][:12],
         'missing_imports': [str(i)[:200] for i in (parsed.get('missing_imports') or [])][:8],
         'security_flags': [str(s)[:200] for s in (parsed.get('security_flags') or [])][:8],
-        'reviewer_model': 'claude-opus-4-5',
+        'reviewer_model': _CROSS_AI_REVIEW_MODEL,
     }
 
 

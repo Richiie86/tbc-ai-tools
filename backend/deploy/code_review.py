@@ -246,6 +246,18 @@ _SECOND_OPINION_PROMPT = (
 )
 
 
+# Model used for the cross-AI second opinion. Defaults to the same
+# proven-working model as the primary reviewer (Sonnet 4.5) — the old
+# hardcoded "claude-opus-4-5" is NOT a real model name and the Emergent/
+# litellm gateway rejected it ("Invalid model name passed in
+# model=claude-opus-4-5"), which crashed every second-opinion pass.
+# Operators can override this with a valid model id (Anthropic or, via the
+# gateway, another provider) using the SECOND_OPINION_MODEL env var.
+_SECOND_OPINION_MODEL = (
+    os.environ.get('SECOND_OPINION_MODEL') or 'claude-sonnet-4-5-20250929'
+)
+
+
 async def _second_opinion(snapshot: dict, first_review: dict, llm_key: str) -> dict:
     """Run a DIFFERENT-provider reviewer (Claude) over the same snapshot
     + first reviewer's verdict. Cheap audit pass — catches hallucinations
@@ -261,18 +273,18 @@ async def _second_opinion(snapshot: dict, first_review: dict, llm_key: str) -> d
         f"Files reviewed:\n" + "\n\n".join(blocks)
         + "\n\nReturn the second-opinion JSON now."
     )
-    # Second opinion uses Claude OPUS — different model strength than the
-    # Sonnet primary, so we still get diverse review angles while keeping
-    # BOTH passes on the operator's BYO Anthropic key (no Emergent spend).
+    # Second opinion runs over the same snapshot + the first reviewer's
+    # verdict. Uses a VALID model id (see _SECOND_OPINION_MODEL) — keeps the
+    # pass on the operator's BYO Anthropic key when set (no Emergent spend).
     chat = LlmChat(
         api_key=llm_key,
         session_id=f'code-review-second-{datetime.now(timezone.utc).timestamp():.0f}',
         system_message=_SECOND_OPINION_PROMPT,
-    ).with_model('anthropic', 'claude-opus-4-5')
+    ).with_model('anthropic', _SECOND_OPINION_MODEL)
     try:
         raw = await chat.send_message(UserMessage(text=user_msg))
     except Exception as e:
-        return {'verdict': 'review_skipped', 'summary': f'Second-opinion failed: {str(e)[:200]}', 'concerns': [], 'reviewer_model': 'claude-opus-4-5'}
+        return {'verdict': 'review_skipped', 'summary': f'Second-opinion failed: {str(e)[:200]}', 'concerns': [], 'reviewer_model': _SECOND_OPINION_MODEL}
     text = (raw or '').strip()
     if text.startswith('```'):
         text = re.sub(r'^```[a-zA-Z]*\n?', '', text)
@@ -289,7 +301,7 @@ async def _second_opinion(snapshot: dict, first_review: dict, llm_key: str) -> d
         'verdict': parsed.get('verdict') or 'review_skipped',
         'summary': (parsed.get('summary') or '')[:280],
         'concerns': [str(c)[:280] for c in (parsed.get('concerns') or [])][:8],
-        'reviewer_model': 'claude-opus-4-5',
+        'reviewer_model': _SECOND_OPINION_MODEL,
     }
 
 
