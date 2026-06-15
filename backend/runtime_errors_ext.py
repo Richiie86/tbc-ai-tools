@@ -162,12 +162,20 @@ _RATE_WINDOW_S = 60
 _RATE_MAX = 30  # 30 reports / minute / IP
 
 _REDIS_URL = os.environ.get('REDIS_URL')
-_redis_client = None  # lazy-init
+_UPSTASH_URL = os.environ.get('UPSTASH_REDIS_REST_URL')
+_UPSTASH_TOKEN = os.environ.get('UPSTASH_REDIS_REST_TOKEN')
+_redis_client = None  # lazy-init — either an upstash-redis async client OR a redis.asyncio client
+_redis_kind: str | None = None  # 'upstash' | 'tcp' | None — set after first successful ping
 # When Redis fails we don't disable it for the whole process anymore —
 # we just back off for a short cooldown. That way a transient KV outage
 # self-heals without needing a backend restart.
 _REDIS_COOLDOWN_S = 60
 _redis_disabled_until: float = 0.0
+
+
+def _redis_configured() -> bool:
+    """True if either backend is wired."""
+    return bool((_UPSTASH_URL and _UPSTASH_TOKEN) or _REDIS_URL)
 
 
 def _client_ip(request: Request) -> str:
@@ -242,12 +250,22 @@ def _ip_in_any_cidr(ip: str, networks: list) -> bool:
 
 
 async def _get_redis():
-    """Lazy-init the shared Redis client. Returns None if no REDIS_URL is
-    configured OR if Redis is currently in cooldown after a recent
-    failure (so transient outages self-heal automatically).
+    """Lazy-init the shared Redis client. Returns None when Redis isn't
+    configured OR is currently in cooldown after a recent failure (so
+    transient outages self-heal automatically).
+
+    Two backends supported:
+      * Upstash REST  — when `UPSTASH_REDIS_REST_URL` + `_TOKEN` are set.
+                        Uses the HTTPS REST API (works through firewalls
+                        that block raw TCP, and matches how Vercel KV
+                        ships credentials).
+      * Redis TCP     — when `REDIS_URL` is set (`rediss://default:...`).
+                        Native Redis protocol via `redis.asyncio`.
+    REST is preferred when both are set because it avoids opening a
+    persistent TCP socket from every backend pod.
     """
-    global _redis_client, _redis_disabled_until
-    if not _REDIS_URL:
+    global _redis_client, _redis_disabled_until, _redis_kind
+    if not _redis_configured():
         return None
     import time
     if _redis_disabled_until and time.time() < _redis_disabled_until:
@@ -255,21 +273,31 @@ async def _get_redis():
     if _redis_client is not None:
         return _redis_client
     try:
-        from redis.asyncio import from_url
-        _redis_client = from_url(
-            _REDIS_URL,
-            socket_connect_timeout=2,
-            socket_timeout=2,
-            decode_responses=True,
-        )
-        # Ping once so we surface mis-configured URLs at first use rather
-        # than on every request.
-        await _redis_client.ping()
+        if _UPSTASH_URL and _UPSTASH_TOKEN:
+            from upstash_redis.asyncio import Redis as UpstashRedis
+            _redis_client = UpstashRedis(url=_UPSTASH_URL, token=_UPSTASH_TOKEN)
+            # Ping once so a bad token surfaces here rather than on every request.
+            pong = await _redis_client.ping()
+            if pong != 'PONG':
+                raise RuntimeError(f'unexpected ping reply: {pong!r}')
+            _redis_kind = 'upstash'
+            logger.info('runtime-errors rate-limiter: Upstash REST ready (%s)', _UPSTASH_URL)
+        else:
+            from redis.asyncio import from_url
+            _redis_client = from_url(
+                _REDIS_URL,
+                socket_connect_timeout=2,
+                socket_timeout=2,
+                decode_responses=True,
+            )
+            await _redis_client.ping()
+            _redis_kind = 'tcp'
+            logger.info('runtime-errors rate-limiter: Redis TCP ready (%s)', _REDIS_URL.split('@')[-1][:40])
         _redis_disabled_until = 0.0
-        logger.info('runtime-errors rate-limiter: Redis backend ready (%s)', _REDIS_URL.split('@')[-1][:40])
     except Exception as e:  # noqa: BLE001
         logger.warning('Redis rate-limiter unavailable, falling back to in-memory for %ss: %s', _REDIS_COOLDOWN_S, e)
         _redis_client = None
+        _redis_kind = None
         _redis_disabled_until = time.time() + _REDIS_COOLDOWN_S
     return _redis_client
 
