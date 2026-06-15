@@ -153,6 +153,16 @@ export function useInlineChatActions({ navigate, messages, currentId }) {
     };
 
     try {
+      if (kind === 'push-code') {
+        // Standalone path: push the live /app source to GitHub. The
+        // helper handles its own success/failure toasts. Operator sees
+        // a button explicitly when the assistant text mentions an empty
+        // repo or "push your code first", so this is the single fastest
+        // way out of the stuck-on-empty-repo state shown in the dialog
+        // they hit from production.
+        await runInitialPush();
+        return;
+      }
       if (kind === 'deploy') {
         // Auto-run the cross-AI review FIRST. If it blocks, previewReview
         // handles the fix/force prompt itself (and may have already fired
@@ -162,9 +172,44 @@ export function useInlineChatActions({ navigate, messages, currentId }) {
         await runDeploy(false);
       } else if (kind === 'review') {
         const t = toast.loading('Running cross-AI code review…');
-        const { data } = await api.post(`/operator/deploy/${projectId}/code-review`, {});
-        toast.dismiss(t);
+        let data;
+        try {
+          ({ data } = await api.post(`/operator/deploy/${projectId}/code-review`, {}));
+        } finally {
+          toast.dismiss(t);
+        }
         const v = data?.verdict || 'completed';
+        // Empty repo: don't dead-end the operator on a useless alert.
+        // Offer the same one-click Push-Code flow the Deploy path does
+        // and re-run the review on the freshly populated repo.
+        if (v === 'repo_empty') {
+          const ok = window.confirm(
+            `Your GitHub repo "${data?.repo}" has no source code yet — only documentation/config placeholders.\n\n`
+            + `Click OK to upload this app's current source (backend/ + frontend/) `
+            + `to GitHub in one shot, then re-run the review.\n\n`
+            + `Cancel to dismiss.`,
+          );
+          if (!ok) return;
+          const pushed = await runInitialPush();
+          if (!pushed) return;
+          // Re-review on the freshly pushed code so the operator sees a real verdict.
+          const t2 = toast.loading('Re-running review on the pushed code…');
+          let again;
+          try {
+            ({ data: again } = await api.post(`/operator/deploy/${projectId}/code-review`, {}));
+          } catch {
+            toast.dismiss(t2);
+            toast.message('Pushed — click Review again to retry.');
+            return;
+          }
+          toast.dismiss(t2);
+          const v2 = again?.verdict || 'completed';
+          window.alert(
+            `Pushed. Re-review verdict: ${v2}\n`
+            + (again?.summary ? `Summary: ${again.summary}` : ''),
+          );
+          return;
+        }
         const second = data?.second_opinion;
         const lines = [
           `Verdict: ${v}`,

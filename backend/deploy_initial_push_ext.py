@@ -171,29 +171,58 @@ async def _put_one_file(
     client: httpx.AsyncClient, repo: str, branch: str, token: str,
     local_path: Path, repo_path: str, existing_sha: Optional[str],
 ) -> tuple[bool, str]:
-    """Upload one file via the Contents API. Returns (ok, detail)."""
+    """Upload one file via the Contents API. Returns (ok, detail).
+
+    Auto-retries once on a 409 (stale SHA) by re-fetching the blob's
+    current SHA — this is the common case when many files are being
+    pushed in rapid succession and GitHub's tree-listing cache hands us
+    a SHA that's already been rotated by a sibling PUT in the same
+    batch. Without this retry the operator-facing "initial push" call
+    consistently leaves ~20 files behind on a fresh repo population."""
     try:
         data = local_path.read_bytes()
     except Exception as e:
         return False, f'read failed: {e}'
-    body: dict = {
-        'message': f'Initial push: {repo_path}',
-        'content': base64.b64encode(data).decode('ascii'),
-        'branch': branch,
-    }
-    if existing_sha:
-        body['sha'] = existing_sha
-    r = await _gh_request(
-        client, 'PUT',
-        f'{GITHUB_API}/repos/{repo}/contents/{repo_path}',
-        token, json_body=body,
-    )
+    encoded = base64.b64encode(data).decode('ascii')
+
+    async def _attempt(sha: Optional[str]) -> 'httpx.Response':
+        body: dict = {
+            'message': f'Initial push: {repo_path}',
+            'content': encoded,
+            'branch': branch,
+        }
+        if sha:
+            body['sha'] = sha
+        return await _gh_request(
+            client, 'PUT',
+            f'{GITHUB_API}/repos/{repo}/contents/{repo_path}',
+            token, json_body=body,
+        )
+
+    r = await _attempt(existing_sha)
     if r.status_code in (200, 201):
         return True, 'ok'
     if r.status_code == 409:
-        # Likely a stale SHA in a race — caller can retry by re-fetching
-        # the tree, but for a one-shot push we just surface the conflict.
-        return False, f'conflict ({r.status_code}): {r.text[:200]}'
+        # Re-fetch the file's current blob SHA and try once more. We add
+        # a tiny jitter sleep so any in-flight tree-cache flush has time
+        # to settle on GitHub's side.
+        await asyncio.sleep(0.5)
+        fresh_sha: Optional[str] = None
+        meta_r = await _gh_request(
+            client, 'GET',
+            f'{GITHUB_API}/repos/{repo}/contents/{repo_path}?ref={branch}',
+            token,
+        )
+        if meta_r.status_code == 200:
+            fresh_sha = (meta_r.json() or {}).get('sha')
+        elif meta_r.status_code == 404:
+            # File was deleted between our list and our PUT — drop the
+            # SHA and create instead.
+            fresh_sha = None
+        r2 = await _attempt(fresh_sha)
+        if r2.status_code in (200, 201):
+            return True, 'ok (retried after 409)'
+        return False, f'conflict ({r2.status_code}) after retry: {r2.text[:200]}'
     return False, f'http {r.status_code}: {r.text[:200]}'
 
 
@@ -245,8 +274,18 @@ async def do_initial_push(project: dict, *, source: str = 'operator_manual') -> 
     errors: list[dict] = []
     started = datetime.now(timezone.utc)
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        branch_exists, existing = await _resolve_repo_state(client, repo, branch, token)
+    # `timeout` and `limits` both matter when pushing 100+ files:
+    # - timeout=30 covers the slowest single PUT (large files)
+    # - limits caps concurrent sockets so our semaphore stays the actual
+    #   bottleneck, not httpx's pool. Without explicit limits the default
+    #   max_connections=100 + keep_alive=20 still allowed a burst that
+    #   timed out the GitHub API on multi-file pushes.
+    async with httpx.AsyncClient(
+        timeout=httpx.Timeout(connect=10.0, read=30.0, write=30.0, pool=30.0),
+        limits=httpx.Limits(max_connections=_BATCH_PUSH_PARALLELISM * 2,
+                            max_keepalive_connections=_BATCH_PUSH_PARALLELISM),
+    ) as client:
+        branch_exists, _existing = await _resolve_repo_state(client, repo, branch, token)
         if not branch_exists:
             # The repo may have a different default branch (e.g. `master`).
             # We try once more against `master` before bailing — fewer
@@ -254,10 +293,9 @@ async def do_initial_push(project: dict, *, source: str = 'operator_manual') -> 
             for fallback in ('master', 'main'):
                 if fallback == branch:
                     continue
-                exists2, ex2 = await _resolve_repo_state(client, repo, fallback, token)
+                exists2, _ex2 = await _resolve_repo_state(client, repo, fallback, token)
                 if exists2:
                     branch = fallback
-                    existing = ex2
                     branch_exists = True
                     break
         if not branch_exists:
@@ -267,29 +305,126 @@ async def do_initial_push(project: dict, *, source: str = 'operator_manual') -> 
                 "Initialise the repo on GitHub first (the README from `Add a README` is enough) — that creates the default branch."
             )
 
+        # ── Git Data API commit ─────────────────────────────────────
+        # Pushing 100+ files via the per-file Contents API is fatally
+        # racy: each PUT creates a commit, concurrent PUTs see a stale
+        # branch HEAD, and ~20 files always 409. We use the Git Data
+        # API instead: upload blobs in parallel (race-free, content-
+        # addressable), build ONE tree, ONE commit, then update the
+        # ref. Atomic AND ~10× faster than sequential Contents API.
+
+        # 1. Get current HEAD commit + tree SHA.
+        head_r = await _gh_request(
+            client, 'GET', f'{GITHUB_API}/repos/{repo}/git/ref/heads/{branch}', token,
+        )
+        if head_r.status_code != 200:
+            raise HTTPException(502, f'GitHub git/ref failed: {head_r.text[:200]}')
+        head_sha = head_r.json()['object']['sha']
+
+        head_commit_r = await _gh_request(
+            client, 'GET', f'{GITHUB_API}/repos/{repo}/git/commits/{head_sha}', token,
+        )
+        if head_commit_r.status_code != 200:
+            raise HTTPException(502, f'GitHub git/commits failed: {head_commit_r.text[:200]}')
+        base_tree_sha = head_commit_r.json()['tree']['sha']
+
+        # 2. Upload one blob per file (parallel — safe; blobs are
+        #    content-addressable, no race possible on creation).
         sem = asyncio.Semaphore(_BATCH_PUSH_PARALLELISM)
 
-        async def _push(local: Path) -> None:
-            nonlocal pushed
+        async def _upload_blob(local: Path):
             rel = local.relative_to(_APP_ROOT).as_posix()
-            sha = None
-            if rel in existing:
-                # Fetch the current blob SHA for an idempotent overwrite.
-                meta_r = await _gh_request(
-                    client, 'GET',
-                    f'{GITHUB_API}/repos/{repo}/contents/{rel}?ref={branch}',
-                    token,
-                )
-                if meta_r.status_code == 200:
-                    sha = (meta_r.json() or {}).get('sha')
+            try:
+                data = local.read_bytes()
+            except OSError as e:
+                return rel, None, f'read failed: {e}'
             async with sem:
-                ok, detail = await _put_one_file(client, repo, branch, token, local, rel, sha)
-            if ok:
-                pushed += 1
-            else:
-                errors.append({'path': rel, 'detail': detail})
+                r = await _gh_request(
+                    client, 'POST', f'{GITHUB_API}/repos/{repo}/git/blobs', token,
+                    json_body={
+                        'content': base64.b64encode(data).decode('ascii'),
+                        'encoding': 'base64',
+                    },
+                )
+            if r.status_code in (200, 201):
+                return rel, r.json().get('sha'), None
+            # Detect & surface rate-limit specifically so the operator
+            # gets an actionable "reset at HH:MM UTC" message instead of
+            # a generic "No blobs uploaded".
+            if r.status_code == 403 and 'rate limit' in r.text.lower():
+                return rel, None, 'rate_limit'
+            return rel, None, f'blob http {r.status_code}: {r.text[:150]}'
 
-        await asyncio.gather(*[_push(f) for f in files], return_exceptions=False)
+        results = await asyncio.gather(*[_upload_blob(f) for f in files])
+        # If ALL failed with rate_limit, surface a 429 with the reset time
+        # rather than a misleading 502.
+        if results and all(err == 'rate_limit' for _, _, err in results if err):
+            limit_r = await _gh_request(client, 'GET', f'{GITHUB_API}/rate_limit', token)
+            try:
+                core = limit_r.json().get('resources', {}).get('core', {})
+                reset_ts = core.get('reset')
+                from datetime import datetime as _dt
+                reset_iso = _dt.fromtimestamp(reset_ts, tz=timezone.utc).isoformat() if reset_ts else 'soon'
+            except Exception:
+                reset_iso = 'soon'
+            raise HTTPException(
+                429,
+                f'GitHub rate limit exhausted ({core.get("used","?")} / {core.get("limit","?")}). '
+                f'Resets at {reset_iso}. The Git Data API push will succeed on retry after that.',
+            )
+        tree_entries: list[dict] = []
+        for rel, blob_sha, err in results:
+            if err:
+                errors.append({'path': rel, 'detail': err})
+                continue
+            tree_entries.append({
+                'path': rel,
+                'mode': '100644',  # blob file (use 100755 for exec; not needed here)
+                'type': 'blob',
+                'sha': blob_sha,
+            })
+
+        if not tree_entries:
+            raise HTTPException(502, 'No blobs uploaded; nothing to commit.')
+
+        # 3. Create a new tree on top of the existing one. `base_tree`
+        #    means GitHub merges our entries with the existing tree,
+        #    preserving any files we didn't include (rare for an
+        #    initial push, but useful for partial syncs).
+        tree_r = await _gh_request(
+            client, 'POST', f'{GITHUB_API}/repos/{repo}/git/trees', token,
+            json_body={'base_tree': base_tree_sha, 'tree': tree_entries},
+        )
+        if tree_r.status_code not in (200, 201):
+            raise HTTPException(502, f'GitHub git/trees failed: {tree_r.text[:300]}')
+        new_tree_sha = tree_r.json()['sha']
+
+        # 4. Create a commit pointing at the new tree.
+        commit_msg = (
+            f'Initial push from preview: {len(tree_entries)} files '
+            f'({source})'
+        )
+        commit_r = await _gh_request(
+            client, 'POST', f'{GITHUB_API}/repos/{repo}/git/commits', token,
+            json_body={
+                'message': commit_msg,
+                'tree': new_tree_sha,
+                'parents': [head_sha],
+            },
+        )
+        if commit_r.status_code not in (200, 201):
+            raise HTTPException(502, f'GitHub git/commits failed: {commit_r.text[:300]}')
+        new_commit_sha = commit_r.json()['sha']
+
+        # 5. Move the branch ref forward to the new commit.
+        ref_r = await _gh_request(
+            client, 'PATCH', f'{GITHUB_API}/repos/{repo}/git/refs/heads/{branch}', token,
+            json_body={'sha': new_commit_sha, 'force': False},
+        )
+        if ref_r.status_code not in (200, 201):
+            raise HTTPException(502, f'GitHub git/refs failed: {ref_r.text[:300]}')
+
+        pushed = len(tree_entries)
 
     # Stamp the project so the UI can stop showing the "empty repo" CTA.
     await db.deploy_projects.update_one(

@@ -79,17 +79,31 @@ function QuickActionsBar({ content, onAction }) {
   const wantsDeploy = /\bdeploy\b|\bship\b|\bpublish\b|\bpush.*live\b|\bredeploy\b/.test(lc);
   const wantsReview = /\breview\b|\bcheck.*code\b|\bcode.*review\b/.test(lc);
   const wantsHealth = /\bhealth\b|\bis.*site.*up\b|\bworking\?\b/.test(lc);
+  // Push Code: surface a primary CTA whenever the assistant is hinting
+  // that the GitHub repo is empty (repo_empty verdict, "push your code
+  // first", "no source code yet"). This is the one quick-action that
+  // unblocks operators stuck on the empty-repo wall.
+  const wantsPushCode = /\brepo[_ ]empty\b|\bpush your code\b|\bno source code\b|\bnothing to deploy\b/.test(lc);
   // Review always rides alongside Deploy — clicking Deploy without first
   // seeing the code-review verdict was the workflow gap that triggered
   // the operator's "add Review next to Deploy" request.
   const showReview = wantsReview || wantsDeploy;
-  if (!wantsDeploy && !wantsReview && !wantsHealth) return null;
+  if (!wantsDeploy && !wantsReview && !wantsHealth && !wantsPushCode) return null;
   return (
     <div
       data-testid="msg-quick-actions"
       className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-800/60 pt-3 text-xs"
     >
       <span className="text-tbc-200/50">Quick actions:</span>
+      {wantsPushCode && (
+        <button
+          type="button"
+          data-testid="msg-action-push-code"
+          onClick={() => onAction('push-code')}
+          className="inline-flex items-center gap-1 rounded-md bg-sky-500 px-2.5 py-1 font-semibold text-ink-950 hover:bg-sky-400"
+          title="Upload backend/ + frontend/ to your configured GitHub repo so Deploy actually has something to ship"
+        >📦 Push Code</button>
+      )}
       {wantsDeploy && (
         <button
           type="button"
