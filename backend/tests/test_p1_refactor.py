@@ -33,7 +33,7 @@ API = f"{BASE_URL}/api"
 # isolated dev runs. CI / pre-deploy pipelines should set TEST_OPERATOR_EMAIL
 # and TEST_OPERATOR_PASSWORD to keep secrets out of version control.
 OPERATOR_EMAIL = os.environ.get('TEST_OPERATOR_EMAIL', 'rac.investments.swe@gmail.com')
-OPERATOR_PASSWORD = os.environ.get('TEST_OPERATOR_PASSWORD', '123Admin@98')
+OPERATOR_PASSWORD = os.environ.get('TEST_OPERATOR_PASSWORD', 'set-TEST_OPERATOR_PASSWORD-to-run')
 
 
 @pytest.fixture(scope='module')

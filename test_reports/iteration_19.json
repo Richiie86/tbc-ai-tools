@@ -36,7 +36,7 @@
     "backend": "100% (12/12 PASS)",
     "frontend": "50% — anonymous banner overlay flow fully verified (banner visibility, text, pointer-events:none, click-through CTA, dismiss + sessionStorage + reload). Operator console (settings card + emergency pill) UNVERIFIABLE due to Operator.jsx import crash."
   },
-  "test_credentials": "Operator: rac.investments.swe@gmail.com / 123Admin@98 — login OK, redirects to /setup-2fa then /operator which currently crashes due to the missing import. The backend operator-only PATCH/GET endpoints used by curl still work fine for setup/teardown.",
+  "test_credentials": "Operator: rac.investments.swe@gmail.com / REDACTED — login OK, redirects to /setup-2fa then /operator which currently crashes due to the missing import. The backend operator-only PATCH/GET endpoints used by curl still work fine for setup/teardown.",
   "seed_data_creation": "Module-scoped fixture seeds + deletes one non-operator user (email matches `test_iter19_user_<hex>@example.com`) directly via pymongo + passlib-equivalent bcrypt for the lockdown gate test. Throttle test inserts and then deletes its own rows in runtime_error_pages + runtime_errors (signature contains 'TEST_iter19'). Each test pre/post-resets app_settings via the operator PATCH so the global state is always {banner_enabled:false, login_lockdown_enabled:false} at the end.",
   "retest_needed": true,
   "main_agent_can_self_test": true,

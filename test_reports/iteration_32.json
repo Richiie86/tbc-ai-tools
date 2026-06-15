@@ -29,7 +29,7 @@
     "/app/backend/tests/test_iter32_redis_s3_diff_proxies.py (new)"
   ],
   "success_rate": {"backend": "100% (10/10 pytest)", "frontend": "100% (BackupCard preview/diff/S3-off all verified live)"},
-  "test_credentials": "rac.investments.swe@gmail.com / 123Admin@98 (operator). Login redirects to /setup-2fa; /operator is reachable directly with the session cookie.",
+  "test_credentials": "rac.investments.swe@gmail.com / REDACTED (operator). Login redirects to /setup-2fa; /operator is reachable directly with the session cookie.",
   "seed_data_creation": "Created 1 new snapshot (~8.9KB) via POST /api/operator/backup/snapshots. Generated ~70 runtime_errors test rows under signatures 'iter32 xff probe …' and 'iter32 rate probe …' for the limiter test — can be cleaned later if noise matters.",
   "retest_needed": false,
   "main_agent_can_self_test": true,

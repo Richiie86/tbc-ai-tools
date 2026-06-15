@@ -31,7 +31,7 @@
     "/app/backend/tests/test_iter27_empty_repo_and_sidebar.py (new — 11 tests, all passing)"
   ],
   "success_rate": {"backend": "100% (11/11)", "frontend": "100% on sidebar filter (live), FAB position+href (live), AI Build history+VisualVerifyChip (live), dashboard no-crash. In-chat toast text code-reviewed only — same blocker as iter25/26."},
-  "test_credentials": "Operator rac.investments.swe@gmail.com / 123Admin@98. Login returns 200 + requires_2fa_setup=true; the legacy token in body is used as Authorization: Bearer for non-browser callers; cookie tbc_session is also set so browser nav to /dashboard works without 2FA enrol when RESET_OPERATOR_PASSWORD=true is active.",
+  "test_credentials": "Operator rac.investments.swe@gmail.com / REDACTED. Login returns 200 + requires_2fa_setup=true; the legacy token in body is used as Authorization: Bearer for non-browser callers; cookie tbc_session is also set so browser nav to /dashboard works without 2FA enrol when RESET_OPERATOR_PASSWORD=true is active.",
   "seed_data_creation": "Inserted+cleaned (via finally blocks): 1 deploy_projects doc with empty repo (TEST_iter27_norepo_*), 1 deploy_projects with last_code_review.verdict='repo_empty' (TEST_iter27_empty_*), 1 normal + 1 fix_review chat_sessions (TEST_iter27_normal_*, TEST_iter27_fix_*), 1 deploy_projects for code_review unit test (TEST_iter27_cr_*). All removed.",
   "retest_needed": false,
   "main_agent_can_self_test": true,

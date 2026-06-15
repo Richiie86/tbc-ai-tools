@@ -30,7 +30,7 @@
   ],
   "updated_files": [],
   "success_rate": {"backend": "90% (9/10, the 1 failure is infra-layer not code)", "frontend": "100% on the 4 scenarios in scope"},
-  "test_credentials": "Operator rac.investments.swe@gmail.com / 123Admin@98 (2FA cleared on boot; redirects to /setup-2fa after login but app remains usable).",
+  "test_credentials": "Operator rac.investments.swe@gmail.com / REDACTED (2FA cleared on boot; redirects to /setup-2fa after login but app remains usable).",
   "seed_data_creation": "None — used existing ai_model_tests (8 probed models, mix of PASS/FAIL) and runtime_errors (3 critical incidents in last 7d).",
   "retest_needed": false,
   "main_agent_can_self_test": true,

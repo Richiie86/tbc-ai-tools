@@ -45,7 +45,7 @@
     "backend": "100% (50/50 passed + 1 prior skip preserved)",
     "frontend": "92% — refactor & all required testids verified, ship-gate modal opens & lists findings with both action buttons, chat-scroll + jump-to-latest mounted as spec'd. One LOW-priority UX bug (modal stays open after non-412 bypass error)."
   },
-  "test_credentials": "Operator rac.investments.swe@gmail.com / 123Admin@98 (RESET_OPERATOR_PASSWORD=true clears 2FA at boot; first login lands on /setup-2fa, navigate directly to /operator). Mongo DB: test_database.",
+  "test_credentials": "Operator rac.investments.swe@gmail.com / REDACTED (RESET_OPERATOR_PASSWORD=true clears 2FA at boot; first login lands on /setup-2fa, navigate directly to /operator). Mongo DB: test_database.",
   "seed_data_creation": "Created (and then deleted in teardown) deploy_projects row id='ship-gate-test' with last_code_review.verdict='do_not_ship' + 2 findings. The autouse fixture in test_p3_ship_gate.py reseeds it for each test run and cleans up afterwards (also deletes any chat_sessions whose title starts with 'Fix review:' and their messages). For the manual UI test I reseeded directly via pymongo, then deleted both the project row and the 1 fix-review chat session it spawned. No residual test data remains.",
   "retest_needed": false,
   "main_agent_can_self_test": true,

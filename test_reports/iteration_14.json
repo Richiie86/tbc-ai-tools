@@ -38,7 +38,7 @@
     "/app/backend/tests/test_sandbox_ai_learnings.py"
   ],
   "success_rate": { "backend": "100% (12/12)", "frontend": "AI Learnings 100% — Sandbox AI BLOCKED by sandbox file tree returning Empty." },
-  "test_credentials": "Operator: rac.investments.swe@gmail.com / 123Admin@98 — currently boots without TOTP enforcement (lands on /setup-2fa but direct nav to /operator works via the tbc_session cookie).",
+  "test_credentials": "Operator: rac.investments.swe@gmail.com / REDACTED — currently boots without TOTP enforcement (lands on /setup-2fa but direct nav to /operator works via the tbc_session cookie).",
   "seed_data_creation": "Created + deleted several TEST_LEARNING_* rows in ai_learnings; created several test rows in sandbox_ai_sessions via /propose against the claude-sonnet-4-6 model; flipped deploy_projects[<first>].ai_edit_mode multi → single → multi via PATCH. The test_chat_succeeds_with_marker_learning test inserts a 'TESTONLY_MARKER_XYZ — keep answers short.' learning, drives /api/chat/stream, then deletes the learning in a finally block — no residual rows.",
   "retest_needed": true,
   "main_agent_can_self_test": true,

@@ -30,7 +30,7 @@
   ],
   "updated_files": [],
   "success_rate": { "backend": "n/a (not exercised this iteration)", "frontend": "60% — 6 of 10 review items pass (Operator login + 16 tabs, StatCard/StatsToolbar, Sandbox, Marketing, SecretsCard, DashboardHeader). 4 items fail/missing (Promote button, Auto-Promote toggle, TestUserBanner mount, Birthday Rewards UI)." },
-  "test_credentials": "Operator rac.investments.swe@gmail.com / 123Admin@98 (cookie auth works; post-login redirects to /setup-2fa — navigate manually to /operator).",
+  "test_credentials": "Operator rac.investments.swe@gmail.com / REDACTED (cookie auth works; post-login redirects to /setup-2fa — navigate manually to /operator).",
   "seed_data_creation": "None this iteration.",
   "retest_needed": true,
   "main_agent_can_self_test": true,

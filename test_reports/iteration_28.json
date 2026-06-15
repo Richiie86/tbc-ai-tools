@@ -32,7 +32,7 @@
     "/app/backend/tests/test_iter28_suggestions_autopush.py (NEW — 19 tests, all passing)"
   ],
   "success_rate": {"backend": "100% (19/19 iter28 + 11/11 iter27 regression)", "frontend": "0% — BLOCKED by /api/operator/deploy/projects 500"},
-  "test_credentials": "Operator rac.investments.swe@gmail.com / 123Admin@98",
+  "test_credentials": "Operator rac.investments.swe@gmail.com / REDACTED",
   "seed_data_creation": "All inserted+cleaned by tests (TEST_iter28_* prefixed). One UI-test seed TEST_iter28_ui_suggestions_seed was inserted with last_suggestions (3 priorities) + last_code_review (1 high/2 medium/1 low findings) then DELETED before finish. After main agent fixes the /deploy/projects 500, re-seed via: db.deploy_projects.insert_one({id:'TEST_iter28_ui_suggestions_seed', projectName:'TEST', repo:'fake/fake', domain:'test.example.com', gitRef:'main', last_suggestions:{suggestions:[{priority:'high',title:'...',rationale:'...',files:['x'],implementation_prompt:'...',effort:'medium'},...]}, last_code_review:{verdict:'ship_with_concerns',findings:[{severity:'high',...},{severity:'medium',...},{severity:'medium',...},{severity:'low',...}]}, created_at, updated_at}).",
   "retest_needed": true,
   "main_agent_can_self_test": true,
