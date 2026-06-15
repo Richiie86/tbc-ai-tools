@@ -1,0 +1,38 @@
+{
+  "summary": "Iter32 — verified Redis TCP live (Upstash rediss://) for runtime-errors rate-limiter (NOT in-memory), S3 mirror correctly gated off by default, restore-preview diff endpoint + UI returning all 5 collections, path-traversal guard on diff endpoint, trusted-proxies default trust-first-hop behaviour, and iter30/31 regression smoke. 10/10 backend pytest pass. Frontend BackupCard shows 'S3 off' badge and Preview button per snapshot row correctly toggles the diff table.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Operator → Security tab <select>", "issues": ["Pre-existing React hydration warning: '<span> cannot be a child of <option>'. Already flagged in iter31; not iter32-introduced."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter32_redis_s3_diff_proxies.py",
+    "/app/test_reports/pytest/iter32.xml"
+  ],
+  "action_items": [
+    "(low / carry-over) Sanitize <option> children in operator Ops-tab <select> to clear the React hydration warning (out of scope for iter32)."
+  ],
+  "critical_code_review_comments": [
+    "runtime_errors_ext.py: _get_redis() correctly prefers Upstash REST when both REST and TCP envs are set; falls back to TCP from REDIS_URL. Backend log confirms 'Redis TCP ready (flowing-oryx-41436.upstash.io:6379)' after the read-only REST token was rejected with NOPERM — self-heal cooldown then handed over to TCP path cleanly. Excellent defensive ordering.",
+    "runtime_errors_ext.py: _client_ip() honours TRUSTED_PROXIES CIDR allowlist when set; when unset (current) trusts first XFF hop. Confirmed via test_ingest_xff_first_hop_default — the spoofed XFF 192.168.x.y was persisted as the doc.ip.",
+    "operator_backup_ext.py: _get_s3() / _s3_mirror_put() correctly env-gated; with S3_BACKUP_BUCKET unset, list returns s3_enabled:false and create_snapshot reports s3_mirrored:false. Never raises on init failure (lazy + try/except logged).",
+    "operator_backup_ext.py: /snapshots/{id}/diff resolves through Path.resolve() + relative_to(_BACKUP_DIR.resolve()); ..%2F..%2Fetc%2Fpasswd correctly returns 400/404. Returns all 5 expected collections (deploy_projects, promo_codes, kyc_bypass_emails, vanished_emails, app_settings) with snapshot_count/current_count/merge_delta_max/replace_delta all ints.",
+    "BackupCard.jsx: Preview button caches the diff per snapshot id (good — re-toggling doesn't re-hit the backend). togglePreview correctly clears diffOpenId on second click. data-testid coverage is complete for the new flow (backup-snapshot-preview-{id}, backup-snapshot-diff-{id}, backup-snapshot-diff-row-{id}-{collection})."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter32_redis_s3_diff_proxies.py (new)"
+  ],
+  "success_rate": {"backend": "100% (10/10 pytest)", "frontend": "100% (BackupCard preview/diff/S3-off all verified live)"},
+  "test_credentials": "rac.investments.swe@gmail.com / 123Admin@98 (operator). Login redirects to /setup-2fa; /operator is reachable directly with the session cookie.",
+  "seed_data_creation": "Created 1 new snapshot (~8.9KB) via POST /api/operator/backup/snapshots. Generated ~70 runtime_errors test rows under signatures 'iter32 xff probe …' and 'iter32 rate probe …' for the limiter test — can be cleaned later if noise matters.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend log line to look for on every boot: 'runtime-errors rate-limiter: Redis TCP ready (flowing-oryx-41436.upstash.io:6379)'. If you see 'Upstash REST ready' followed by 'NOPERM' + cooldown, that's the read-only REST token failing and TCP taking over (expected with the current creds). The iter32 pytest file is the regression suite — re-run with `pytest backend/tests/test_iter32_redis_s3_diff_proxies.py -v`. Rate-limit test sends 35 rapid POSTs from a single XFF and asserts ≥1 rate_limited and ≤31 accepted, which is the strict Redis-cross-pod behaviour (iter31 had to relax this because in-memory + ingress SNAT broke it; now reliable).",
+  "rca_of_the_issue": "N/A — all iter32 features verified working as designed."
+}
