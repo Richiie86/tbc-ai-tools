@@ -163,7 +163,7 @@ async def run_suggestions(
     # Reuse the same repo snapshot logic the code review uses — exactly
     # one source of truth for "what files do we look at".
     from deploy.code_review import fetch_repo_snapshot
-    from emergentintegrations.llm.chat import LlmChat, UserMessage
+    from llm_router import LlmChat, UserMessage
     snapshot = await fetch_repo_snapshot(repo, project.get('gitRef'), gh_token)
     if not snapshot['files']:
         raise HTTPException(502, f"Could not sample repo {repo}@{snapshot['ref']}")

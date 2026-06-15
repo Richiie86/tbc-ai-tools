@@ -79,7 +79,7 @@ async def propose_learning_from_session(
         # Use a cheap/fast model regardless of which one the user picked
         # for the main conversation — the operator pays once per main
         # reply, NOT once per extraction.
-        from emergentintegrations.llm.chat import LlmChat, UserMessage
+        from llm_router import LlmChat, UserMessage
         chat = LlmChat(
             api_key=api_key,
             session_id=f'autolearn:{session_id}',

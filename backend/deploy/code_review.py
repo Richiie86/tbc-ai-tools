@@ -220,7 +220,7 @@ async def _second_opinion(snapshot: dict, first_review: dict, llm_key: str) -> d
     + first reviewer's verdict. Cheap audit pass — catches hallucinations
     the primary GPT-4o reviewer might miss. Always returns a dict.
     """
-    from emergentintegrations.llm.chat import LlmChat, UserMessage
+    from llm_router import LlmChat, UserMessage
 
     blocks = [f"--- {f['path']} ---\n{f['content'][:6_000]}" for f in snapshot['files'][:20]]
     user_msg = (
@@ -230,15 +230,18 @@ async def _second_opinion(snapshot: dict, first_review: dict, llm_key: str) -> d
         f"Files reviewed:\n" + "\n\n".join(blocks)
         + "\n\nReturn the second-opinion JSON now."
     )
+    # Second opinion uses Claude OPUS — different model strength than the
+    # Sonnet primary, so we still get diverse review angles while keeping
+    # BOTH passes on the operator's BYO Anthropic key (no Emergent spend).
     chat = LlmChat(
         api_key=llm_key,
         session_id=f'code-review-second-{datetime.now(timezone.utc).timestamp():.0f}',
         system_message=_SECOND_OPINION_PROMPT,
-    ).with_model('anthropic', 'claude-sonnet-4-5-20250929')
+    ).with_model('anthropic', 'claude-opus-4-5')
     try:
         raw = await chat.send_message(UserMessage(text=user_msg))
     except Exception as e:
-        return {'verdict': 'review_skipped', 'summary': f'Second-opinion failed: {str(e)[:200]}', 'concerns': [], 'reviewer_model': 'claude-sonnet-4-5'}
+        return {'verdict': 'review_skipped', 'summary': f'Second-opinion failed: {str(e)[:200]}', 'concerns': [], 'reviewer_model': 'claude-opus-4-5'}
     text = (raw or '').strip()
     if text.startswith('```'):
         text = re.sub(r'^```[a-zA-Z]*\n?', '', text)
@@ -255,7 +258,7 @@ async def _second_opinion(snapshot: dict, first_review: dict, llm_key: str) -> d
         'verdict': parsed.get('verdict') or 'review_skipped',
         'summary': (parsed.get('summary') or '')[:280],
         'concerns': [str(c)[:280] for c in (parsed.get('concerns') or [])][:8],
-        'reviewer_model': 'claude-sonnet-4-5',
+        'reviewer_model': 'claude-opus-4-5',
     }
 
 
@@ -263,7 +266,7 @@ async def run_code_review(project: dict, settings: dict) -> dict:
     """Fetch the repo snapshot, hand it to the LLM, parse JSON. Always returns
     a dict — even on parse failure we surface the raw text so the operator can
     still act on it."""
-    from emergentintegrations.llm.chat import LlmChat, UserMessage  # local import to avoid top-level cost
+    from llm_router import LlmChat, UserMessage  # BYO Anthropic key when ANTHROPIC_API_KEY is set
 
     # Repo precondition — surface a clean 412 instead of letting the
     # downstream `fetch_repo_snapshot` hit GitHub with an empty path
@@ -377,7 +380,7 @@ async def run_code_review(project: dict, settings: dict) -> dict:
         api_key=llm_key,
         session_id=f'code-review-{project["id"]}',
         system_message=_SYSTEM_PROMPT,
-    ).with_model('openai', 'gpt-4o')
+    ).with_model('anthropic', 'claude-sonnet-4-5-20250929')  # primary reviewer — uses BYO ANTHROPIC_API_KEY when set
 
     try:
         raw = await chat.send_message(UserMessage(text=prompt))

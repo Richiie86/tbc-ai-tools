@@ -260,7 +260,7 @@ async def _cross_ai_review(llm_key: str, prompt: str, summary: str, files: list[
     Returns `{verdict, summary, concerns, missing_imports, security_flags,
               reviewer_model}` — always returns a dict, even on parse failure.
     """
-    from emergentintegrations.llm.chat import LlmChat, UserMessage
+    from llm_router import LlmChat, UserMessage
 
     # Truncate file contents for the reviewer so we don't blow tokens on a
     # 12 × 80KB patch set — heads are what matter for import + signature checks.
@@ -274,11 +274,15 @@ async def _cross_ai_review(llm_key: str, prompt: str, summary: str, files: list[
         f'Proposed files ({len(files)}):\n{files_blob}\n\n'
         'Return the review JSON now.'
     )
+    # Reviewer = Claude Opus (different model from the Sonnet generator) so
+    # we still get cross-model diversity while staying on the operator's
+    # BYO Anthropic key. Previously this hit gpt-4o-mini through Emergent's
+    # budget which exhausted in production.
     chat = LlmChat(
         api_key=llm_key,
         session_id=f'ai-build-review-{datetime.now(timezone.utc).timestamp():.0f}',
         system_message=_REVIEWER_SYSTEM_PROMPT,
-    ).with_model('openai', 'gpt-4o-mini')
+    ).with_model('anthropic', 'claude-opus-4-5')
     try:
         raw = await chat.send_message(UserMessage(text=user_msg))
     except Exception as e:
@@ -287,7 +291,7 @@ async def _cross_ai_review(llm_key: str, prompt: str, summary: str, files: list[
             'verdict': 'review_skipped',
             'summary': f'Reviewer call failed: {str(e)[:200]}',
             'concerns': [], 'missing_imports': [], 'security_flags': [],
-            'reviewer_model': 'gpt-4o-mini',
+            'reviewer_model': 'claude-opus-4-5',
         }
     text = _strip_codefences(raw or '')
     try:
@@ -300,7 +304,7 @@ async def _cross_ai_review(llm_key: str, prompt: str, summary: str, files: list[
                 'summary': 'Reviewer returned non-JSON',
                 'concerns': [text[:200]] if text else [],
                 'missing_imports': [], 'security_flags': [],
-                'reviewer_model': 'gpt-4o-mini',
+                'reviewer_model': 'claude-opus-4-5',
             }
         try:
             parsed = json.loads(m.group(0))
@@ -312,7 +316,7 @@ async def _cross_ai_review(llm_key: str, prompt: str, summary: str, files: list[
         'concerns': [str(c)[:280] for c in (parsed.get('concerns') or [])][:12],
         'missing_imports': [str(i)[:200] for i in (parsed.get('missing_imports') or [])][:8],
         'security_flags': [str(s)[:200] for s in (parsed.get('security_flags') or [])][:8],
-        'reviewer_model': 'gpt-4o-mini',
+        'reviewer_model': 'claude-opus-4-5',
     }
 
 
@@ -324,7 +328,7 @@ async def plan(req: PlanRequest, user: dict = Depends(get_current_operator)):
     Stored in `ai_build_plans` so the follow-up `/open-pr` call doesn't
     need to re-run the LLM. Plans expire after 24h via index TTL.
     """
-    from emergentintegrations.llm.chat import LlmChat, UserMessage
+    from llm_router import LlmChat, UserMessage
 
     project = await db.deploy_projects.find_one({'id': req.project_id})
     if not project:
