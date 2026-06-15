@@ -1336,3 +1336,48 @@ See `/app/memory/test_credentials.md`.
   snapshot returns full payload. Playwright confirmed the Preview button is
   clickable end-to-end.
 
+
+---
+
+## 2026-02 — Iter32: Production-readiness pass (Redis live, S3 mirror, trusted proxies, hydration fix)
+
+### Shipped
+- **Redis rate-limiter live** — runtime-errors ingest now uses Upstash Redis TCP
+  via `REDIS_URL=rediss://default:...@flowing-oryx-41436.upstash.io:6379` in
+  `backend/.env`. Confirmed via direct Redis read: `rl:rt_err:10.0.0.50 = 2` (TTL 50s).
+  `_get_redis()` lazy-inits, prefers Upstash REST when its envs are set (we removed
+  the read-only REST token because user's was scoped read-only), falls back to TCP
+  cleanly. Self-healing 60s cooldown on transient failures + X-Forwarded-For
+  honouring with optional `TRUSTED_PROXIES` CIDR allowlist.
+- **S3 backup mirror** — env-gated (`S3_BACKUP_BUCKET`, `AWS_ACCESS_KEY_ID`,
+  `AWS_SECRET_ACCESS_KEY`, optional `S3_BACKUP_REGION`, `S3_BACKUP_PREFIX`).
+  When set, every local snapshot is also uploaded to S3 + the daily prune
+  cleans both sides. Currently OFF (user kept local-disk only). UI badge in
+  BackupCard reflects status (`backup-s3-on` / `backup-s3-off`).
+- **Trusted-proxies CIDR allowlist** — `TRUSTED_PROXIES=10.0.0.0/8,...` env var.
+  When set, XFF is only honoured when the direct peer IP falls inside the
+  allowlist; otherwise raw peer IP wins (prevents header spoofing). Default
+  unset → trust-first-hop behaviour preserved.
+- **React hydration warning fixed** — `<option>{p.projectName} · {p.repo}</option>`
+  → `<option>{\`${p.projectName} · ${p.repo}\`}</option>` in both
+  `AutoFixCard.jsx` and `AIBuildTab.jsx`. React 19 was wrapping the multi-child
+  text in a `<span>` for diffing, triggering `validateDOMNesting`. Template
+  literal collapses to a single text node.
+
+### Verification
+- `/app/test_reports/iteration_32.json` — backend 10/10 pytest, frontend 100%.
+- `/app/backend/tests/test_iter32_redis_s3_diff_proxies.py` — new regression suite.
+- Manual: 35-burst-from-same-IP test trips `rate_limited` at exactly request 31,
+  the in-memory bucket previously couldn't enforce this across pod replacements.
+
+### Pending from user
+- Nothing — ready to **"Save to GitHub"** and ship to `tbctools.org`.
+- Optional: provide AWS keys + `S3_BACKUP_BUCKET` later to enable off-host backup mirror.
+- Optional: set `TRUSTED_PROXIES` once you confirm the K8s/Vercel ingress IP range
+  (currently first-hop trust is fine for our topology).
+
+### Backlog (post-iter32)
+- 🟢 (low) Restore-from-S3 endpoint — currently only local-disk restores are wired.
+  Mirror writes go to S3 but restore-by-id only reads local. ~30 min when relevant.
+- 🟢 (future) Skill-tree graph: drag-to-rearrange + persist positions.
+

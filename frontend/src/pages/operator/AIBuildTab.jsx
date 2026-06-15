@@ -179,7 +179,7 @@ export default function AIBuildTab() {
                 <option value="">No deploy projects — add one in the Projects tab</option>
               ) : (
                 projects.map((p) => (
-                  <option key={p.id} value={p.id}>{p.projectName} · {p.repo}</option>
+                  <option key={p.id} value={p.id}>{`${p.projectName} · ${p.repo}`}</option>
                 ))
               )}
             </select>

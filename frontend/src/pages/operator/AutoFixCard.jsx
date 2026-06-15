@@ -129,7 +129,7 @@ export default function AutoFixCard() {
             >
               <option value="">— pick a project —</option>
               {projects.map((p) => (
-                <option key={p.id} value={p.id}>{p.projectName} · {p.repo}</option>
+                <option key={p.id} value={p.id}>{`${p.projectName} · ${p.repo}`}</option>
               ))}
             </select>
           </div>
