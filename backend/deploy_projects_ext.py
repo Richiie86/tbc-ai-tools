@@ -803,7 +803,36 @@ async def _trigger_deploy(
     if target == 'production' and not bypass_review:
         last_review = project.get('last_code_review') or {}
         if last_review.get('verdict') == 'repo_empty':
-            # Special-case: nothing to fix because there's no code yet.
+            # A `repo_empty` verdict is cheap to be WRONG about and expensive
+            # for the operator: it hard-blocks the deploy. It's also easy to
+            # go stale — the verdict is cached, so once code is pushed the
+            # stored `repo_empty` lingers until someone manually re-runs
+            # Review. Before blocking, re-check the LIVE repo tree (a single
+            # cheap GitHub call, no LLM spend) so a stale verdict can self-heal.
+            try:
+                from deploy.code_review import fetch_repo_snapshot
+                settings_doc = await get_settings_doc()
+                gh_token = (settings_doc or {}).get('github_token') or os.environ.get('GITHUB_TOKEN')
+                snap = await fetch_repo_snapshot(
+                    project['repo'], project.get('gitRef'), gh_token,
+                )
+                live_code_count = snap.get('code_blob_count', 0)
+            except Exception:
+                # If the re-check fails (rate limit, transient GitHub error),
+                # fall back to the cached verdict rather than guessing.
+                live_code_count = 0
+            if live_code_count > 0:
+                # Stale verdict — repo now has real source. Clear the cached
+                # `repo_empty` so the gate stops blocking, and let the deploy
+                # proceed. The operator can run a full Review post-deploy.
+                await db.deploy_projects.update_one(
+                    {'id': project_id},
+                    {'$unset': {'last_code_review': '', 'last_code_review_at': ''},
+                     '$set': {'updated_at': datetime.now(timezone.utc)}},
+                )
+                last_review = {}
+        if last_review.get('verdict') == 'repo_empty':
+            # Confirmed empty: nothing to fix because there's no code yet.
             # Operator needs the one-click initial push, not the AI fix
             # chat. Surface a dedicated error so the frontend can render
             # the correct dialog (and stop charging the user to talk to

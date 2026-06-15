@@ -54,6 +54,23 @@ _CODE_EXTS = (
     '.json', '.md', '.yml', '.yaml',
 )
 
+# Files that are pure documentation/config scaffolding. A repo containing
+# ONLY these (and nothing else) is considered "empty" — there is no real
+# source code to review or ship. Used by BOTH the snapshot tree-count and
+# the `run_code_review` fast-path so they can never disagree.
+_PLACEHOLDER_SUFFIXES = (
+    'readme.md', 'readme.rst', 'readme.txt', 'readme',
+    'license', 'license.md', 'license.txt', 'license.rst',
+    '.gitignore', '.gitattributes', '.editorconfig',
+    'code_of_conduct.md', 'contributing.md', 'security.md',
+    'changelog.md', 'authors', 'notice', '.env.example',
+)
+
+
+def _is_placeholder_path(path: str) -> bool:
+    """True if `path` is a doc/config placeholder (not real source code)."""
+    return path.lower().endswith(_PLACEHOLDER_SUFFIXES)
+
 
 async def _gh_get_json(
     client: httpx.AsyncClient,
@@ -124,6 +141,16 @@ async def fetch_repo_snapshot(
 
         tree = [t for t in (tree_resp.get('tree') or []) if t.get('type') == 'blob']
 
+        # Count REAL source files across the ENTIRE tree (not just the small
+        # sampled subset). This is the authoritative signal for "is the repo
+        # empty?" — sampling caps at ~30 files and bucketed selection could
+        # otherwise miss code that lives outside the sampled paths, producing
+        # a false `repo_empty` verdict that permanently blocks deploys.
+        code_blob_count = sum(
+            1 for t in tree if not _is_placeholder_path(t.get('path', ''))
+        )
+        tree_was_truncated = bool(tree_resp.get('truncated'))
+
         # Bucketed selection: priority files first, then top-level code files.
         chosen_paths: list[str] = []
         for name in _PRIORITY_FILES:
@@ -172,6 +199,10 @@ async def fetch_repo_snapshot(
         'files': files,
         'file_count': len(files),
         'total_chars': total,
+        # Tree-wide signals (authoritative, not limited by sampling).
+        'tree_blob_count': len(tree),
+        'code_blob_count': code_blob_count,
+        'tree_truncated': tree_was_truncated,
     }
 
 
@@ -300,15 +331,20 @@ async def run_code_review(project: dict, settings: dict) -> dict:
     # We surface a dedicated `repo_empty` verdict so the frontend can show a
     # one-click "Push initial code" dialog instead of the generic fix/force
     # prompt — that's the action the operator actually needs.
-    code_files = [
-        f for f in snapshot['files']
-        if not f['path'].lower().endswith(
-            ('readme.md', 'readme.rst', 'license', 'license.md',
-             'license.txt', '.gitignore', '.gitattributes', 'code_of_conduct.md',
-             'contributing.md', 'security.md', '.env.example')
+    #
+    # IMPORTANT: base this on the AUTHORITATIVE tree-wide `code_blob_count`
+    # (computed over the entire GitHub tree), NOT on the small sampled
+    # `snapshot['files']` subset. The old sample-based check produced false
+    # `repo_empty` verdicts (e.g. "1 file sampled") whenever the bucketed
+    # sampler happened to only pull a README, which then permanently blocked
+    # deploys for a repo that actually had hundreds of source files.
+    code_blob_count = snapshot.get('code_blob_count')
+    if code_blob_count is None:
+        # Defensive fallback for older snapshots: derive from the sample.
+        code_blob_count = len(
+            [f for f in snapshot['files'] if not _is_placeholder_path(f['path'])]
         )
-    ]
-    if not code_files:
+    if code_blob_count == 0:
         review = {
             'summary': (
                 f"Repository {project['repo']} has no source code yet — only documentation/config "
