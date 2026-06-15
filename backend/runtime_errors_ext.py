@@ -176,15 +176,69 @@ def _client_ip(request: Request) -> str:
     Cloudflare, Vercel etc.). Falls back to `request.client.host` if the
     header is absent.
 
-    We only trust the FIRST hop because in our deployment topology the
-    ingress always appends; spoofing would require control of the proxy.
+    Spoof-resistance: when the env var `TRUSTED_PROXIES` is set (a
+    comma-separated CIDR list, e.g. `10.0.0.0/8,172.16.0.0/12`) we only
+    honour XFF when the *direct* peer IP (request.client.host) is inside
+    that allowlist. Otherwise the header is ignored and the peer IP
+    wins. This stops an external attacker spoofing XFF to bypass the
+    per-IP rate-limit. When the env var is unset we trust the first hop
+    (suitable for our K8s ingress topology — the ingress always
+    appends).
     """
+    peer = request.client.host if request.client else 'unknown'
     xff = request.headers.get('x-forwarded-for') or request.headers.get('X-Forwarded-For')
-    if xff:
-        first = xff.split(',', 1)[0].strip()
-        if first:
-            return first
-    return request.client.host if request.client else 'unknown'
+    if not xff:
+        return peer
+    trusted = _trusted_proxies()
+    if trusted is not None and not _ip_in_any_cidr(peer, trusted):
+        # Peer isn't a trusted proxy — XFF could be spoofed, ignore it.
+        return peer
+    first = xff.split(',', 1)[0].strip()
+    return first or peer
+
+
+# Cached trusted-proxy CIDR list. Re-parsed when the env var changes
+# (rare; usually only on restart).
+_TRUSTED_PROXIES_RAW: str | None = None
+_TRUSTED_PROXIES_PARSED: list | None = None
+
+
+def _trusted_proxies():
+    """Returns the parsed CIDR list, or None if the env var is unset
+    (in which case we trust the first XFF hop unconditionally — current
+    behaviour). Lazy-parsed and cached."""
+    global _TRUSTED_PROXIES_RAW, _TRUSTED_PROXIES_PARSED
+    raw = os.environ.get('TRUSTED_PROXIES')
+    if raw == _TRUSTED_PROXIES_RAW and _TRUSTED_PROXIES_PARSED is not None:
+        return _TRUSTED_PROXIES_PARSED
+    _TRUSTED_PROXIES_RAW = raw
+    if not raw:
+        _TRUSTED_PROXIES_PARSED = None
+        return None
+    import ipaddress
+    parsed = []
+    for piece in raw.split(','):
+        piece = piece.strip()
+        if not piece:
+            continue
+        try:
+            parsed.append(ipaddress.ip_network(piece, strict=False))
+        except ValueError:
+            logger.warning('TRUSTED_PROXIES: ignoring invalid CIDR %r', piece)
+    _TRUSTED_PROXIES_PARSED = parsed
+    return parsed
+
+
+def _ip_in_any_cidr(ip: str, networks: list) -> bool:
+    """True if `ip` is inside any of `networks`. Safe on malformed input."""
+    if not ip or ip == 'unknown':
+        return False
+    import ipaddress
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    return any(addr in n for n in networks)
 
 
 async def _get_redis():

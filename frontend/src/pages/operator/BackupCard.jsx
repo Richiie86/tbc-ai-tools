@@ -34,6 +34,7 @@ export default function BackupCard() {
   const [snapshotting, setSnapshotting] = useState(false);
   const [restoringId, setRestoringId] = useState(null);
   const [retentionDays, setRetentionDays] = useState(30);
+  const [s3Status, setS3Status] = useState({ enabled: false, bucket: null });
   // Per-snapshot diff cache + the id currently expanded. Lazy-loaded
   // when the operator clicks "Preview" on a row so the list itself
   // stays cheap.
@@ -47,6 +48,7 @@ export default function BackupCard() {
       const { data } = await api.get('/operator/backup/snapshots');
       setSnapshots(data?.snapshots || []);
       setRetentionDays(data?.retention_days || 30);
+      setS3Status({ enabled: !!data?.s3_enabled, bucket: data?.s3_bucket || null });
     } catch (e) {
       // Don't toast on first load — the card still works without history.
       console.warn('snapshots fetch failed', e);
@@ -308,6 +310,23 @@ export default function BackupCard() {
             <span className="rounded-full border border-amber-500/30 bg-amber-500/[0.08] px-1.5 py-0.5 text-[9px] font-bold uppercase text-amber-200">
               {retentionDays}-day rolling
             </span>
+            {s3Status.enabled ? (
+              <span
+                data-testid="backup-s3-on"
+                title={`Mirroring to s3://${s3Status.bucket}`}
+                className="rounded-full border border-emerald-500/30 bg-emerald-500/[0.08] px-1.5 py-0.5 text-[9px] font-bold uppercase text-emerald-200"
+              >
+                S3 on
+              </span>
+            ) : (
+              <span
+                data-testid="backup-s3-off"
+                title="Set S3_BACKUP_BUCKET to enable an off-host mirror"
+                className="rounded-full border border-tbc-700/40 bg-ink-900/60 px-1.5 py-0.5 text-[9px] font-bold uppercase text-tbc-200/60"
+              >
+                S3 off
+              </span>
+            )}
           </p>
           <Button
             size="sm"

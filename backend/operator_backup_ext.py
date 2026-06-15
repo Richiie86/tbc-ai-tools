@@ -207,6 +207,74 @@ async def import_backup(
 _BACKUP_DIR = Path(os.environ.get('BACKUP_SNAPSHOT_DIR', '/app/data/backups'))
 _BACKUP_RETENTION_DAYS = int(os.environ.get('BACKUP_SNAPSHOT_RETENTION_DAYS', '30'))
 
+# Optional S3 mirror — when `S3_BACKUP_BUCKET` is set every local
+# snapshot is *also* uploaded to S3 under `<prefix>/<filename>`. Local
+# disk stays the primary; S3 is a redundant off-host copy so the
+# operator can survive a pod replacement that drops `/app/data/`.
+# Required envs to enable: S3_BACKUP_BUCKET, AWS_ACCESS_KEY_ID,
+# AWS_SECRET_ACCESS_KEY (or an IAM role). Optional: S3_BACKUP_REGION
+# (default us-east-1), S3_BACKUP_PREFIX (default 'tbc-backups/').
+_S3_BUCKET = os.environ.get('S3_BACKUP_BUCKET')
+_S3_REGION = os.environ.get('S3_BACKUP_REGION', 'us-east-1')
+_S3_PREFIX = (os.environ.get('S3_BACKUP_PREFIX', 'tbc-backups/')).rstrip('/') + '/'
+_s3_client = None  # lazy-init
+
+
+def _get_s3():
+    """Lazy-init the boto3 S3 client. Returns None if S3 isn't
+    configured. Never raises — callers fall back to local-only on
+    failure so snapshot writes never block on a misconfigured mirror."""
+    global _s3_client
+    if not _S3_BUCKET:
+        return None
+    if _s3_client is not None:
+        return _s3_client
+    try:
+        import boto3
+        _s3_client = boto3.client('s3', region_name=_S3_REGION)
+        logger.info('backup S3 mirror ready: s3://%s/%s (region %s)',
+                    _S3_BUCKET, _S3_PREFIX, _S3_REGION)
+    except Exception:
+        logger.exception('S3 mirror init failed; continuing local-only')
+        _s3_client = None
+    return _s3_client
+
+
+def _s3_mirror_put(path: Path) -> bool:
+    """Upload a snapshot file to S3. Returns True on success, False on
+    any failure (logged, never raised). Local-disk write succeeds
+    independently."""
+    client = _get_s3()
+    if client is None:
+        return False
+    try:
+        key = f'{_S3_PREFIX}{path.name}'
+        client.upload_file(str(path), _S3_BUCKET, key)
+        logger.info('S3 mirror put ok: s3://%s/%s', _S3_BUCKET, key)
+        return True
+    except Exception:
+        logger.exception('S3 mirror put failed for %s', path.name)
+        return False
+
+
+def _s3_mirror_prune(filenames_to_delete: list[str]) -> int:
+    """Delete a list of snapshot filenames from the S3 mirror. Best
+    effort — failures are logged but never raised."""
+    client = _get_s3()
+    if client is None or not filenames_to_delete:
+        return 0
+    try:
+        objects = [{'Key': f'{_S3_PREFIX}{name}'} for name in filenames_to_delete]
+        client.delete_objects(
+            Bucket=_S3_BUCKET,
+            Delete={'Objects': objects, 'Quiet': True},
+        )
+        logger.info('S3 mirror pruned %s file(s)', len(filenames_to_delete))
+        return len(filenames_to_delete)
+    except Exception:
+        logger.exception('S3 mirror prune failed')
+        return 0
+
 
 def _ensure_backup_dir() -> Path:
     _BACKUP_DIR.mkdir(parents=True, exist_ok=True)
@@ -268,32 +336,37 @@ def _list_snapshots() -> list[dict]:
 
 def _prune_old_snapshots() -> int:
     """Drop any snapshot file older than the retention window. Returns
-    the number of files removed."""
+    the number of files removed. Also prunes the same files from the
+    S3 mirror when one is configured."""
     d = _ensure_backup_dir()
     cutoff = datetime.now(timezone.utc) - timedelta(days=_BACKUP_RETENTION_DAYS)
-    removed = 0
+    removed_names: list[str] = []
     for p in d.glob('snapshot-*.json'):
         try:
             mtime = datetime.fromtimestamp(p.stat().st_mtime, tz=timezone.utc)
             if mtime < cutoff:
                 p.unlink()
-                removed += 1
+                removed_names.append(p.name)
         except OSError:
             continue
-    return removed
+    if removed_names:
+        _s3_mirror_prune(removed_names)
+    return len(removed_names)
 
 
 async def _run_snapshot(operator_email: str | None = None) -> dict:
-    """Write a snapshot to disk + prune old ones. Returns metadata about
-    the new file. Used by both the scheduler job and the manual UI."""
+    """Write a snapshot to disk + (optionally) mirror to S3 + prune old
+    ones. Returns metadata about the new file. Used by both the
+    scheduler job and the manual UI."""
     payload = await _build_snapshot_payload(operator_email)
     stamp = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H-%M-%SZ')
     fname = f'snapshot-{stamp}.json'
     path = _ensure_backup_dir() / fname
     path.write_text(json.dumps(payload, indent=2, default=str))
+    mirrored = _s3_mirror_put(path)
     pruned = _prune_old_snapshots()
-    logger.info('backup snapshot written %s (%s bytes); pruned %s old files',
-                path.name, path.stat().st_size, pruned)
+    logger.info('backup snapshot written %s (%s bytes); s3 mirror=%s; pruned %s old files',
+                path.name, path.stat().st_size, mirrored, pruned)
     return {
         'id': path.stem,
         'filename': path.name,
@@ -301,16 +374,23 @@ async def _run_snapshot(operator_email: str | None = None) -> dict:
         'created_at': datetime.now(timezone.utc).isoformat(),
         'pruned': pruned,
         'retention_days': _BACKUP_RETENTION_DAYS,
+        's3_mirrored': mirrored,
+        's3_enabled': bool(_S3_BUCKET),
     }
 
 
 @router.get('/snapshots')
 async def list_snapshots(_op: dict = Depends(get_current_operator)):
-    """List on-disk snapshots (newest first). 30-day rolling window."""
+    """List on-disk snapshots (newest first). 30-day rolling window.
+    Includes the S3 mirror status so the UI can flag operators that
+    they have / don't have an off-host backup."""
     return {
         'snapshots': _list_snapshots(),
         'retention_days': _BACKUP_RETENTION_DAYS,
         'directory': str(_BACKUP_DIR),
+        's3_enabled': bool(_S3_BUCKET),
+        's3_bucket': _S3_BUCKET if _S3_BUCKET else None,
+        's3_prefix': _S3_PREFIX if _S3_BUCKET else None,
     }
 
 
