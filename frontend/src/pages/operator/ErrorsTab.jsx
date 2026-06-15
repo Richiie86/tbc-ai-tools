@@ -9,7 +9,7 @@ import {
 import { toast } from 'sonner';
 import {
   AlertOctagon, Loader2, RefreshCw, Trash2, EyeOff, Wand2, Code2, GitBranch,
-  ChevronDown, ChevronRight,
+  ChevronDown, ChevronRight, Activity,
 } from 'lucide-react';
 
 /**
@@ -31,6 +31,28 @@ export default function ErrorsTab() {
   const [running, setRunning] = useState(null); // id of error currently running RCA
   const [includeDismissed, setIncludeDismissed] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null); // error pending delete
+  // Rate-limiter live status (Upstash / TCP / in-memory). Polled every
+  // 15s so the operator can see cooldown counts tick down during a
+  // transient outage. We don't show this in production-facing UI — it's
+  // diagnostic-only — but it's hugely useful when shipping changes that
+  // touch the limiter.
+  const [limiter, setLimiter] = useState(null);
+
+  const loadLimiter = useCallback(async () => {
+    try {
+      const { data } = await api.get('/operator/runtime-errors/limiter-status');
+      setLimiter(data);
+    } catch {
+      // Limiter status is non-critical; never toast on its failures.
+      setLimiter(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadLimiter();
+    const t = setInterval(loadLimiter, 15000);
+    return () => clearInterval(t);
+  }, [loadLimiter]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -149,6 +171,7 @@ export default function ErrorsTab() {
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
+          <LimiterBadge status={limiter} />
           <label className="flex items-center gap-1.5 text-[11px] text-tbc-200/60">
             <input
               type="checkbox"
@@ -407,3 +430,54 @@ function ErrorRow({ err, expanded, onToggle, running, onRunRCA, onDismiss, onDel
     </li>
   );
 }
+
+/**
+ * Tiny live-status pill for the runtime-errors rate-limiter. Polled
+ * every 15s from the parent. Shows the active backend (Upstash TCP /
+ * REST / in-memory) + colour-coded state so the operator can spot a
+ * cooldown event immediately.
+ *
+ * Hidden entirely when the status hasn't loaded yet (avoids a flash
+ * of "off" on first render while Redis lazy-inits).
+ */
+function LimiterBadge({ status }) {
+  if (!status) return null;
+  const { configured, state, backend, cooldown_remaining_s: cooldown, host } = status;
+
+  let label, colour, dot, testid;
+  if (!configured) {
+    label = 'In-memory only';
+    colour = 'border-tbc-700/40 bg-ink-900/60 text-tbc-200/60';
+    dot = 'bg-tbc-300/50';
+    testid = 'limiter-badge-inmem';
+  } else if (state === 'live') {
+    label = backend === 'upstash' ? 'Upstash REST · live' : 'Upstash TCP · live';
+    colour = 'border-emerald-500/30 bg-emerald-500/[0.08] text-emerald-200';
+    dot = 'bg-emerald-400';
+    testid = 'limiter-badge-live';
+  } else if (state === 'cooldown') {
+    label = `Cooldown · ${cooldown}s`;
+    colour = 'border-amber-500/40 bg-amber-500/[0.08] text-amber-200';
+    dot = 'bg-amber-400';
+    testid = 'limiter-badge-cooldown';
+  } else {
+    // configured but not yet lazy-inited (no ingest hit since boot).
+    label = 'Ready · awaiting first request';
+    colour = 'border-tbc-500/30 bg-tbc-500/[0.08] text-tbc-100';
+    dot = 'bg-tbc-300';
+    testid = 'limiter-badge-ready';
+  }
+
+  return (
+    <span
+      data-testid={testid}
+      title={host ? `Redis: ${host}` : 'Per-pod in-memory rate-limiter'}
+      className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${colour}`}
+    >
+      <span className={`h-1.5 w-1.5 rounded-full ${dot} ${state === 'live' ? 'animate-pulse' : ''}`} />
+      <Activity className="h-2.5 w-2.5" />
+      {label}
+    </span>
+  );
+}
+

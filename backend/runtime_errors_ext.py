@@ -426,6 +426,55 @@ async def list_errors(
     return [_serialize(d) async for d in cursor]
 
 
+@op_router.get('/limiter-status')
+async def limiter_status(_op: dict = Depends(get_current_operator)):
+    """Returns the live state of the runtime-errors rate-limiter so the
+    operator can see at a glance whether requests are being counted in
+    Upstash/Redis (cross-pod-correct) or in-memory (per-pod). Exposes:
+
+    - `configured`: bool — is `REDIS_URL` or `UPSTASH_*` env set
+    - `state`: 'live' | 'cooldown' | 'off' — current effective state
+    - `backend`: 'tcp' | 'upstash' | 'inmem' — which backend is active
+    - `cooldown_remaining_s`: int (>=0) — seconds until next Redis retry
+    - `host`: str — masked host of the configured Redis (for the UI tooltip)
+    - `trusted_proxies_configured`: bool
+    - `window_s` / `max_per_window`: ints — the bucket config
+    """
+    import time
+    now = time.time()
+    cooldown_left = int(max(0, _redis_disabled_until - now)) if _redis_disabled_until else 0
+    if not _redis_configured():
+        state, backend = 'off', 'inmem'
+    elif cooldown_left > 0:
+        state, backend = 'cooldown', 'inmem'
+    elif _redis_client is None:
+        # Configured but not yet lazy-inited — counts as off until first request.
+        state, backend = 'off', 'inmem'
+    else:
+        state, backend = 'live', _redis_kind or 'inmem'
+
+    host = None
+    if _UPSTASH_URL:
+        host = _UPSTASH_URL.replace('https://', '').replace('http://', '')
+    elif _REDIS_URL:
+        # Strip credentials but keep host:port for the UI tooltip.
+        try:
+            host = _REDIS_URL.split('@', 1)[1]
+        except IndexError:
+            host = '(redacted)'
+
+    return {
+        'configured': _redis_configured(),
+        'state': state,
+        'backend': backend,
+        'cooldown_remaining_s': cooldown_left,
+        'host': host,
+        'trusted_proxies_configured': bool(os.environ.get('TRUSTED_PROXIES')),
+        'window_s': _RATE_WINDOW_S,
+        'max_per_window': _RATE_MAX,
+    }
+
+
 @op_router.post('/{error_id}/rca')
 async def run_rca(error_id: str, _op: dict = Depends(get_current_operator)):
     """Ask an LLM for a root-cause analysis + one-line fix suggestion.
