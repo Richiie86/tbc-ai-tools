@@ -1,0 +1,112 @@
+.project-settings-page {
+  min-height: 100vh;
+  background: var(--background);
+  color: var(--foreground);
+}
+
+.settings-container {
+  max-width: 900px;
+  margin: 2rem auto;
+  padding: 0 1.5rem;
+}
+
+.settings-container h1 {
+  font-size: 2rem;
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+}
+
+.settings-subtitle {
+  color: var(--muted-foreground);
+  margin-bottom: 2rem;
+}
+
+.api-keys-section {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 2rem;
+  margin-bottom: 2rem;
+}
+
+.api-keys-section h2 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+
+.section-hint {
+  color: var(--muted-foreground);
+  font-size: 0.9rem;
+  margin-bottom: 1.5rem;
+}
+
+.api-key-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1.25rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.api-key-row:last-child {
+  border-bottom: none;
+}
+
+.api-key-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.provider-name {
+  font-weight: 600;
+  font-size: 1rem;
+}
+
+.provider-hint {
+  color: var(--muted-foreground);
+  font-size: 0.85rem;
+}
+
+.key-input-wrapper {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.key-input-wrapper input {
+  flex: 1;
+  padding: 0.625rem 1rem;
+  background: var(--input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--foreground);
+  font-family: 'SF Mono', Consolas, monospace;
+  font-size: 0.9rem;
+}
+
+.key-input-wrapper input:focus {
+  outline: none;
+  border-color: var(--ring);
+  box-shadow: 0 0 0 2px var(--ring-offset);
+}
+
+.key-input-wrapper button {
+  padding: 0.625rem 1.25rem;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  border: none;
+  border-radius: 6px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.key-input-wrapper button:hover {
+  opacity: 0.9;
+}
+
+.key-input-wrapper button:active {
+  opacity: 0.8;
+}
