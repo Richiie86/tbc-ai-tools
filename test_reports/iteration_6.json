@@ -32,7 +32,7 @@
     "/app/test_reports/pytest/iter6_full.xml (new)"
   ],
   "success_rate": {"backend": "100% (56/56 passed + 1 skipped)", "frontend": "100% (all flows verified)"},
-  "test_credentials": "Operator rac.investments.swe@gmail.com / 123Admin@98 — used for the github_token UI flow. Browser redirected to /setup-2fa first (RESET_OPERATOR_PASSWORD=true clears 2FA on boot), then direct nav to /operator works (cookie session valid).",
+  "test_credentials": "Operator rac.investments.swe@gmail.com / REDACTED — used for the github_token UI flow. Browser redirected to /setup-2fa first (RESET_OPERATOR_PASSWORD=true clears 2FA on boot), then direct nav to /operator works (cookie session valid).",
   "seed_data_creation": "None — used existing seed projects rendered in Ops tab (P2 Test Project, Clone Variant, etc.). github_token set to 'ghp_test_placeholder_token' transiently, then cleared at end (verified has_github_token=false at finish).",
   "retest_needed": false,
   "main_agent_can_self_test": true,

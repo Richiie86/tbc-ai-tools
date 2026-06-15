@@ -30,7 +30,7 @@
     "/app/backend/tests/test_iter24_cross_ai_review.py (new — 10 tests, all passing)"
   ],
   "success_rate": {"backend": "100% (10/10 iter24 tests pass; iter23 regression failures are env loading, not iter24)", "frontend": "100% on rendering + preview-probe wiring + 409 graceful path; ReviewPanel not E2E-tested because /plan requires github_token to produce a review (verified via code inspection)"},
-  "test_credentials": "Operator rac.investments.swe@gmail.com / 123Admin@98 (cookie-based session, no 2FA required).",
+  "test_credentials": "Operator rac.investments.swe@gmail.com / REDACTED (cookie-based session, no 2FA required).",
   "seed_data_creation": "Inserted + cleaned 3 synthetic docs per test run (ai_build_plans planned/opened, deploy_projects with last_code_review.second_opinion). All cleaned in finally blocks. Existing 'plan_opened_*' synthetic from iter23 (created by previous testing agent) is still in DB and was used to verify the preview-probe button renders in the live UI history.",
   "retest_needed": false,
   "main_agent_can_self_test": true,

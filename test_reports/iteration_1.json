@@ -28,7 +28,7 @@
     "/app/backend/tests/test_p0_review.py"
   ],
   "success_rate": {"backend": "100% (6/6, 1 skipped on prod-shape response)", "frontend": "100% (no console errors, no warnings, all flows reachable)"},
-  "test_credentials": "Operator rac.investments.swe@gmail.com / 123Admin@98 (boots with 2FA cleared, lands on /setup-2fa). Fresh users registered in tests use TEST_<uuid>@example.com with password TempPass!2345 / OrigPass!2345.",
+  "test_credentials": "Operator rac.investments.swe@gmail.com / REDACTED (boots with 2FA cleared, lands on /setup-2fa). Fresh users registered in tests use TEST_<uuid>@example.com with password TempPass!2345 / OrigPass!2345.",
   "seed_data_creation": "Each test class registers its own throwaway TEST_<uuid>@example.com user; no fixture-level seeding required.",
   "retest_needed": false,
   "main_agent_can_self_test": true,

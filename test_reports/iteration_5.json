@@ -30,7 +30,7 @@
     "/app/test_reports/pytest/iter5_full.xml (new)"
   ],
   "success_rate": {"backend": "100% (56/56 + 1 skip)", "frontend": "100% (static review + landing-page smoke test)"},
-  "test_credentials": "Operator rac.investments.swe@gmail.com / 123Admin@98 — not used by P4 tests (we override get_current_operator via app.dependency_overrides).",
+  "test_credentials": "Operator rac.investments.swe@gmail.com / REDACTED — not used by P4 tests (we override get_current_operator via app.dependency_overrides).",
   "seed_data_creation": "Two deploy_projects rows seeded: autopilot-test-blocked (verdict=do_not_ship), autopilot-test-ship (verdict=ship). Cleaned up in module-scope teardown along with any 'Fix review:' chat sessions/messages.",
   "retest_needed": false,
   "main_agent_can_self_test": true,

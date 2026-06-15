@@ -25,7 +25,7 @@
     "backend": "100% (carried from iter19 — 12/12)",
     "frontend": "100% — all 19 retest assertions PASS (no error boundary, pill renders, all 5 AppSettingsCard selectors render, card-is-first ordering, banner toggle backend persistence, preview panel renders, lockdown toggle + window.confirm flow, pill flips both flags with red-pulse style, pill release returns both to false, end-of-run cleanup confirmed)"
   },
-  "test_credentials": "Operator: rac.investments.swe@gmail.com / 123Admin@98 — login OK, 2FA setup page shows 'Skip' button which is clicked to land on /operator. Test ran from preview env via REACT_APP_BACKEND_URL.",
+  "test_credentials": "Operator: rac.investments.swe@gmail.com / REDACTED — login OK, 2FA setup page shows 'Skip' button which is clicked to land on /operator. Test ran from preview env via REACT_APP_BACKEND_URL.",
   "seed_data_creation": "None — test used existing operator account and only flipped global app_settings flags. Final cleanup PATCH leaves the doc at {banner_enabled:false, login_lockdown_enabled:false}. banner_text retains the value previously written by iter19 tests ('ITER19 TEST: personal use only!') — this is harmless because banner_enabled is false; main agent may want to PATCH banner_text back to the production default if desired.",
   "retest_needed": false,
   "main_agent_can_self_test": true,
