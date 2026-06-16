@@ -1961,6 +1961,11 @@ app.include_router(alerts_router)
 app.include_router(secrets_router)
 app.include_router(deploy_access_router)
 app.include_router(ai_learnings_router)
+# Vercel-sourced learnings (design pack + live deployment telemetry).
+# Lives in its own module so the generic ai_learnings_ext stays free of
+# any third-party knowledge.
+from vercel_learnings_ext import router as vercel_learnings_router  # noqa: E402
+app.include_router(vercel_learnings_router)
 app.include_router(ai_brain_router)
 app.include_router(ai_test_bench_router)
 app.include_router(deploy_previews_router)

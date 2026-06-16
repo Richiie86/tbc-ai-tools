@@ -11,6 +11,7 @@ import {
 import { toast } from 'sonner';
 import {
   Brain, Plus, Loader2, Trash2, Save, Sparkles, CheckCircle2, XCircle, FileText, Archive,
+  Triangle, Palette,
 } from 'lucide-react';
 
 /**
@@ -194,17 +195,55 @@ export default function AILearningsTab() {
             and drops new proposals here as <em>pending</em> — approve them with one click.
           </p>
         </div>
-        <Button
-          onClick={generateDigest}
-          disabled={digestLoading}
-          data-testid="ai-learnings-digest-btn"
-          variant="outline"
-          className="shrink-0 border-tbc-900/60 bg-ink-900 text-tbc-100 hover:bg-ink-950"
-        >
-          {digestLoading
-            ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Generating…</>
-            : <><FileText className="mr-1.5 h-4 w-4" />Weekly digest</>}
-        </Button>
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <Button
+            onClick={async () => {
+              try {
+                const { data } = await api.post('/operator/ai-learnings/vercel/seed-design');
+                toast.success(`Seeded ${data.inserted} design learnings (${data.skipped_duplicate} skipped duplicates)`);
+                load();
+              } catch (e) {
+                toast.error(e?.response?.data?.detail || 'Seed failed');
+              }
+            }}
+            data-testid="ai-learnings-seed-vercel-design"
+            variant="outline"
+            title="Add ~25 curated design-system learnings (Vercel/v0 style) to the brain"
+            className="border-purple-500/40 bg-ink-900 text-purple-200 hover:bg-purple-500/10"
+          >
+            <Palette className="mr-1.5 h-4 w-4" />
+            Seed design pack
+          </Button>
+          <Button
+            onClick={async () => {
+              try {
+                const { data } = await api.post('/operator/ai-learnings/vercel/import-vercel');
+                toast.success(`Imported ${data.inserted} new Vercel events (${data.skipped_duplicate} already known)`);
+                load();
+              } catch (e) {
+                toast.error(e?.response?.data?.detail || 'Import failed');
+              }
+            }}
+            data-testid="ai-learnings-import-vercel"
+            variant="outline"
+            title="Pull recent deployments + build outcomes from Vercel into the learning store"
+            className="border-tbc-900/60 bg-ink-900 text-tbc-100 hover:bg-ink-950"
+          >
+            <Triangle className="mr-1.5 h-4 w-4 -rotate-180 fill-current" />
+            Import Vercel
+          </Button>
+          <Button
+            onClick={generateDigest}
+            disabled={digestLoading}
+            data-testid="ai-learnings-digest-btn"
+            variant="outline"
+            className="border-tbc-900/60 bg-ink-900 text-tbc-100 hover:bg-ink-950"
+          >
+            {digestLoading
+              ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Generating…</>
+              : <><FileText className="mr-1.5 h-4 w-4" />Weekly digest</>}
+          </Button>
+        </div>
       </div>
 
       {/* GC controls — operator-tuned archive window for unapproved
