@@ -1026,8 +1026,15 @@ async def delete_session(session_id: str, user: dict = Depends(get_current_user)
 
 @api.post('/chat/stream')
 async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_user)):
-    """Stream AI response over SSE while saving messages to DB."""
-    from emergentintegrations.llm.chat import LlmChat, UserMessage, TextDelta, StreamDone
+    """Stream AI response over SSE while saving messages to DB.
+
+    Supports text + image attachments (base64-encoded). Image-capable
+    models (Claude 3.5+, GPT-4o, Gemini Pro) receive an `ImageContent`
+    block alongside the text. Non-vision models silently ignore images
+    — we don't gate the upload button on model choice so the operator
+    can freely switch providers mid-thread.
+    """
+    from emergentintegrations.llm.chat import LlmChat, UserMessage, TextDelta, StreamDone, ImageContent
 
     db_user = await db.users.find_one({'id': user['sub']})
     if not db_user:
@@ -1111,6 +1118,33 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
     else:
         prompt = req.message
 
+    # Build image attachments — emergentintegrations accepts a list of
+    # `ImageContent` (one per image) passed alongside the text on the
+    # UserMessage. We only forward images; text/PDF attachments stay as
+    # plain text appended to the prompt so non-vision models still see
+    # something useful.
+    image_blocks: list = []
+    image_count = 0
+    if req.attachments:
+        for att in req.attachments:
+            mime = (att.mime or '').lower()
+            if mime.startswith('image/'):
+                # `content` is the raw base64 string (no data: prefix).
+                # Cap at 6 images per send so a single request can't blow
+                # the token window on big multi-image messages.
+                if image_count >= 6:
+                    continue
+                try:
+                    # ImageContent in emergentintegrations only takes the
+                    # raw base64 — mime is auto-detected from the bytes.
+                    image_blocks.append(ImageContent(image_base64=att.content))
+                    image_count += 1
+                except Exception as e:  # noqa: BLE001
+                    logger.warning('Skipping malformed image attachment %s: %s', att.name, e)
+            elif mime.startswith('text/') and att.content:
+                # Append textual attachments inline so the AI still sees them.
+                prompt += f'\n\n--- attachment: {att.name} ---\n{att.content[:8000]}'
+
     async def event_generator():
         full_response = ''
         # Build the model attempt list: primary first, then any fallbacks
@@ -1131,7 +1165,17 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
                 system_message=effective_prompt,
             ).with_model(provider_i, model_name_i)
             try:
-                async for ev in chat_i.stream_message(UserMessage(text=prompt)):
+                # Build the user message — text + any image blocks. The
+                # `file_contents` keyword is what emergentintegrations
+                # exposes for the multimodal payload; when empty we send
+                # plain text so non-vision providers don't see an empty
+                # list and freak out.
+                user_msg = (
+                    UserMessage(text=prompt, file_contents=image_blocks)
+                    if image_blocks
+                    else UserMessage(text=prompt)
+                )
+                async for ev in chat_i.stream_message(user_msg):
                     if isinstance(ev, TextDelta):
                         full_response += ev.content
                         data = json.dumps({'type': 'delta', 'content': ev.content, 'session_id': session_id})
@@ -1794,7 +1838,7 @@ async def op_bulk_user_action(payload: dict, request: Request, op: dict = Depend
     if action not in {'pause', 'resume', 'delete', 'restore', 'vanish', 'grant_credits', 'set_plan'}:
         raise HTTPException(400, 'unsupported action')
 
-    op_self_id = op.get('sub')
+    op_self_id = op.get('sub')  # noqa: F841 — kept for audit-trail logging downstream
     ok: list[str] = []
     skipped: list[dict] = []
 

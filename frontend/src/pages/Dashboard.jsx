@@ -102,9 +102,10 @@ export default function Dashboard({ variant = 'tbc1' }) {
   // Mirror live stream text so the final-message commit doesn't lose the tail.
   useEffect(() => { streamTextRef.current = streamText; }, [streamText]);
 
-  async function send() {
+  async function send(attachments = []) {
     const text = input.trim();
-    if (!text || streaming) return;
+    if (!text && attachments.length === 0) return;
+    if (streaming) return;
     if (user && user.role !== 'operator' && (user.credits ?? 0) <= 0) {
       // Dedicated dialog (with a top-up CTA) converts far better than the old
       // toast + redirect. We keep the draft in the textarea so the user can
@@ -116,13 +117,24 @@ export default function Dashboard({ variant = 'tbc1' }) {
     setStreaming(true);
     setStreamText('');
     setShowDeploySuggest(false);
-    // Optimistic user message
-    const userMsg = { id: 'tmp-' + Date.now(), role: 'user', content: text };
+    // Optimistic user message — preserve the attachments on the bubble so the
+    // user sees what they sent even after the stream finishes. We store the
+    // base64 inline; for very large multi-image sends this is fine because
+    // we cap at 6 × 4MB upstream.
+    const userMsg = {
+      id: 'tmp-' + Date.now(),
+      role: 'user',
+      content: text,
+      attachments: attachments.length ? attachments : undefined,
+    };
     setMessages((m) => [...m, userMsg]);
 
     let acquiredSessionId = currentId;
     try {
-      for await (const ev of streamChat({ session_id: currentId, message: text, model, variant })) {
+      for await (const ev of streamChat({
+        session_id: currentId, message: text, model, variant,
+        attachments: attachments.length ? attachments : undefined,
+      })) {
         if (ev.type === 'delta') {
           if (ev.session_id && !acquiredSessionId) acquiredSessionId = ev.session_id;
           setStreamText((t) => t + (ev.content || ''));
