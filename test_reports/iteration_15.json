@@ -24,7 +24,7 @@
     "/app/backend/tests/test_iter15_ai_brain_fallback_autoheal.py"
   ],
   "success_rate": { "backend": "100% (10/10)", "frontend": "100% — all 4 requested flows verified" },
-  "test_credentials": "Operator: rac.investments.swe@gmail.com / 123Admin@98 — boots without TOTP enforcement; lands on /setup-2fa but /operator works via tbc_session cookie.",
+  "test_credentials": "Operator: rac.investments.swe@gmail.com / REDACTED — boots without TOTP enforcement; lands on /setup-2fa but /operator works via tbc_session cookie.",
   "seed_data_creation": "test_skills_seed_keywords_classified inserts two TEST_iter15 learnings (deploy + voice keywords) then deletes them in a finally block. test_patch_combined_auto_promote_and_auto_heal resets both flags to false before exiting. Frontend playwright toggled auto-heal-tbctools-self ON, verified persistence after reload, then toggled OFF for cleanup. No residual seed data.",
   "retest_needed": false,
   "main_agent_can_self_test": true,

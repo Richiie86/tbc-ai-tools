@@ -28,7 +28,7 @@ BASE_URL = (_BACKEND or '').rstrip('/')
 API = f"{BASE_URL}/api"
 
 OPERATOR_EMAIL = os.environ.get('TEST_OPERATOR_EMAIL', 'rac.investments.swe@gmail.com')
-OPERATOR_PASSWORD = os.environ.get('TEST_OPERATOR_PASSWORD', '123Admin@98')
+OPERATOR_PASSWORD = os.environ.get('TEST_OPERATOR_PASSWORD', 'set-TEST_OPERATOR_PASSWORD-to-run')
 
 MONGO_URL = os.environ.get('MONGO_URL', 'mongodb://localhost:27017')
 DB_NAME = os.environ.get('DB_NAME', 'test_database')

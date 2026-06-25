@@ -26,7 +26,7 @@
     "/app/backend/tests/test_iter16_ai_test_bench.py"
   ],
   "success_rate": { "backend": "100% (6/6)", "frontend": "100% — all 4 requested UI flows verified (cards render, Run probes single, Probes expand, Run all + headline)" },
-  "test_credentials": "Operator: rac.investments.swe@gmail.com / 123Admin@98 — boots without TOTP, lands on /setup-2fa but /operator works via tbc_session cookie.",
+  "test_credentials": "Operator: rac.investments.swe@gmail.com / REDACTED — boots without TOTP, lands on /setup-2fa but /operator works via tbc_session cookie.",
   "seed_data_creation": "Three ai_model_tests docs persisted during testing (one from /run/gpt-4.1, plus eight from /run-all). Not cleaned up by the tests — they're intentionally kept as historical data the operator can browse. They are correctly namespaced in the ai_model_tests collection and do not pollute any other collection.",
   "retest_needed": false,
   "main_agent_can_self_test": true,

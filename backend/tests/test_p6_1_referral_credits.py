@@ -13,7 +13,7 @@ BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://tbc-self-copy.previe
 API = f"{BASE_URL}/api"
 
 OPERATOR_EMAIL = os.environ.get('TEST_OPERATOR_EMAIL', 'rac.investments.swe@gmail.com')
-OPERATOR_PASSWORD = os.environ.get('TEST_OPERATOR_PASSWORD', '123Admin@98')
+OPERATOR_PASSWORD = os.environ.get('TEST_OPERATOR_PASSWORD', 'set-TEST_OPERATOR_PASSWORD-to-run')
 
 
 def _login(session, email, password):

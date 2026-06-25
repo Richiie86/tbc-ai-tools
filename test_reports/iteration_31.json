@@ -31,7 +31,7 @@
     "/app/backend/tests/test_iter31_backup_snapshots_and_rate_limit.py (new)"
   ],
   "success_rate": {"backend": "100% (7/7 pytest)", "frontend": "100% (BackupCard, AutoFix, SecurityCard, SkillGraph, Dashboard smoke all green)"},
-  "test_credentials": "rac.investments.swe@gmail.com / 123Admin@98 (operator). RESET_OPERATOR_PASSWORD=true keeps 2FA cleared on boot; login redirects to /setup-2fa but /operator is reachable directly.",
+  "test_credentials": "rac.investments.swe@gmail.com / REDACTED (operator). RESET_OPERATOR_PASSWORD=true keeps 2FA cleared on boot; login redirects to /setup-2fa but /operator is reachable directly.",
   "seed_data_creation": "Created 1 new snapshot file in /app/data/backups during testing (~8.9KB). No DB rows added/removed by the merge restore (verified counts before/after).",
   "retest_needed": false,
   "main_agent_can_self_test": true,

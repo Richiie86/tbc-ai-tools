@@ -29,7 +29,7 @@
     "backend": "100% (3/3 P6.15 + 12/12 iter17 = 15/15)",
     "frontend": "100% — all four requested flows verified (Errors tab row+RCA, AI Learnings digest open/close, PreviewWidget hidden on empty)"
   },
-  "test_credentials": "Operator: rac.investments.swe@gmail.com / 123Admin@98 — boots without TOTP; /operator works via tbc_session cookie.",
+  "test_credentials": "Operator: rac.investments.swe@gmail.com / REDACTED — boots without TOTP; /operator works via tbc_session cookie.",
   "seed_data_creation": "~63 runtime_errors docs persisted (60 of which are TEST_iter17_ratelimit_* + TEST_iter17_<ts>_alpha + a couple of warmup/dismiss probes). Not auto-cleaned because the operator dashboard treats these as historical state. None pollute other collections. The dismissed/deleted ones are removed by their respective tests.",
   "retest_needed": false,
   "main_agent_can_self_test": true,

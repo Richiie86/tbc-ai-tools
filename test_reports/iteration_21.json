@@ -30,7 +30,7 @@
     "backend": "100% (14/14)",
     "frontend": "100% (all selectors render, all flows pass)"
   },
-  "test_credentials": "Operator: rac.investments.swe@gmail.com / 123Admin@98 (no TOTP). Skip button on /setup-2fa works. REACT_APP_BACKEND_URL=https://tbc-self-copy.preview.emergentagent.com.",
+  "test_credentials": "Operator: rac.investments.swe@gmail.com / REDACTED (no TOTP). Skip button on /setup-2fa works. REACT_APP_BACKEND_URL=https://tbc-self-copy.preview.emergentagent.com.",
   "seed_data_creation": "None. Each test cleans up via PUT {url:'', enabled:true} and PATCH login_lockdown_enabled:false. Final env state confirmed clean (configured=false, lockdown=false).",
   "retest_needed": false,
   "main_agent_can_self_test": true,

@@ -34,7 +34,7 @@
     "/app/backend/tests/test_iter23_ai_build.py (new)"
   ],
   "success_rate": {"backend": "100% (12/12 effective — 2 skips are by-design infra gates)", "frontend": "AI Build UI 100% on rendering + disabled-state + dropdown + 503-handling; Dashboard deploy-gate verified via code review, not E2E (would require triggering a real 412 from inline chat which needs a project with failing AI code review)"},
-  "test_credentials": "Operator rac.investments.swe@gmail.com / 123Admin@98 (2FA cleared; cookie-based session works as before).",
+  "test_credentials": "Operator rac.investments.swe@gmail.com / REDACTED (2FA cleared; cookie-based session works as before).",
   "seed_data_creation": "Inserted 2 synthetic ai_build_plans docs (one 'planned' → deleted via API → verified 200; one 'opened' → verified /open-pr returns 409). Both should be garbage-collected by the planned 24h TTL or can be manually cleaned with `db.ai_build_plans.deleteMany({plan_id: /^plan_(test|opened)_/})`.",
   "retest_needed": false,
   "main_agent_can_self_test": true,

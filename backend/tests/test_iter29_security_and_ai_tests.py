@@ -38,7 +38,7 @@ def _mongo_env():
         pass
 _mongo_env()
 OP_EMAIL = 'rac.investments.swe@gmail.com'
-OP_PASS = '123Admin@98'
+OP_PASS = os.environ.get('TEST_OPERATOR_PASSWORD', 'set-TEST_OPERATOR_PASSWORD-to-run')
 
 VANISH_EMAIL = 'test_vanish_reregister_iter29@example.com'
 KYC_EMAIL = 'test_kyc_bypass_iter29@example.com'

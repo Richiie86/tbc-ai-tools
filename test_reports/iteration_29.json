@@ -36,7 +36,7 @@
     "/app/backend/tests/test_iter29_security_and_ai_tests.py (NEW — 9 tests, all passing)"
   ],
   "success_rate": {"backend": "100% (9/9 iter29 + 30/30 iter27+iter28 regression)", "frontend": "Testids present 4/4. Toggle persistence + KYC input remain blocked by UI bugs above."},
-  "test_credentials": "Operator rac.investments.swe@gmail.com / 123Admin@98 — no 2FA enrolled in this env, login returns token directly.",
+  "test_credentials": "Operator rac.investments.swe@gmail.com / REDACTED — no 2FA enrolled in this env, login returns token directly.",
   "seed_data_creation": "Inserted+cleaned within tests: test_kyc_bypass_iter29@example.com (kyc_bypass_emails), test_vanish_reregister_iter29@example.com (users + vanished_emails), test_reject_iter29@example.com (vanished_emails), TEST_iter29_plan_<uuid> (ai_build_plans). All deleted in teardown.",
   "retest_needed": true,
   "main_agent_can_self_test": true,

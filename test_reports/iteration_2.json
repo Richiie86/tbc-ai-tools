@@ -27,7 +27,7 @@
     "/app/backend/tests/test_p1_refactor.py"
   ],
   "success_rate": {"backend": "100% (9/9 new + 6/6 prior = 15/15, 1 prior skip preserved)", "frontend": "100% (operator console + dashboard render, no JS errors)"},
-  "test_credentials": "Operator rac.investments.swe@gmail.com / 123Admin@98. Operator boots with RESET_OPERATOR_PASSWORD=true, so login lands on /setup-2fa; navigate directly to /operator or /dashboard afterwards.",
+  "test_credentials": "Operator rac.investments.swe@gmail.com / REDACTED. Operator boots with RESET_OPERATOR_PASSWORD=true, so login lands on /setup-2fa; navigate directly to /operator or /dashboard afterwards.",
   "seed_data_creation": "None — black-box only. Tests reuse the operator account; transactions/export PDF path is exercised against existing paid txs in the DB (1 paid tx present).",
   "retest_needed": false,
   "main_agent_can_self_test": true,

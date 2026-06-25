@@ -138,6 +138,9 @@ frontend/node_modules/.cache/default-development/79.pack
 .env
 .env.*
 *.env
+# ...but DO track the documented example templates (no secrets in them).
+!.env.example
+!**/.env.example
 credentials.json
 *.key
 .credentials

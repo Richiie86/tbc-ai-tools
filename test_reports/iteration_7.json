@@ -27,7 +27,7 @@
     "/app/backend/tests/test_p6_session_features.py (new — 14 tests covering all 6 new feature groups)"
   ],
   "success_rate": {"backend": "100% (74/74 passed + 1 skipped)", "frontend": "100% of verified flows (data-testids confirmed, CreditsAdjuster + Marketing banner + ProjectSettings + Dashboard bell/in-chat controls all functional)"},
-  "test_credentials": "Operator rac.investments.swe@gmail.com / 123Admin@98. After login operator redirects to /setup-2fa but session cookie is valid for /api/* — backend tests use that cookie, frontend tour-modal must be Skip'd before clicking other Tabs triggers.",
+  "test_credentials": "Operator rac.investments.swe@gmail.com / REDACTED. After login operator redirects to /setup-2fa but session cookie is valid for /api/* — backend tests use that cookie, frontend tour-modal must be Skip'd before clicking other Tabs triggers.",
   "seed_data_creation": "Test ran with `TEST_P6_VAR` env-var on first deploy_project (created+rotated+deleted within one test). Marketing banner set to 'TEST_P6 UI Banner' for UI test then cleaned up to {enabled:false, messages:[]} at finish. Fresh registered users TEST_p6_*@test.com remain in DB (consistent with prior iterations).",
   "retest_needed": false,
   "main_agent_can_self_test": true,
