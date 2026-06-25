@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import api from '../../lib/api';
 import { toast } from 'sonner';
 
@@ -10,6 +11,7 @@ import { OpsTrialEmailCron }    from './ops/OpsTrialEmailCron';
 import { OpsDeploySection }     from './ops/OpsDeploySection';
 
 export default function OpsTab() {
+  const navigate = useNavigate();
   const [health, setHealth] = useState(null);
   const [healthLoading, setHealthLoading] = useState(false);
   const [review, setReview] = useState(null);
@@ -19,6 +21,7 @@ export default function OpsTab() {
   const [copied, setCopied] = useState(false);
   const [trialRun, setTrialRun] = useState(null);
   const [trialBusy, setTrialBusy] = useState(false);
+  const [selfDeployBusy, setSelfDeployBusy] = useState(false);
 
   const loadHealth = useCallback(async () => {
     setHealthLoading(true);
@@ -80,6 +83,54 @@ export default function OpsTab() {
     }
   };
 
+  // One-tap "Deploy this app" → ships the configured self-repo to Vercel via
+  // POST /operator/deploy/self/deploy. Replaces the old card that only linked
+  // out to Emergent's now-defunct deploy panel. Surfaces the backend's
+  // actionable preconditions (missing Vercel token, unconfigured/empty repo,
+  // blocked review) as toasts with a one-click jump to the right settings.
+  const selfDeploy = async () => {
+    if (!window.confirm('Deploy this app to production now?')) return;
+    setSelfDeployBusy(true);
+    try {
+      const { data } = await api.post('/operator/deploy/self/deploy', { target: 'production' });
+      toast.success(`Deploy started · ${data.state || 'queued'}`);
+      loadDeployInfo();
+    } catch (e) {
+      const status = e?.response?.status;
+      const detail = e?.response?.data?.detail;
+      // 412 preconditions carry a structured {error, message} body.
+      if (status === 412 && detail && typeof detail === 'object') {
+        const goSettings = {
+          label: 'Open settings',
+          onClick: () => navigate('/operator?tab=settings#self-source'),
+        };
+        toast.error(detail.message || 'Deploy blocked — check the self-deploy settings.', {
+          duration: 12000,
+          action: detail.error === 'review_blocked' ? undefined : goSettings,
+        });
+        return;
+      }
+      const msg = typeof detail === 'string'
+        ? detail
+        : `Deploy failed${status ? ` (HTTP ${status})` : ''}`;
+      // 503 = Vercel token or self_repo not configured → point at the fix.
+      if (status === 503) {
+        const isToken = msg.toLowerCase().includes('vercel token');
+        toast.error(msg, {
+          duration: 12000,
+          action: {
+            label: 'Configure now',
+            onClick: () => navigate(isToken ? '/operator?tab=ops' : '/operator?tab=settings#self-source'),
+          },
+        });
+      } else {
+        toast.error(msg);
+      }
+    } finally {
+      setSelfDeployBusy(false);
+    }
+  };
+
   const copyCommit = async () => {
     const sha = deployInfo?.commit?.sha;
     if (!sha) return;
@@ -127,6 +178,8 @@ export default function OpsTab() {
         deployInfo={deployInfo}
         copied={copied}
         onCopyCommit={copyCommit}
+        onSelfDeploy={selfDeploy}
+        selfDeployBusy={selfDeployBusy}
       />
       <OpsTrialEmailCron trialRun={trialRun} busy={trialBusy} onRun={runTrialCron} />
     </div>

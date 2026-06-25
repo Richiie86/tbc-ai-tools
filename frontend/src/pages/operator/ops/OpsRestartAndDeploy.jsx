@@ -8,6 +8,7 @@ import {
 /** Restart services + Deploy/Redeploy cards (paired in a two-column section). */
 export function OpsRestartAndDeploy({
   restartingSvc, onRestart, deployInfo, copied, onCopyCommit,
+  onSelfDeploy, selfDeployBusy,
 }) {
   return (
     <section className="grid gap-4 lg:grid-cols-2">
@@ -48,7 +49,8 @@ export function OpsRestartAndDeploy({
           <div>
             <h3 className="text-base font-bold text-tbc-100">Deploy / Redeploy</h3>
             <p className="text-xs text-tbc-200/60">
-              Production deploy is triggered from Emergent&apos;s top-right Deploy button.
+              Ship this app to production. Configure the target repo in
+              Settings → &ldquo;Update this app&rdquo;.
             </p>
           </div>
         </div>
@@ -78,20 +80,31 @@ export function OpsRestartAndDeploy({
           </div>
         )}
 
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <Button
+            data-testid="ops-self-deploy"
+            onClick={onSelfDeploy}
+            disabled={selfDeployBusy}
+            className="bg-tbc-500 font-semibold text-ink-950 hover:bg-tbc-400"
+          >
+            {selfDeployBusy
+              ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              : <Rocket className="mr-2 h-4 w-4" />}
+            Deploy this app
+          </Button>
+          <a
+            href="/operator?tab=settings#self-source"
+            className="inline-flex items-center gap-1 text-xs text-tbc-300 hover:text-tbc-200"
+          >
+            Configure target <ExternalLink className="h-3 w-3" />
+          </a>
+        </div>
+
         <ol className="mt-3 space-y-1 text-xs text-tbc-200/70">
-          <li>1. Click <strong className="text-tbc-100">Deploy</strong> in the Emergent chat panel (top right).</li>
-          <li>2. Wait for the green check — your preview &amp; production update together.</li>
+          <li>1. Set the repo + branch in Settings → &ldquo;Update this app&rdquo; and paste a Vercel token in the Vercel deploys card above.</li>
+          <li>2. Click <strong className="text-tbc-100">Deploy this app</strong> — production ships from the configured repo.</li>
           <li>3. Hit <strong className="text-tbc-100">Refresh</strong> on Health Check above to confirm.</li>
         </ol>
-
-        <a
-          href="https://app.emergent.sh"
-          target="_blank"
-          rel="noreferrer"
-          className="mt-3 inline-flex items-center gap-1 text-xs text-tbc-300 hover:text-tbc-200"
-        >
-          Open Emergent <ExternalLink className="h-3 w-3" />
-        </a>
       </Card>
     </section>
   );
