@@ -28,7 +28,14 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from emergentintegrations.llm.chat import LlmChat, UserMessage
+try:
+    from emergentintegrations.llm.chat import LlmChat, UserMessage
+except ModuleNotFoundError:
+    # Emergent-only package is not available off-Emergent (e.g. Render).
+    # The AI test bench degrades gracefully: _run_probe catches the
+    # resulting error and reports it instead of crashing app startup.
+    LlmChat = None  # type: ignore
+    UserMessage = None  # type: ignore
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 
 from auth_utils import get_current_operator
