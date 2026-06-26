@@ -417,12 +417,10 @@ async def run_code_review(project: dict, settings: dict) -> dict:
         + '\n\nReturn the strict JSON review object now.'
     )
 
-    llm_key = (settings or {}).get('emergent_llm_key') or os.environ.get('EMERGENT_LLM_KEY')
+    from llm_router import resolve_llm_key, NO_LLM_PROVIDER_MSG
+    llm_key = resolve_llm_key(settings or {})
     if not llm_key:
-        raise HTTPException(
-            503,
-            'Emergent LLM key not configured. Set EMERGENT_LLM_KEY in backend env or operator settings.',
-        )
+        raise HTTPException(503, NO_LLM_PROVIDER_MSG)
 
     chat = LlmChat(
         api_key=llm_key,

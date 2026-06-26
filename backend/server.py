@@ -1070,7 +1070,10 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
     — we don't gate the upload button on model choice so the operator
     can freely switch providers mid-thread.
     """
-    from emergentintegrations.llm.chat import LlmChat, UserMessage, TextDelta, StreamDone, ImageContent
+    # BYO-aware router: streams directly from the operator's own Anthropic/
+    # OpenAI key when set (zero Emergent spend), and transparently falls back
+    # to emergentintegrations for providers without a BYO key (e.g. Gemini).
+    from llm_router import LlmChat, UserMessage, TextDelta, StreamDone, ImageContent
 
     db_user = await db.users.find_one({'id': user['sub']})
     if not db_user:
@@ -1116,9 +1119,12 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
     ).sort('created_at', 1).limit(100)
     history = [m async for m in history_cursor]
 
-    # Use operator-overridden LLM key from DB if present, else env var
+    # Use operator-overridden LLM key from DB if present, else env var.
+    # resolve_llm_key honours BYO Anthropic/OpenAI keys (returns a sentinel the
+    # direct providers ignore) so the chat works without an Emergent key.
+    from llm_router import resolve_llm_key
     settings_doc = await db.settings.find_one({'_id': 'payment_settings'}) or {}
-    llm_key = settings_doc.get('emergent_llm_key') or EMERGENT_LLM_KEY
+    llm_key = resolve_llm_key(settings_doc) or ''
     # Auto-inject operator learnings — every entry the operator has added
     # via POST /api/operator/ai-learnings is appended to the system prompt
     # so ALL models (Claude, GPT, Gemini) share the same accumulated

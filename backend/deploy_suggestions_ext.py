@@ -143,9 +143,10 @@ async def run_suggestions(
         raise HTTPException(412, 'Project has no GitHub repo configured.')
 
     settings = await db.settings.find_one({'_id': 'payment_settings'}) or {}
-    llm_key = settings.get('emergent_llm_key') or os.environ.get('EMERGENT_LLM_KEY')
+    from llm_router import resolve_llm_key, NO_LLM_PROVIDER_MSG
+    llm_key = resolve_llm_key(settings)
     if not llm_key:
-        raise HTTPException(503, 'EMERGENT_LLM_KEY not configured.')
+        raise HTTPException(503, NO_LLM_PROVIDER_MSG)
     gh_token = settings.get('github_token') or os.environ.get('GITHUB_TOKEN')
 
     # 30-minute cache — same key shape as the code review module so
