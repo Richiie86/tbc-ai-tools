@@ -335,7 +335,7 @@ async def plan(req: PlanRequest, user: dict = Depends(get_current_operator)):
     Stored in `ai_build_plans` so the follow-up `/open-pr` call doesn't
     need to re-run the LLM. Plans expire after 24h via index TTL.
     """
-    from llm_router import LlmChat, UserMessage
+    from llm_router import LlmChat, UserMessage, resolve_llm_key, NO_LLM_PROVIDER_MSG
 
     project = await db.deploy_projects.find_one({'id': req.project_id})
     if not project:
@@ -348,9 +348,10 @@ async def plan(req: PlanRequest, user: dict = Depends(get_current_operator)):
     gh_token = settings.get('github_token') or os.environ.get('GITHUB_TOKEN')
     if not gh_token:
         raise HTTPException(503, 'github_token not set in Operator → Security.')
-    llm_key = settings.get('emergent_llm_key') or os.environ.get('EMERGENT_LLM_KEY')
+    # Honour BYO Anthropic/OpenAI keys — only 503 when no provider at all is set.
+    llm_key = resolve_llm_key(settings)
     if not llm_key:
-        raise HTTPException(503, 'EMERGENT_LLM_KEY not configured.')
+        raise HTTPException(503, NO_LLM_PROVIDER_MSG)
 
     ref = project.get('gitRef') or 'main'
     async with httpx.AsyncClient(timeout=20.0) as client:

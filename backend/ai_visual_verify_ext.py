@@ -196,7 +196,8 @@ async def run_visual_verify(plan_id: str, *, fallback_url: Optional[str] = None)
         return {'ok': False, 'reason': 'plan_not_found'}
 
     settings = await db.settings.find_one({'_id': 'payment_settings'}) or {}
-    llm_key = settings.get('emergent_llm_key') or os.environ.get('EMERGENT_LLM_KEY')
+    from llm_router import resolve_llm_key
+    llm_key = resolve_llm_key(settings)
     if not llm_key:
         return {'ok': False, 'reason': 'no_llm_key'}
 

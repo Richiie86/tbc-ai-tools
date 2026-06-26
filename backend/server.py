@@ -9,6 +9,7 @@ Endpoints:
 """
 import os
 import json
+import hashlib
 import logging
 import asyncio
 import uuid
@@ -264,41 +265,76 @@ async def startup():
                 )
                 logger.info('Renamed operator email %s -> %s (2FA reset)', _LEGACY_OPERATOR_EMAIL, OPERATOR_EMAIL)
 
-    # Optional emergency lockout-recovery: set RESET_OPERATOR_2FA=true to clear 2FA on next boot.
-    if os.environ.get('RESET_OPERATOR_2FA', '').lower() == 'true':
-        await db.users.update_one(
-            {'email': OPERATOR_EMAIL},
-            {'$unset': {'totp_secret': '', 'totp_enabled': '', 'totp_pending_secret': ''}},
+    # --- One-shot emergency recovery flags --------------------------------
+    # Both RESET_OPERATOR_2FA and RESET_OPERATOR_PASSWORD used to fire on
+    # EVERY boot while the flag was 'true'. On a host that redeploys often
+    # (Vercel) that silently wiped the operator's password / 2FA on every
+    # build — forcing the dangerous "remember to delete the env var
+    # afterwards" step. We now make each reset *idempotent*: we record a
+    # signature of the applied reset in `system_state` and skip it next boot
+    # unless the signature changes (i.e. the operator deliberately set a NEW
+    # OPERATOR_PASSWORD to trigger another reset). This means leaving the
+    # flag set to 'true' is now SAFE — no need to delete it after logging in.
+    async def _reset_already_applied(key: str, signature: str) -> bool:
+        """True if this exact reset (key+signature) has already run. Records
+        it atomically when it hasn't, so it only ever fires once."""
+        doc = await db.system_state.find_one({'_id': key})
+        if doc and doc.get('signature') == signature:
+            return True
+        await db.system_state.update_one(
+            {'_id': key},
+            {'$set': {'signature': signature, 'applied_at': datetime.now(timezone.utc)}},
+            upsert=True,
         )
-        logger.warning('RESET_OPERATOR_2FA flag honoured: 2FA cleared for %s', OPERATOR_EMAIL)
+        return False
 
-    # Optional emergency password recovery: set RESET_OPERATOR_PASSWORD=true and the
-    # operator's password will be re-hashed from OPERATOR_PASSWORD env var on next boot.
-    # Also clears 2FA so the operator can re-enrol cleanly. Unset the flag after.
-    if os.environ.get('RESET_OPERATOR_PASSWORD', '').lower() == 'true':
-        new_hash = hash_password(OPERATOR_PASSWORD)
-        result = await db.users.update_one(
-            {'email': OPERATOR_EMAIL},
-            {
-                '$set': {'password_hash': new_hash, 'role': 'operator', 'plan': 'enterprise', 'credits': 999999},
-                '$unset': {'totp_secret': '', 'totp_enabled': '', 'totp_pending_secret': ''},
-            },
-            upsert=False,
-        )
-        if result.matched_count == 0:
-            # Operator doesn't exist yet — create them now so the unlock works on first deploy too.
-            op = User(
-                email=OPERATOR_EMAIL,
-                password_hash=new_hash,
-                name='TBC Operator',
-                role='operator',
-                plan='enterprise',
-                credits=999999,
-            )
-            await db.users.insert_one(op.model_dump())
-            logger.warning('RESET_OPERATOR_PASSWORD: operator did not exist, created fresh for %s', OPERATOR_EMAIL)
+    # Optional emergency lockout-recovery: set RESET_OPERATOR_2FA=true to clear
+    # 2FA once. Re-runs only if you toggle the flag off and back on.
+    if os.environ.get('RESET_OPERATOR_2FA', '').lower() == 'true':
+        sig_2fa = hashlib.sha256(f'2fa:{OPERATOR_EMAIL}'.encode()).hexdigest()
+        if await _reset_already_applied('reset_operator_2fa', sig_2fa):
+            logger.info('RESET_OPERATOR_2FA already applied for %s — skipping (safe to leave flag set).', OPERATOR_EMAIL)
         else:
-            logger.warning('RESET_OPERATOR_PASSWORD flag honoured: password reset + 2FA cleared for %s', OPERATOR_EMAIL)
+            await db.users.update_one(
+                {'email': OPERATOR_EMAIL},
+                {'$unset': {'totp_secret': '', 'totp_enabled': '', 'totp_pending_secret': ''}},
+            )
+            logger.warning('RESET_OPERATOR_2FA honoured (one-shot): 2FA cleared for %s', OPERATOR_EMAIL)
+
+    # Optional emergency password recovery: set RESET_OPERATOR_PASSWORD=true and
+    # the operator's password is re-hashed from OPERATOR_PASSWORD once. Clears
+    # 2FA so they can re-enrol cleanly. Because it's keyed on the password
+    # value, a later in-app password change is NOT clobbered on redeploy, and
+    # leaving the flag set is harmless. To force another reset, change
+    # OPERATOR_PASSWORD to a new value.
+    if os.environ.get('RESET_OPERATOR_PASSWORD', '').lower() == 'true':
+        sig_pw = hashlib.sha256(f'{OPERATOR_EMAIL}:{OPERATOR_PASSWORD}'.encode()).hexdigest()
+        if await _reset_already_applied('reset_operator_password', sig_pw):
+            logger.info('RESET_OPERATOR_PASSWORD already applied for current password — skipping (safe to leave flag set).')
+        else:
+            new_hash = hash_password(OPERATOR_PASSWORD)
+            result = await db.users.update_one(
+                {'email': OPERATOR_EMAIL},
+                {
+                    '$set': {'password_hash': new_hash, 'role': 'operator', 'plan': 'enterprise', 'credits': 999999},
+                    '$unset': {'totp_secret': '', 'totp_enabled': '', 'totp_pending_secret': ''},
+                },
+                upsert=False,
+            )
+            if result.matched_count == 0:
+                # Operator doesn't exist yet — create them now so the unlock works on first deploy too.
+                op = User(
+                    email=OPERATOR_EMAIL,
+                    password_hash=new_hash,
+                    name='TBC Operator',
+                    role='operator',
+                    plan='enterprise',
+                    credits=999999,
+                )
+                await db.users.insert_one(op.model_dump())
+                logger.warning('RESET_OPERATOR_PASSWORD (one-shot): operator did not exist, created fresh for %s', OPERATOR_EMAIL)
+            else:
+                logger.warning('RESET_OPERATOR_PASSWORD honoured (one-shot): password reset + 2FA cleared for %s', OPERATOR_EMAIL)
 
     # Seed operator user
     existing = await db.users.find_one({'email': OPERATOR_EMAIL})
@@ -1034,7 +1070,10 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
     — we don't gate the upload button on model choice so the operator
     can freely switch providers mid-thread.
     """
-    from emergentintegrations.llm.chat import LlmChat, UserMessage, TextDelta, StreamDone, ImageContent
+    # BYO-aware router: streams directly from the operator's own Anthropic/
+    # OpenAI key when set (zero Emergent spend), and transparently falls back
+    # to emergentintegrations for providers without a BYO key (e.g. Gemini).
+    from llm_router import LlmChat, UserMessage, TextDelta, StreamDone, ImageContent
 
     db_user = await db.users.find_one({'id': user['sub']})
     if not db_user:
@@ -1080,9 +1119,12 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
     ).sort('created_at', 1).limit(100)
     history = [m async for m in history_cursor]
 
-    # Use operator-overridden LLM key from DB if present, else env var
+    # Use operator-overridden LLM key from DB if present, else env var.
+    # resolve_llm_key honours BYO Anthropic/OpenAI keys (returns a sentinel the
+    # direct providers ignore) so the chat works without an Emergent key.
+    from llm_router import resolve_llm_key
     settings_doc = await db.settings.find_one({'_id': 'payment_settings'}) or {}
-    llm_key = settings_doc.get('emergent_llm_key') or EMERGENT_LLM_KEY
+    llm_key = resolve_llm_key(settings_doc) or ''
     # Auto-inject operator learnings — every entry the operator has added
     # via POST /api/operator/ai-learnings is appended to the system prompt
     # so ALL models (Claude, GPT, Gemini) share the same accumulated

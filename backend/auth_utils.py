@@ -222,12 +222,17 @@ def set_session_cookie(response, token: str, pending_2fa: bool = False) -> None:
         key=SESSION_COOKIE,
         value=token,
         httponly=True,
-        secure=True,           # Both preview and prod are HTTPS-only.
-        samesite='lax',        # First-party site → Lax is safe and lets normal nav carry the cookie.
+        secure=True,           # Required for SameSite=None and HTTPS-only anyway.
+        samesite='none',       # Frontend (tbctools.org) and API (onrender.com) are
+                               # different sites, so the session cookie is cross-site.
+                               # SameSite=Lax would be dropped on XHR/fetch, breaking
+                               # /auth/me right after login. None+Secure lets it flow.
         max_age=max_age,
         path='/',
     )
 
 
 def clear_session_cookie(response) -> None:
-    response.delete_cookie(key=SESSION_COOKIE, path='/')
+    # Delete must match the attributes the cookie was set with (SameSite=None;
+    # Secure) or some browsers ignore the deletion.
+    response.delete_cookie(key=SESSION_COOKIE, path='/', samesite='none', secure=True)

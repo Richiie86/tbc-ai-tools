@@ -18,6 +18,39 @@ from db import db
 logger = logging.getLogger('tbc.ops')
 router = APIRouter(prefix='/api/operator/ops')
 
+# ---------------------------------------------------------------------------
+# Path / environment resolution
+#
+# This module was originally written for Emergent's Kubernetes pod where the
+# repo always lived at `/app` and `sudo supervisorctl` managed the services.
+# In other hosting environments (Vercel/serverless containers, a fresh VM,
+# local dev) `/app` may not exist, supervisor may be absent, and git may not
+# be on PATH. Hardcoding `/app` made the Health Check + Code Review cards go
+# red on production even though the platform was perfectly healthy.
+#
+# We now resolve every path RELATIVE to this file and probe for tools at
+# runtime so the same code behaves correctly across environments. Anything
+# that genuinely can't run in the current environment degrades to a
+# `skipped` info row rather than a false-red failure.
+# ---------------------------------------------------------------------------
+BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
+# Repo root = parent of backend/. Falls back to BACKEND_DIR if, for some
+# reason, this file isn't nested under a repo root.
+APP_ROOT = os.path.dirname(BACKEND_DIR) or BACKEND_DIR
+# Allow an explicit override for unusual layouts.
+APP_ROOT = os.environ.get('APP_ROOT', APP_ROOT)
+FRONTEND_SRC = os.path.join(APP_ROOT, 'frontend', 'src')
+
+
+def _disk_check_path() -> str:
+    """Best path to report disk usage for. Prefer the repo root (always
+    exists where we're running); fall back to '/' so the check never throws
+    just because a hardcoded directory is missing."""
+    for candidate in (APP_ROOT, BACKEND_DIR, '/'):
+        if candidate and os.path.exists(candidate):
+            return candidate
+    return '/'
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -144,16 +177,24 @@ async def _check_frontend() -> dict:
 
 
 def _check_disk() -> dict:
+    path = _disk_check_path()
     try:
-        usage = shutil.disk_usage('/app')
+        usage = shutil.disk_usage(path)
         pct = round(usage.used / usage.total * 100, 1)
         return {
-            'key': 'disk', 'label': 'Disk (/app)',
+            'key': 'disk', 'label': f'Disk ({path})',
             'ok': pct < 90,
             'detail': f'{pct}% used · {usage.free // (1024**3)} GB free',
         }
     except Exception as e:
-        return {'key': 'disk', 'label': 'Disk (/app)', 'ok': False, 'detail': str(e)[:200]}
+        # Disk introspection isn't available in every sandbox (some
+        # serverless runtimes block it). Surface as a skipped info row
+        # rather than a hard fail so the health card doesn't go red.
+        return {
+            'key': 'disk', 'label': f'Disk ({path})',
+            'ok': True, 'skipped': True,
+            'detail': f'Skipped (disk stats unavailable: {str(e)[:160]})',
+        }
 
 
 def _check_services() -> list[dict]:
@@ -164,7 +205,25 @@ def _check_services() -> list[dict]:
     a stopped sidecar because the row would just say "non-critical · ok".
     """
     CORE_SERVICES = {'backend', 'frontend', 'mongodb'}
+    # supervisor only exists in the Emergent pod image. Where it's absent
+    # (serverless / managed container / local dev) there's nothing to query —
+    # the platform's process management is handled by the host. Surface a
+    # single skipped info row instead of an empty section or a red failure.
+    if not (shutil.which('supervisorctl') or shutil.which('sudo')):
+        return [{
+            'key': 'svc.supervisor', 'label': 'Services',
+            'ok': True, 'level': 'ok', 'skipped': True,
+            'detail': 'Skipped (no supervisor in this environment — processes managed by host)',
+        }]
     res = _run(['sudo', 'supervisorctl', 'status'], timeout=10)
+    if not res.get('ok') and not (res.get('stdout') or '').strip():
+        # supervisor binary resolved but the call failed (no sudo rights, not
+        # running, etc.). Degrade to an info row rather than fail-red.
+        return [{
+            'key': 'svc.supervisor', 'label': 'Services',
+            'ok': True, 'level': 'ok', 'skipped': True,
+            'detail': f"Skipped (supervisorctl unavailable: {(res.get('stderr') or 'no output')[:140]})",
+        }]
     rows: list[dict] = []
     for line in (res.get('stdout') or '').splitlines():
         parts = line.split()
@@ -196,8 +255,20 @@ def _check_services() -> list[dict]:
 
 
 def _check_commit() -> str:
-    git = _run(['git', '-C', '/app', 'log', '-1', '--pretty=%h · %s · %cr'], timeout=5)
-    return (git.get('stdout') or '').strip() or 'unknown'
+    # Prefer a real git lookup against the repo root; if git isn't on PATH or
+    # this isn't a checkout (common on build-artifact deploys), fall back to
+    # the commit SHA the platform injects as an env var.
+    if shutil.which('git'):
+        git = _run(['git', '-C', APP_ROOT, 'log', '-1', '--pretty=%h · %s · %cr'], timeout=5)
+        out = (git.get('stdout') or '').strip()
+        if out:
+            return out
+    for env_key in ('VERCEL_GIT_COMMIT_SHA', 'GIT_COMMIT', 'COMMIT_SHA', 'SOURCE_COMMIT'):
+        sha = os.environ.get(env_key)
+        if sha:
+            msg = os.environ.get('VERCEL_GIT_COMMIT_MESSAGE', '')
+            return f'{sha[:7]}{" · " + msg if msg else ""}'.strip()
+    return 'unknown'
 
 
 @router.get('/health')
@@ -253,18 +324,27 @@ async def ops_code_review(_user: dict = Depends(get_current_operator)):
         has_ruff = probe.get('ok', False)
 
     py_check = (
-        _run([py, '-m', 'ruff', 'check', '/app/backend', '--output-format=concise'], timeout=60)
+        _run([py, '-m', 'ruff', 'check', BACKEND_DIR, '--output-format=concise'], timeout=60)
         if has_ruff else
         {'ok': False, 'stdout': '', 'stderr': 'ruff not installed (pip install ruff)', 'exit_code': -1, 'ms': 0}
     )
     py_format = (
-        _run([py, '-m', 'ruff', 'format', '--check', '/app/backend'], timeout=60)
+        _run([py, '-m', 'ruff', 'format', '--check', BACKEND_DIR], timeout=60)
         if has_ruff else
         {'ok': False, 'stdout': '', 'stderr': 'ruff not installed (pip install ruff)', 'exit_code': -1, 'ms': 0}
     )
 
-    # Quick JS smoke — just count files for the report header.
-    js_files = _run(['bash', '-lc', 'find /app/frontend/src -type f \\( -name "*.js" -o -name "*.jsx" \\) | wc -l'], timeout=5)
+    # Quick JS smoke — just count files for the report header. Count in Python
+    # so it works regardless of whether `bash`/`find` exist in the environment.
+    js_count = 0
+    try:
+        for root, _dirs, files in os.walk(FRONTEND_SRC):
+            if 'node_modules' in root:
+                continue
+            js_count += sum(1 for f in files if f.endswith(('.js', '.jsx')))
+    except Exception:
+        js_count = 0
+    js_files = {'stdout': str(js_count)}
 
     return {
         'generated_at': _now_iso(),
@@ -302,8 +382,21 @@ async def ops_deploy_info(_user: dict = Depends(get_current_operator)):
     Deploy button — there's no public API to fire it server-side. This endpoint
     surfaces the info the operator needs to act on it confidently.
     """
-    commit = _run(['git', '-C', '/app', 'log', '-1', '--pretty=%h%n%s%n%an%n%cI'], timeout=5)
-    lines = (commit.get('stdout') or '').splitlines() + ['', '', '', '']
+    lines = ['', '', '', '']
+    if shutil.which('git'):
+        commit = _run(['git', '-C', APP_ROOT, 'log', '-1', '--pretty=%h%n%s%n%an%n%cI'], timeout=5)
+        parsed = (commit.get('stdout') or '').splitlines()
+        if parsed:
+            lines = parsed + ['', '', '', '']
+    # Fall back to platform-injected commit env vars when git isn't available.
+    if not lines[0]:
+        sha = os.environ.get('VERCEL_GIT_COMMIT_SHA') or os.environ.get('SOURCE_COMMIT') or ''
+        lines = [
+            sha[:7],
+            os.environ.get('VERCEL_GIT_COMMIT_MESSAGE', ''),
+            os.environ.get('VERCEL_GIT_COMMIT_AUTHOR_NAME', ''),
+            '',
+        ]
     return {
         'commit': {
             'sha': lines[0],

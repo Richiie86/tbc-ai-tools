@@ -28,7 +28,14 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from emergentintegrations.llm.chat import LlmChat, UserMessage
+try:
+    from emergentintegrations.llm.chat import LlmChat, UserMessage
+except ModuleNotFoundError:
+    # Emergent-only package is not available off-Emergent (e.g. Render).
+    # The AI test bench degrades gracefully: _run_probe catches the
+    # resulting error and reports it instead of crashing app startup.
+    LlmChat = None  # type: ignore
+    UserMessage = None  # type: ignore
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 
 from auth_utils import get_current_operator
@@ -114,13 +121,11 @@ async def _get_llm_key() -> str:
     how server.py builds chat clients. Raises 503 if the operator hasn't
     set it up yet."""
     s = await db.settings.find_one({'_id': 'payment_settings'}) or {}
-    key = s.get('emergent_llm_key') or ''
+    # Honour BYO Anthropic/OpenAI keys; only 503 when no provider is set at all.
+    from llm_router import resolve_llm_key, NO_LLM_PROVIDER_MSG
+    key = resolve_llm_key(s)
     if not key:
-        # Fall back to env so dev still works
-        import os
-        key = os.environ.get('EMERGENT_LLM_KEY') or ''
-    if not key:
-        raise HTTPException(503, 'EMERGENT_LLM_KEY not configured')
+        raise HTTPException(503, NO_LLM_PROVIDER_MSG)
     return key
 
 

@@ -60,16 +60,6 @@ export default function Footer() {
         </div>
         <div className="flex items-center gap-3">
           <span>tbctools.org</span>
-          <span className="text-slate-700">·</span>
-          <a
-            href="https://emergent.sh"
-            target="_blank"
-            rel="noreferrer"
-            className="text-slate-600 hover:text-tbc-400/80 transition-colors"
-            data-testid="footer-emergent-credit"
-          >
-            Powered by Emergent
-          </a>
         </div>
       </div>
     </footer>

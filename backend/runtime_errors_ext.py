@@ -486,14 +486,16 @@ async def run_rca(error_id: str, _op: dict = Depends(get_current_operator)):
     if not doc:
         raise HTTPException(404, 'Error not found')
 
-    api_key = os.environ.get('EMERGENT_LLM_KEY') or ''
-    if not api_key:
-        raise HTTPException(503, 'EMERGENT_LLM_KEY not configured')
-
     # Operator-configurable RCA model — falls back to claude-sonnet (the
     # iter17-validated default) when no setting is present. Set via
     # `settings.rca_model` in MongoDB or via the Operator → Security tab.
     settings = await db.settings.find_one({'_id': 'payment_settings'}) or {}
+    # Honour BYO Anthropic/OpenAI keys; only 503 when no provider is set at all.
+    from llm_router import resolve_llm_key, NO_LLM_PROVIDER_MSG
+    api_key = resolve_llm_key(settings)
+    if not api_key:
+        raise HTTPException(503, NO_LLM_PROVIDER_MSG)
+
     rca_model_id = (settings.get('rca_model') or '').strip()
     # Map provider for emergentintegrations.
     _rca_provider_map = {
@@ -521,7 +523,10 @@ async def run_rca(error_id: str, _op: dict = Depends(get_current_operator)):
         "suggested_change (string), confidence (low|medium|high)."
     )
     try:
-        from emergentintegrations.llm.chat import LlmChat, UserMessage, TextDelta, StreamDone
+        # Use the BYO-aware router (direct Anthropic/OpenAI when the operator
+        # set their own key, Emergent fallback otherwise). Non-streaming —
+        # the RCA payload is tiny so we just collect the full text.
+        from llm_router import LlmChat, UserMessage
         chat = LlmChat(
             api_key=api_key,
             session_id=f'rca-{uuid.uuid4()}',
@@ -530,12 +535,7 @@ async def run_rca(error_id: str, _op: dict = Depends(get_current_operator)):
                 'Be terse. Only return valid JSON.'
             ),
         ).with_model(rca_provider, rca_model_id)
-        full = ''
-        async for ev in chat.stream_message(UserMessage(text=prompt)):
-            if isinstance(ev, TextDelta):
-                full += ev.content
-            elif isinstance(ev, StreamDone):
-                break
+        full = await chat.send_message(UserMessage(text=prompt))
     except Exception as e:
         raise HTTPException(502, f'LLM RCA failed: {e}')
 
