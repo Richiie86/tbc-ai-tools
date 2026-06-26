@@ -1,44 +1,26 @@
-# Render Blueprint for the TBC Tools FastAPI backend.
-#
-# This stands up the always-on Python API on Render (render.com). The React
-# frontend stays on Vercel and talks to this service via REACT_APP_BACKEND_URL.
-#
-# How to use:
-#   1. Push this file to your GitHub repo (it lives at the repo root).
-#   2. On render.com → New → "Blueprint" → connect this repo. Render reads
-#      this file and creates the service automatically.
-#   3. Fill in the env vars marked `sync: false` in the Render dashboard
-#      (they're secrets, so they are NOT stored in git).
-#   4. Deploy. Render gives you a URL like https://tbctools-api.onrender.com
-#
-# After it's live, set REACT_APP_BACKEND_URL on Vercel to that URL.
 services:
   - type: web
     name: tbctools-api
     runtime: python
-    plan: starter            # always-on; "free" sleeps after inactivity
-    rootDir: backend         # the FastAPI app lives in /backend
+    plan: free
+    rootDir: backend
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT
-    healthCheckPath: /api/operator/ops/health
+    healthCheckPath: /api/
     envVars:
-      # --- Database (MongoDB Atlas) ---
-      - key: MONGO_URL        # full mongodb+srv://... string
+      - key: MONGO_URL
         sync: false
-      - key: DB_NAME          # tbctools
+      - key: DB_NAME
         sync: false
-      # --- Auth / operator ---
-      - key: JWT_SECRET       # any long random string; keep stable
+      - key: JWT_SECRET
         sync: false
-      - key: OPERATOR_EMAIL   # rac.investments.swe@gmail.com
+      - key: OPERATOR_EMAIL
         sync: false
       - key: OPERATOR_PASSWORD
         sync: false
-      - key: RESET_OPERATOR_PASSWORD   # 'true' for first boot; now safe to leave on
+      - key: RESET_OPERATOR_PASSWORD
         value: "true"
-      # --- Frontend origin allow-list (so the Vercel site can call this API) ---
       - key: CORS_ORIGINS
         value: "https://tbctools.org,https://www.tbctools.org"
-      # --- Optional AI / integrations (add if your app uses them) ---
       - key: ANTHROPIC_API_KEY
         sync: false
