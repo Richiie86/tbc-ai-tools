@@ -12,6 +12,7 @@ import glob
 import json
 import os
 import sys
+from datetime import datetime, timezone
 
 from pymongo import MongoClient, UpdateOne
 
@@ -23,6 +24,62 @@ RESTORABLE = [
     "kyc_bypass_emails",
     "vanished_emails",
 ]
+
+# Flat-array exports (one file == one collection), e.g. the AI learnings
+# recovered from Emergent. Maps collection name -> glob pattern.
+FLAT_EXPORTS = {
+    "ai_learnings": "data/backups/ai_learnings-*.json",
+}
+
+# Fields that must be stored as real datetimes, not ISO strings, so the
+# backend's date handling and sorting keep working exactly as before.
+_DATE_FIELDS = ("created_at", "updated_at")
+
+
+def _coerce_dates(doc):
+    """Convert ISO-8601 date strings into timezone-aware datetimes."""
+    for field in _DATE_FIELDS:
+        val = doc.get(field)
+        if isinstance(val, str):
+            try:
+                dt = datetime.fromisoformat(val.replace("Z", "+00:00"))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                doc[field] = dt
+            except ValueError:
+                pass
+    return doc
+
+
+def seed_flat_exports(db, dry_run):
+    """Restore flat-array collections (e.g. ai_learnings) by upserting on id."""
+    for coll_name, pattern in FLAT_EXPORTS.items():
+        files = sorted(glob.glob(pattern))
+        if not files:
+            print(f"  {coll_name}: no export file matching {pattern}, skipping")
+            continue
+        path = files[-1]
+        with open(path) as f:
+            docs = json.load(f)
+        if not isinstance(docs, list) or not docs:
+            print(f"  {coll_name}: {path} is empty, skipping")
+            continue
+
+        ops = [
+            UpdateOne({"id": d["id"]}, {"$set": _coerce_dates(d)}, upsert=True)
+            for d in docs
+            if "id" in d
+        ]
+        if dry_run:
+            print(f"  {coll_name}: would upsert {len(ops)} docs from {path}")
+            continue
+        if ops:
+            result = db[coll_name].bulk_write(ops, ordered=False)
+            print(
+                f"  {coll_name}: matched={result.matched_count} "
+                f"upserted={result.upserted_count} modified={result.modified_count} "
+                f"(from {path})"
+            )
 
 
 def pick_snapshot(arg_path):
@@ -83,6 +140,9 @@ def main():
                 f"upserted={result.upserted_count} modified={result.modified_count} "
                 f"({skipped} skipped)"
             )
+
+    print("\nAI learnings + other flat exports:")
+    seed_flat_exports(db, dry_run)
 
     client.close()
     print("\nDone." if not dry_run else "\nDry run complete (no writes).")
