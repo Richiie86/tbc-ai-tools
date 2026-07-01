@@ -19,11 +19,17 @@ from pymongo import MongoClient, UpdateOne
 # Collections we know how to restore from the snapshot format.
 RESTORABLE = [
     "deploy_projects",
-    "app_settings",
     "promo_codes",
     "kyc_bypass_emails",
     "vanished_emails",
 ]
+
+# Singleton collections: the whole collection is one logical doc identified
+# by a fixed _id. The snapshot may contain duplicates; we collapse them into
+# a single upsert. Maps collection name -> fixed _id (per the backend code).
+SINGLETONS = {
+    "app_settings": "main",  # app_settings_ext.py reads _id='main'
+}
 
 # Flat-array exports (one file == one collection), e.g. the AI learnings
 # recovered from Emergent. Maps collection name -> glob pattern.
@@ -140,6 +146,25 @@ def main():
                 f"upserted={result.upserted_count} modified={result.modified_count} "
                 f"({skipped} skipped)"
             )
+
+    print("\nSingleton settings:")
+    for coll_name, fixed_id in SINGLETONS.items():
+        docs = snapshot.get(coll_name) or []
+        if not docs:
+            print(f"  {coll_name}: nothing in snapshot, skipping")
+            continue
+        # All copies are identical; take the last one and drop any stored _id.
+        merged = dict(docs[-1])
+        merged.pop("_id", None)
+        if dry_run:
+            print(f"  {coll_name}: would upsert 1 doc as _id='{fixed_id}' "
+                  f"(collapsed from {len(docs)} copies)")
+        else:
+            db[coll_name].update_one(
+                {"_id": fixed_id}, {"$set": merged}, upsert=True
+            )
+            print(f"  {coll_name}: upserted _id='{fixed_id}' "
+                  f"(collapsed from {len(docs)} copies)")
 
     print("\nAI learnings + other flat exports:")
     seed_flat_exports(db, dry_run)
