@@ -37,7 +37,14 @@ VERCEL_TOKEN_MISSING_DETAIL = (
 
 
 def vercel_team_qs(settings: dict) -> dict:
-    tid = (settings or {}).get('vercel_team_id')
+    """Resolve the Vercel team/workspace scope from (in order):
+      1. The operator-managed `settings.vercel_team_id` row in Mongo.
+      2. `VERCEL_TEAM_ID` env var (so deployments target the right
+         workspace even before the operator pastes it via the UI).
+    Returns an empty dict when neither is set (personal-scope fallback)."""
+    tid = ((settings or {}).get('vercel_team_id') or '').strip()
+    if not tid:
+        tid = (os.environ.get('VERCEL_TEAM_ID') or '').strip()
     return {'teamId': tid} if tid else {}
 
 
