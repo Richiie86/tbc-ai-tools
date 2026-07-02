@@ -26,8 +26,8 @@ export function DashboardHeader({
   onOpenGuide,
 }) {
   return (
-    <div className="flex items-center justify-between border-b border-slate-800 bg-ink-950/80 px-5 py-3 backdrop-blur">
-      <div className="flex items-center gap-3">
+    <div className="flex items-center justify-between gap-3 border-b border-slate-800 bg-ink-950/80 px-5 py-3 backdrop-blur">
+      <div className="flex shrink-0 items-center gap-3">
         {!sidebarOpen && (
           <button
             onClick={onOpenSidebar}
@@ -36,9 +36,9 @@ export function DashboardHeader({
             <Menu className="h-4 w-4" />
           </button>
         )}
-        <div className="text-sm font-semibold text-white">{brandTitle}</div>
+        <div className="hidden whitespace-nowrap text-sm font-semibold text-white sm:block">{brandTitle}</div>
       </div>
-      <div className="flex items-center gap-3">
+      <div className="flex min-w-0 items-center gap-3 overflow-x-auto [&>*]:shrink-0">
         {/* Operator-only deploy controls so we can ship code from inside chat. */}
         <InChatDeployControls user={user} />
         <NotificationsBell />

@@ -8,7 +8,7 @@ import {
   Users, CreditCard, MessageSquare, DollarSign, Loader2, ShieldCheck, Mail,
   Code2, Sparkles, Wallet, KeyRound, Settings as SettingsIcon, Coins,
   FolderKanban, Activity, ScrollText, Megaphone, MessageCircle, FlaskConical,
-  TrendingUp, Lock, Brain, Network, TestTube, AlertOctagon, Wand2,
+  TrendingUp, Lock, Brain, Network, TestTube, AlertOctagon, Wand2, Link2,
 } from 'lucide-react';
 
 import PlansTab     from './operator/PlansTab';
@@ -31,6 +31,7 @@ import AITestBenchTab from './operator/AITestBenchTab';
 import ErrorsTab from './operator/ErrorsTab';
 import AIBuildTab from './operator/AIBuildTab';
 import MyKeysTab from './operator/MyKeysTab';
+import LinksTab from './operator/LinksTab';
 import PreviewWidget from './PreviewWidget';
 import EmergencyLockdownPill from '../components/EmergencyLockdownPill';
 import AnalyticsTab from './operator/AnalyticsTab';
@@ -217,6 +218,7 @@ export default function Operator() {
                 <TabTrigger value="royalties" icon={Coins}>Royalties</TabTrigger>
                 <TabTrigger value="settings"  icon={SettingsIcon}>Security</TabTrigger>
                 <TabTrigger value="ops"       icon={Activity}>Ops</TabTrigger>
+                <TabTrigger value="links"     icon={Link2}>Links</TabTrigger>
                 <TabTrigger value="audit"     icon={ScrollText}>Audit</TabTrigger>
                 <TabTrigger value="contacts"  icon={Mail}>Contacts</TabTrigger>
                 <TabTrigger value="codes"     icon={Code2}>Codes</TabTrigger>
@@ -246,6 +248,7 @@ export default function Operator() {
               <TabsContent value="royalties" className="mt-5"><RoyaltiesTab /></TabsContent>
               <TabsContent value="settings"  className="mt-5"><SettingsTab /></TabsContent>
               <TabsContent value="ops"       className="mt-5"><OpsTab /></TabsContent>
+              <TabsContent value="links"     className="mt-5"><LinksTab /></TabsContent>
               <TabsContent value="audit"     className="mt-5"><AuditTab /></TabsContent>
               <TabsContent value="contacts"  className="mt-5"><ContactsList contacts={contacts} onChanged={loadAll} /></TabsContent>
               <TabsContent value="codes"     className="mt-5"><CodesBrowser /></TabsContent>
