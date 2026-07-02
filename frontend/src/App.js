@@ -1,6 +1,8 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from './components/ui/sonner';
 import { AuthProvider } from './context/AuthContext';
+import { ViewModeProvider } from './context/ViewModeContext';
+import ViewModeToggle from './components/ViewModeToggle';
 import ProtectedRoute from './components/ProtectedRoute';
 import Landing from './pages/Landing';
 import About from './pages/About';
@@ -30,6 +32,7 @@ import './App.css';
 function App() {
   return (
     <div className="App min-h-screen bg-background text-foreground">
+      <ViewModeProvider>
       <AuthProvider>
         <BrowserRouter>
           <MarketingBanner />
@@ -62,9 +65,11 @@ function App() {
             <Route path="/operator/projects/:projectId/settings" element={<ProtectedRoute operatorOnly><ProjectSettings /></ProtectedRoute>} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
+          <ViewModeToggle />
         </BrowserRouter>
         <Toaster position="top-right" theme="dark" richColors />
       </AuthProvider>
+      </ViewModeProvider>
     </div>
   );
 }
