@@ -671,6 +671,85 @@ async def op_activate_treasury(dest_id: str, _: dict = Depends(get_current_opera
 
 
 # ===================================================================
+# OPERATOR: USAGE METERS ("Taxameter")
+# Tracks how much of each provider's credit/quota is used vs left, with a
+# refill link per provider. Values are operator-maintained (manual) so the
+# tab works with zero extra API keys; the shape leaves room for live sync
+# to be layered on per-provider later.
+# ===================================================================
+_USAGE_METERS_ID = 'usage_meters'
+
+# Seeded when the operator first opens the tab. Refill links point straight
+# at each provider's billing/usage page.
+_DEFAULT_USAGE_METERS = [
+    {'id': 'vercel',    'provider': 'Vercel',        'unit': 'USD',     'used': 0, 'total': 0, 'refill_url': 'https://vercel.com/account/billing'},
+    {'id': 'github',    'provider': 'GitHub',        'unit': 'USD',     'used': 0, 'total': 0, 'refill_url': 'https://github.com/settings/billing'},
+    {'id': 'render',    'provider': 'Render',        'unit': 'USD',     'used': 0, 'total': 0, 'refill_url': 'https://dashboard.render.com/billing'},
+    {'id': 'openai',    'provider': 'OpenAI',        'unit': 'USD',     'used': 0, 'total': 0, 'refill_url': 'https://platform.openai.com/account/billing/overview'},
+    {'id': 'anthropic', 'provider': 'Anthropic',     'unit': 'USD',     'used': 0, 'total': 0, 'refill_url': 'https://console.anthropic.com/settings/billing'},
+    {'id': 'groq',      'provider': 'Groq',          'unit': 'USD',     'used': 0, 'total': 0, 'refill_url': 'https://console.groq.com/settings/billing'},
+    {'id': 'gemini',    'provider': 'Google Gemini', 'unit': 'USD',     'used': 0, 'total': 0, 'refill_url': 'https://aistudio.google.com/app/apikey'},
+    {'id': 'mongodb',   'provider': 'MongoDB Atlas', 'unit': 'USD',     'used': 0, 'total': 0, 'refill_url': 'https://cloud.mongodb.com'},
+    {'id': 'resend',    'provider': 'Resend',        'unit': 'emails',  'used': 0, 'total': 0, 'refill_url': 'https://resend.com/settings/billing'},
+    {'id': 'cloudflare','provider': 'Cloudflare',    'unit': 'USD',     'used': 0, 'total': 0, 'refill_url': 'https://dash.cloudflare.com'},
+]
+
+_ALLOWED_UNITS = {'USD', 'EUR', 'credits', 'requests', 'tokens', 'emails', 'GB'}
+
+
+def _sanitize_meter(m: dict) -> dict:
+    """Coerce a client-supplied meter into a safe, stored shape."""
+    def _f(v):
+        try:
+            n = float(v)
+            return n if n >= 0 else 0.0
+        except (TypeError, ValueError):
+            return 0.0
+    mid = str(m.get('id') or '').strip()[:40] or secrets.token_hex(4)
+    unit = m.get('unit') if m.get('unit') in _ALLOWED_UNITS else 'USD'
+    url = str(m.get('refill_url') or '').strip()[:400]
+    if url and not url.startswith(('http://', 'https://')):
+        url = ''
+    return {
+        'id': mid,
+        'provider': str(m.get('provider') or 'Provider').strip()[:60],
+        'unit': unit,
+        'used': _f(m.get('used')),
+        'total': _f(m.get('total')),
+        'refill_url': url,
+        'notes': str(m.get('notes') or '').strip()[:200],
+    }
+
+
+@router.get('/operator/usage-meters')
+async def op_get_usage_meters(_: dict = Depends(get_current_operator)):
+    db = await get_db()
+    doc = await db.settings.find_one({'_id': _USAGE_METERS_ID})
+    if not doc:
+        await db.settings.insert_one({'_id': _USAGE_METERS_ID, 'meters': _DEFAULT_USAGE_METERS})
+        return {'meters': _DEFAULT_USAGE_METERS, 'updated_at': None}
+    return {'meters': doc.get('meters', _DEFAULT_USAGE_METERS), 'updated_at': doc.get('updated_at')}
+
+
+@router.put('/operator/usage-meters')
+async def op_update_usage_meters(payload: dict = Body(...), _: dict = Depends(get_current_operator)):
+    raw = payload.get('meters')
+    if not isinstance(raw, list):
+        raise HTTPException(400, 'meters must be a list')
+    if len(raw) > 50:
+        raise HTTPException(400, 'Too many meters (max 50)')
+    meters = [_sanitize_meter(m) for m in raw if isinstance(m, dict)]
+    now = datetime.now(timezone.utc).isoformat()
+    db = await get_db()
+    await db.settings.update_one(
+        {'_id': _USAGE_METERS_ID},
+        {'$set': {'meters': meters, 'updated_at': now}},
+        upsert=True,
+    )
+    return {'success': True, 'meters': meters, 'updated_at': now}
+
+
+# ===================================================================
 # OPERATOR: SETTINGS
 # ===================================================================
 @router.get('/operator/settings')

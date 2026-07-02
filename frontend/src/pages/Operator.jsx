@@ -9,6 +9,7 @@ import {
   Code2, Sparkles, Wallet, KeyRound, Settings as SettingsIcon, Coins,
   FolderKanban, Activity, ScrollText, Megaphone, MessageCircle, FlaskConical,
   TrendingUp, Lock, Brain, Network, TestTube, AlertOctagon, Wand2, Link2,
+  Calculator, Gauge,
 } from 'lucide-react';
 
 import PlansTab     from './operator/PlansTab';
@@ -32,6 +33,8 @@ import ErrorsTab from './operator/ErrorsTab';
 import AIBuildTab from './operator/AIBuildTab';
 import MyKeysTab from './operator/MyKeysTab';
 import LinksTab from './operator/LinksTab';
+import TaxCalculatorTab from './operator/TaxCalculatorTab';
+import TaxameterTab from './operator/TaxameterTab';
 import PreviewWidget from './PreviewWidget';
 import EmergencyLockdownPill from '../components/EmergencyLockdownPill';
 import AnalyticsTab from './operator/AnalyticsTab';
@@ -219,6 +222,8 @@ export default function Operator() {
                 <TabTrigger value="settings"  icon={SettingsIcon}>Security</TabTrigger>
                 <TabTrigger value="ops"       icon={Activity}>Ops</TabTrigger>
                 <TabTrigger value="links"     icon={Link2}>Links</TabTrigger>
+                <TabTrigger value="taxcalc"   icon={Calculator}>Tax Calc</TabTrigger>
+                <TabTrigger value="taxameter" icon={Gauge}>Taxameter</TabTrigger>
                 <TabTrigger value="audit"     icon={ScrollText}>Audit</TabTrigger>
                 <TabTrigger value="contacts"  icon={Mail}>Contacts</TabTrigger>
                 <TabTrigger value="codes"     icon={Code2}>Codes</TabTrigger>
@@ -249,6 +254,8 @@ export default function Operator() {
               <TabsContent value="settings"  className="mt-5"><SettingsTab /></TabsContent>
               <TabsContent value="ops"       className="mt-5"><OpsTab /></TabsContent>
               <TabsContent value="links"     className="mt-5"><LinksTab /></TabsContent>
+              <TabsContent value="taxcalc"   className="mt-5"><TaxCalculatorTab /></TabsContent>
+              <TabsContent value="taxameter" className="mt-5"><TaxameterTab /></TabsContent>
               <TabsContent value="audit"     className="mt-5"><AuditTab /></TabsContent>
               <TabsContent value="contacts"  className="mt-5"><ContactsList contacts={contacts} onChanged={loadAll} /></TabsContent>
               <TabsContent value="codes"     className="mt-5"><CodesBrowser /></TabsContent>
