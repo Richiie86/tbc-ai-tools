@@ -35,6 +35,26 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 
+async def _settings_ai_key(field: str) -> Optional[str]:
+    """Return an AI provider key the operator saved *inside the app*.
+
+    Keys entered in the Operator console → "My Keys" tab live in the
+    ``settings`` collection under ``_id='payment_settings'``. Reading them here
+    means build tools work with a key pasted in the UI — no hosting env vars,
+    no redeploy. Best-effort: any failure returns ``None`` so callers fall back
+    to env vars / emergentintegrations.
+    """
+    try:
+        from payments_ext import get_db  # lazy import avoids circular load
+        db = await get_db()
+        doc = await db.settings.find_one({'_id': 'payment_settings'}) or {}
+        val = doc.get(field)
+        return val if isinstance(val, str) and val.strip() else None
+    except Exception as e:  # noqa: BLE001
+        logger.warning('Could not read %s from settings: %s', field, e)
+        return None
+
+
 @dataclass
 class UserMessage:
     """Drop-in shape match for `emergentintegrations.llm.chat.UserMessage`."""
@@ -112,7 +132,7 @@ class LlmChat:
 
         # ---- 2. Direct OpenAI ------------------------------------
         if self._provider == 'openai':
-            own = self._own_openai_key()
+            own = await self._own_openai_key()
             if own:
                 try:
                     return await self._send_openai_direct(own, text)
