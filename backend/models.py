@@ -41,6 +41,23 @@ class ResetPasswordRequest(BaseModel):
     new_password: str = Field(min_length=10, max_length=128)
 
 
+class ChangePasswordRequest(BaseModel):
+    """Change password while logged in — requires the current password."""
+    current_password: str
+    new_password: str = Field(min_length=10, max_length=128)
+
+
+class ChangeEmailRequest(BaseModel):
+    """Change account email while logged in — requires the current password."""
+    new_email: EmailStr
+    current_password: str
+
+
+class Disable2FARequest(BaseModel):
+    """Turn off 2FA — requires a valid current TOTP code to prove ownership."""
+    code: str
+
+
 class Setup2FAResponse(BaseModel):
     secret: str
     qr_data_url: str

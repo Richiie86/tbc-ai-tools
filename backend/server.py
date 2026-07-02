@@ -37,6 +37,7 @@ from email_utils import send_email, render_password_reset_email
 from models import (
     RegisterRequest, LoginRequest, Verify2FARequest, Setup2FAResponse, AuthResponse, User,
     ForgotPasswordRequest, ResetPasswordRequest,
+    ChangePasswordRequest, ChangeEmailRequest, Disable2FARequest,
     ChatSendRequest, ChatMessage, ChatSession, CreateSessionRequest, RenameSessionRequest,
     CheckoutRequest, PaymentTransaction, ContactRequest, ContactSubmission,
 )
@@ -938,6 +939,66 @@ async def enable_2fa(req: Verify2FARequest, user: dict = Depends(get_current_use
     if not verify_totp(db_user['totp_secret'], req.code):
         raise HTTPException(400, 'Invalid 2FA code')
     await db.users.update_one({'id': user['sub']}, {'$set': {'totp_enabled': True}})
+    return {'success': True}
+
+
+@api.post('/auth/change-password')
+async def change_password(req: ChangePasswordRequest, user: dict = Depends(get_current_user)):
+    """Change password from inside the app (Settings). Requires the current
+    password so a hijacked session alone can't lock the owner out."""
+    db_user = await db.users.find_one({'id': user['sub']})
+    if not db_user:
+        raise HTTPException(404, 'User not found')
+    if not verify_password(req.current_password, db_user['password_hash']):
+        raise HTTPException(400, 'Current password is incorrect')
+    strength_err = validate_password_strength(req.new_password)
+    if strength_err:
+        raise HTTPException(400, strength_err)
+    if verify_password(req.new_password, db_user['password_hash']):
+        raise HTTPException(400, 'New password must be different from the current one')
+    await db.users.update_one(
+        {'id': user['sub']},
+        {'$set': {'password_hash': hash_password(req.new_password)}},
+    )
+    logger.info('Password changed (self-serve) for %s', db_user['email'])
+    return {'success': True}
+
+
+@api.post('/auth/change-email')
+async def change_email(req: ChangeEmailRequest, user: dict = Depends(get_current_user)):
+    """Change the account email. Requires the current password, and the new
+    address must not already be in use by another account."""
+    db_user = await db.users.find_one({'id': user['sub']})
+    if not db_user:
+        raise HTTPException(404, 'User not found')
+    if not verify_password(req.current_password, db_user['password_hash']):
+        raise HTTPException(400, 'Current password is incorrect')
+    new_email = req.new_email.lower().strip()
+    if new_email == db_user['email'].lower():
+        raise HTTPException(400, 'That is already your email address')
+    existing = await db.users.find_one({'email': new_email})
+    if existing and existing['id'] != db_user['id']:
+        raise HTTPException(400, 'That email is already in use')
+    await db.users.update_one({'id': user['sub']}, {'$set': {'email': new_email}})
+    logger.info('Email changed for user %s -> %s', db_user['id'], new_email)
+    fresh = await db.users.find_one({'id': user['sub']})
+    return {'success': True, 'user': _public_user(fresh)}
+
+
+@api.post('/auth/2fa/disable')
+async def disable_2fa(req: Disable2FARequest, user: dict = Depends(get_current_user)):
+    """Turn off 2FA for the current account. Requires a valid current TOTP
+    code so only the true owner (with the authenticator) can disable it."""
+    db_user = await db.users.find_one({'id': user['sub']})
+    if not db_user or not db_user.get('totp_enabled') or not db_user.get('totp_secret'):
+        raise HTTPException(400, '2FA is not currently enabled')
+    if not verify_totp(db_user['totp_secret'], req.code):
+        raise HTTPException(400, 'Invalid 2FA code')
+    await db.users.update_one(
+        {'id': user['sub']},
+        {'$unset': {'totp_secret': '', 'totp_enabled': '', 'totp_pending_secret': ''}},
+    )
+    logger.info('2FA disabled (self-serve) for %s', db_user['email'])
     return {'success': True}
 
 
