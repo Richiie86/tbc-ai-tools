@@ -12,7 +12,7 @@ import CreditsBadge from '../../components/CreditsBadge';
 import api from '../../lib/api';
 import {
   Cpu, Plus, Trash2, MessageSquare, LogOut, Sparkles,
-  ChevronLeft, ShieldCheck, Edit3,
+  ChevronLeft, ShieldCheck, Edit3, Settings as SettingsIcon,
 } from 'lucide-react';
 
 /** Left sidebar: branding, new-session button, grouped session list, footer actions. */
@@ -122,6 +122,9 @@ export function DashboardSidebar({
             <ShieldCheck className="h-3.5 w-3.5" /> Operator console
           </Link>
         )}
+        <Link to="/settings" className="mb-1 flex items-center gap-2 rounded-md px-2.5 py-2 text-xs font-medium text-slate-300 hover:bg-slate-800" data-testid="sidebar-settings">
+          <SettingsIcon className="h-3.5 w-3.5" /> Settings
+        </Link>
         <Link to="/pricing" className="mb-1 flex items-center gap-2 rounded-md px-2.5 py-2 text-xs font-medium text-slate-300 hover:bg-slate-800">
           <Sparkles className="h-3.5 w-3.5" /> Upgrade plan
         </Link>

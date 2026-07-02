@@ -20,6 +20,7 @@ import Register from './pages/Register';
 import Verify2FA from './pages/Verify2FA';
 import Setup2FA from './pages/Setup2FA';
 import Dashboard from './pages/Dashboard';
+import Settings from './pages/Settings';
 import BillingSuccess from './pages/BillingSuccess';
 import Operator from './pages/Operator';
 import ProjectSettings from './pages/ProjectSettings';
@@ -60,6 +61,7 @@ function App() {
             <Route path="/dashboard/:sessionId" element={<ProtectedRoute><Dashboard variant="tbc1" /></ProtectedRoute>} />
             <Route path="/tbc2" element={<ProtectedRoute><Dashboard variant="tbc2" /></ProtectedRoute>} />
             <Route path="/tbc2/:sessionId" element={<ProtectedRoute><Dashboard variant="tbc2" /></ProtectedRoute>} />
+            <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
             <Route path="/billing/success" element={<ProtectedRoute><BillingSuccess /></ProtectedRoute>} />
             <Route path="/operator" element={<ProtectedRoute operatorOnly><Operator /></ProtectedRoute>} />
             <Route path="/operator/projects/:projectId/settings" element={<ProtectedRoute operatorOnly><ProjectSettings /></ProtectedRoute>} />
