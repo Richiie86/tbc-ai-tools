@@ -316,8 +316,12 @@ async def op_update_brand_settings(payload: dict, _: dict = Depends(get_current_
 # ===================================================================
 @router.get('/operator/projects')
 async def op_list_projects(user: dict = Depends(get_current_operator)):
+    # Operators have full control of the platform, so they see EVERY project —
+    # not just ones they personally created. This means projects created by
+    # other workspaces/users (e.g. tbc1, tbc2) or recovered from a migration
+    # are always visible here instead of silently hidden by an owner filter.
     db = await get_db()
-    cursor = db.projects.find({'owner_id': user['sub']}).sort('updated_at', -1).limit(500)
+    cursor = db.projects.find({}).sort('updated_at', -1).limit(500)
     return [_serialize(_migrate_project_status(p)) async for p in cursor]
 
 
@@ -333,7 +337,8 @@ async def op_create_project(req: ProjectUpsertRequest, user: dict = Depends(get_
 async def op_update_project(pid: str, req: ProjectUpsertRequest, user: dict = Depends(get_current_operator)):
     db = await get_db()
     updates = {**req.model_dump(), 'updated_at': datetime.now(timezone.utc)}
-    res = await db.projects.update_one({'id': pid, 'owner_id': user['sub']}, {'$set': updates})
+    # Match on id only: an operator can edit any project, not just their own.
+    res = await db.projects.update_one({'id': pid}, {'$set': updates})
     if res.matched_count == 0:
         raise HTTPException(404, 'Project not found')
     doc = await db.projects.find_one({'id': pid})
@@ -343,7 +348,8 @@ async def op_update_project(pid: str, req: ProjectUpsertRequest, user: dict = De
 @router.delete('/operator/projects/{pid}')
 async def op_delete_project(pid: str, user: dict = Depends(get_current_operator)):
     db = await get_db()
-    res = await db.projects.delete_one({'id': pid, 'owner_id': user['sub']})
+    # Operators can delete any project (full control), not just their own.
+    res = await db.projects.delete_one({'id': pid})
     if res.deleted_count == 0:
         raise HTTPException(404, 'Project not found')
     return {'success': True}
@@ -562,7 +568,8 @@ async def op_launch_project_chat(pid: str, user: dict = Depends(get_current_oper
     Returns `{ session_id }` — the frontend then navigates to `/dashboard/{session_id}`.
     """
     db = await get_db()
-    p = await db.projects.find_one({'id': pid, 'owner_id': user['sub']})
+    # Operator can open any project in chat, not just their own.
+    p = await db.projects.find_one({'id': pid})
     if not p:
         raise HTTPException(404, 'Project not found')
 
