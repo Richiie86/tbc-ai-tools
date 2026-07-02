@@ -1079,6 +1079,10 @@ async def rename_session(session_id: str, req: RenameSessionRequest, user: dict 
 
 @api.delete('/chat/sessions/{session_id}')
 async def delete_session(session_id: str, user: dict = Depends(get_current_user)):
+    # Snapshot into the operator archive BEFORE removing anything, so the
+    # project (with the owner's email + transcript) survives even though the
+    # user is removing it from their own account.
+    await archive_session(session_id, reason='user_deleted')
     res = await db.chat_sessions.delete_one({'id': session_id, 'user_id': user['sub']})
     await db.chat_messages.delete_many({'session_id': session_id})
     if res.deleted_count == 0:
@@ -2098,7 +2102,9 @@ app.include_router(operator_security_router)
 from ai_build_tests_ext import router as ai_build_tests_router
 app.include_router(ai_build_tests_router)
 from operator_search_ext import router as operator_search_router
+from user_projects_ext import router as user_projects_router, archive_session
 app.include_router(operator_search_router)
+app.include_router(user_projects_router)
 from operator_backup_ext import router as operator_backup_router
 app.include_router(operator_backup_router)
 from changelog_ext import router as changelog_router

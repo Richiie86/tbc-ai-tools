@@ -9,7 +9,7 @@ import {
   Code2, Sparkles, Wallet, KeyRound, Settings as SettingsIcon, Coins,
   FolderKanban, Activity, ScrollText, Megaphone, MessageCircle, FlaskConical,
   TrendingUp, Lock, Brain, Network, TestTube, AlertOctagon, Wand2, Link2,
-  Calculator, Gauge,
+  Calculator, Gauge, Archive,
 } from 'lucide-react';
 
 import PlansTab     from './operator/PlansTab';
@@ -35,6 +35,7 @@ import MyKeysTab from './operator/MyKeysTab';
 import LinksTab from './operator/LinksTab';
 import TaxCalculatorTab from './operator/TaxCalculatorTab';
 import TaxameterTab from './operator/TaxameterTab';
+import UserProjectsTab from './operator/UserProjectsTab';
 import PreviewWidget from './PreviewWidget';
 import EmergencyLockdownPill from '../components/EmergencyLockdownPill';
 import AnalyticsTab from './operator/AnalyticsTab';
@@ -212,6 +213,7 @@ export default function Operator() {
                 <TabTrigger value="users"     icon={Users}>Users ({users.length})</TabTrigger>
                 <TabTrigger value="analytics" icon={TrendingUp}>Analytics</TabTrigger>
                 <TabTrigger value="projects"  icon={FolderKanban}>Projects</TabTrigger>
+                <TabTrigger value="user-projects" icon={Archive}>User Projects</TabTrigger>
                 <TabTrigger value="plans"     icon={Sparkles}>Plans</TabTrigger>
                 <TabTrigger value="payments"  icon={CreditCard}>Payments</TabTrigger>
                 <TabTrigger value="treasury"  icon={Wallet}>Treasury</TabTrigger>
@@ -245,6 +247,7 @@ export default function Operator() {
 
               <TabsContent value="plans"     className="mt-5"><PlansTab /></TabsContent>
               <TabsContent value="projects"  className="mt-5"><ProjectsTab /></TabsContent>
+              <TabsContent value="user-projects" className="mt-5"><UserProjectsTab /></TabsContent>
               <TabsContent value="payments"  className="mt-5"><PaymentsTab /></TabsContent>
               <TabsContent value="treasury"  className="mt-5"><TreasuryTab /></TabsContent>
               <TabsContent value="money"     className="mt-5"><MoneyTab /></TabsContent>
