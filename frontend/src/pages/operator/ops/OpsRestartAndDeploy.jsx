@@ -48,7 +48,7 @@ export function OpsRestartAndDeploy({
           <div>
             <h3 className="text-base font-bold text-tbc-100">Deploy / Redeploy</h3>
             <p className="text-xs text-tbc-200/60">
-              Production deploy is triggered from Emergent&apos;s top-right Deploy button.
+              Production deploy is triggered from the Deploy button in the chat header.
             </p>
           </div>
         </div>
@@ -79,18 +79,16 @@ export function OpsRestartAndDeploy({
         )}
 
         <ol className="mt-3 space-y-1 text-xs text-tbc-200/70">
-          <li>1. Click <strong className="text-tbc-100">Deploy</strong> in the Emergent chat panel (top right).</li>
+          <li>1. Click <strong className="text-tbc-100">Deploy</strong> in the chat header (top right).</li>
           <li>2. Wait for the green check — your preview &amp; production update together.</li>
           <li>3. Hit <strong className="text-tbc-100">Refresh</strong> on Health Check above to confirm.</li>
         </ol>
 
         <a
-          href="https://app.emergent.sh"
-          target="_blank"
-          rel="noreferrer"
+          href="/dashboard"
           className="mt-3 inline-flex items-center gap-1 text-xs text-tbc-300 hover:text-tbc-200"
         >
-          Open Emergent <ExternalLink className="h-3 w-3" />
+          Open Builder chat <ExternalLink className="h-3 w-3" />
         </a>
       </Card>
     </section>
