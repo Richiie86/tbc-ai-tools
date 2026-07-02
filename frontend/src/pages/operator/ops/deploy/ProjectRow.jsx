@@ -10,7 +10,7 @@ import {
 import {
   Rocket, Globe, Loader2, Copy, Check, GitBranch, ExternalLink, RotateCw, Save,
   Sparkles, Activity, AlertCircle, CheckCircle2, GitFork, Pencil, ShieldCheck, Bot,
-  Cog, BadgeCheck, Zap, ArrowUpCircle, UploadCloud,
+  Cog, BadgeCheck, Zap, ArrowUpCircle, UploadCloud, RotateCcw,
 } from 'lucide-react';
 
 import { CodeReviewDialog } from './CodeReviewDialog';
@@ -332,6 +332,22 @@ export function ProjectRow({ project, onDeployed }) {
             {a.busy === 'promote' ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : <ArrowUpCircle className="mr-1.5 h-3 w-3" />}
             Promote to Prod
           </Button>
+          <Button
+            size="sm"
+            data-testid={`rollback-${project.id}`}
+            onClick={a.rollback}
+            disabled={a.busy !== null || !project.last_good_deployment_id}
+            variant="outline"
+            title={
+              !project.last_good_deployment_id
+                ? 'No known-good deployment yet — promote a working deploy first'
+                : 'Roll production back to the last known-good deployment'
+            }
+            className="border-rose-500/40 bg-ink-900 text-rose-300 hover:bg-rose-500/10"
+          >
+            {a.busy === 'rollback' ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : <RotateCcw className="mr-1.5 h-3 w-3" />}
+            Rollback
+          </Button>
           <label
             className="inline-flex items-center gap-2 rounded-md border border-tbc-900/60 bg-ink-900 px-2.5 py-1.5 text-[11px] text-tbc-200/80"
             title="When ON, a successful preview deploy is automatically promoted to production."
@@ -355,6 +371,18 @@ export function ProjectRow({ project, onDeployed }) {
               disabled={a.busy !== null}
             />
             <span>Self-healing</span>
+          </label>
+          <label
+            className="inline-flex items-center gap-2 rounded-md border border-tbc-900/60 bg-ink-900 px-2.5 py-1.5 text-[11px] text-tbc-200/80"
+            title="When ON, a failed deploy (ERROR/CANCELED) automatically restores the last known-good production deployment."
+          >
+            <Switch
+              data-testid={`auto-rollback-${project.id}`}
+              checked={!!project.auto_rollback}
+              onCheckedChange={a.toggleAutoRollback}
+              disabled={a.busy !== null}
+            />
+            <span>Auto-rollback</span>
           </label>
         </div>
       </div>
