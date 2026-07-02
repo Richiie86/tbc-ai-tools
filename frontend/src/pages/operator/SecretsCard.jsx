@@ -5,7 +5,7 @@ import { Input } from '../../components/ui/input';
 import { toast } from 'sonner';
 import {
   KeyRound, Save, Loader2, ShieldCheck, ShieldAlert, Eye, EyeOff,
-  RotateCw, CheckCircle2, XCircle, Github, Cloud, Sparkles, Bot, Server,
+  RotateCw, CheckCircle2, XCircle, Github, Cloud, Sparkles, Bot, Server, Zap,
 } from 'lucide-react';
 
 export const KIND_META = {
@@ -43,6 +43,13 @@ export const KIND_META = {
     fieldKey: 'render_api_key',
     placeholder: 'Paste your Render key (rnd_…) — manage the backend host',
     helperUrl: 'https://dashboard.render.com/u/settings/api-keys',
+  },
+  groq: {
+    label: 'Groq API Key',
+    icon: Zap,
+    fieldKey: 'groq_api_key',
+    placeholder: 'Paste your Groq key (gsk_…) — fast open-model inference',
+    helperUrl: 'https://console.groq.com/keys',
   },
 };
 

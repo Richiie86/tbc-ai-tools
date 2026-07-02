@@ -716,6 +716,10 @@ async def op_get_settings(_: dict = Depends(get_current_operator)):
         'render_api_key_set': bool(doc.get('render_api_key')),
         'render_api_key_masked': _mask_key(doc.get('render_api_key')),
         'render_api_key_rotated_at': doc.get('render_api_key_rotated_at'),
+        # Groq API key — fast open-model inference (Llama, Mixtral, etc.).
+        'groq_api_key_set': bool(doc.get('groq_api_key')),
+        'groq_api_key_masked': _mask_key(doc.get('groq_api_key')),
+        'groq_api_key_rotated_at': doc.get('groq_api_key_rotated_at'),
         # Outbound webhook for ship-and-watch events.
         'deploy_webhook_url': doc.get('deploy_webhook_url') or '',
         'deploy_webhook_secret_set': bool(doc.get('deploy_webhook_secret')),
@@ -750,7 +754,7 @@ async def op_update_settings(payload: dict, _: dict = Depends(get_current_operat
         'default_plan_id',
         # Deploy & AI surface — same gate as the rest of the settings doc.
         'vercel_token', 'vercel_team_id', 'ai_api_key',
-        'anthropic_api_key', 'openai_api_key', 'render_api_key',
+        'anthropic_api_key', 'openai_api_key', 'render_api_key', 'groq_api_key',
         'deploy_webhook_url', 'deploy_webhook_secret',
         'self_repo', 'self_git_ref', 'self_vercel_project_id',
         'github_token',
@@ -759,7 +763,7 @@ async def op_update_settings(payload: dict, _: dict = Depends(get_current_operat
     now = datetime.now(timezone.utc).isoformat()
     rotation_tracked = {
         'vercel_token', 'github_token',
-        'anthropic_api_key', 'openai_api_key', 'render_api_key',
+        'anthropic_api_key', 'openai_api_key', 'render_api_key', 'groq_api_key',
     }
     for k, v in payload.items():
         if k not in allowed:
@@ -779,10 +783,10 @@ async def op_update_settings(payload: dict, _: dict = Depends(get_current_operat
 @router.post('/operator/settings/clear')
 async def op_clear_secret(key: str = Query(...), _: dict = Depends(get_current_operator)):
     db = await get_db()
-    if key not in {'stripe_secret_key', 'nowpayments_api_key', 'nowpayments_ipn_secret', 'paypal_client_id', 'paypal_client_secret', 'emergent_llm_key', 'resend_api_key', 'vercel_token', 'ai_api_key', 'github_token', 'anthropic_api_key', 'openai_api_key', 'render_api_key'}:
+    if key not in {'stripe_secret_key', 'nowpayments_api_key', 'nowpayments_ipn_secret', 'paypal_client_id', 'paypal_client_secret', 'emergent_llm_key', 'resend_api_key', 'vercel_token', 'ai_api_key', 'github_token', 'anthropic_api_key', 'openai_api_key', 'render_api_key', 'groq_api_key'}:
         raise HTTPException(400, 'Cannot clear this key')
     unset_extra = {}
-    if key in {'vercel_token', 'github_token', 'anthropic_api_key', 'openai_api_key', 'render_api_key'}:
+    if key in {'vercel_token', 'github_token', 'anthropic_api_key', 'openai_api_key', 'render_api_key', 'groq_api_key'}:
         unset_extra[f'{key}_rotated_at'] = None
     await db.settings.update_one(
         {'_id': 'payment_settings'},
@@ -812,7 +816,7 @@ async def op_test_key(
 
 
 # Which key kinds the live "Test" button can validate against a provider API.
-_TESTABLE_KINDS = {'vercel', 'github', 'anthropic', 'openai', 'render', 'resend', 'stripe'}
+_TESTABLE_KINDS = {'vercel', 'github', 'anthropic', 'openai', 'render', 'resend', 'stripe', 'groq'}
 
 
 async def _validate_key(kind: str, value: str) -> dict:
@@ -864,6 +868,16 @@ async def _validate_key(kind: str, value: str) -> dict:
                             'message': 'Render API key valid'}
                 return {'ok': False, 'message': f'Render rejected the key ({r.status_code}).'}
 
+            if kind == 'groq':
+                # Groq exposes an OpenAI-compatible surface; /openai/v1/models
+                # is the cheapest authenticated GET.
+                r = await client.get('https://api.groq.com/openai/v1/models',
+                                     headers={'Authorization': f'Bearer {value}'})
+                if r.status_code == 200:
+                    return {'ok': True, 'identity': 'Groq account',
+                            'message': 'Groq API key valid'}
+                return {'ok': False, 'message': f'Groq rejected the key ({r.status_code}).'}
+
             if kind == 'resend':
                 r = await client.get('https://api.resend.com/domains',
                                      headers={'Authorization': f'Bearer {value}'})
@@ -894,8 +908,9 @@ _KIND_TO_FIELD = {
     'render': 'render_api_key',
     'resend': 'resend_api_key',
     'stripe': 'stripe_secret_key',
+    'groq': 'groq_api_key',
 }
-_ROTATION_STAMPED = {'vercel_token', 'github_token', 'anthropic_api_key', 'openai_api_key', 'render_api_key'}
+_ROTATION_STAMPED = {'vercel_token', 'github_token', 'anthropic_api_key', 'openai_api_key', 'render_api_key', 'groq_api_key'}
 
 
 def _detect_key_kind(value: str) -> Optional[str]:
@@ -909,6 +924,10 @@ def _detect_key_kind(value: str) -> Optional[str]:
     low = v.lower()
     if low.startswith('sk-ant-'):
         return 'anthropic'
+    # Groq keys start with `gsk_` — check before the GitHub `gh*`/generic
+    # `sk-` branches so it can't be mis-detected.
+    if low.startswith('gsk_'):
+        return 'groq'
     if low.startswith(('ghp_', 'github_pat_', 'gho_', 'ghs_', 'ghu_', 'ghr_')):
         return 'github'
     if low.startswith('rnd_'):
@@ -951,7 +970,7 @@ async def op_auto_detect_key(
             raise HTTPException(
                 422,
                 "Couldn't recognise this key automatically. Use the specific "
-                "field for it (Vercel/GitHub/Anthropic/OpenAI/Render).",
+                "field for it (Vercel/GitHub/Anthropic/OpenAI/Render/Groq).",
             )
 
     if do_validate and verdict is None:
