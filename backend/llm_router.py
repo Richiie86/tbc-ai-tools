@@ -35,6 +35,26 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 
+async def _settings_ai_key(field: str) -> Optional[str]:
+    """Return an AI provider key the operator saved *inside the app*.
+
+    Keys pasted in the Operator console → "My Keys" tab live in the
+    ``settings`` collection under ``_id='payment_settings'``. Reading them here
+    lets the build tools run on a key entered in the UI — no hosting env vars,
+    no redeploy. Best-effort: any failure returns ``None`` so callers fall back
+    to emergentintegrations, preserving existing behaviour.
+    """
+    try:
+        from payments_ext import get_db  # lazy import avoids circular load
+        db = await get_db()
+        doc = await db.settings.find_one({'_id': 'payment_settings'}) or {}
+        val = doc.get(field)
+        return val if isinstance(val, str) and val.strip() else None
+    except Exception as e:  # noqa: BLE001
+        logger.warning('Could not read %s from settings: %s', field, e)
+        return None
+
+
 @dataclass
 class ImageContent:
     """Drop-in shape match for `emergentintegrations.llm.chat.ImageContent`.
@@ -111,13 +131,23 @@ class LlmChat:
     # ----------------------------------------------------------------
     # Routing helpers
     # ----------------------------------------------------------------
-    def _own_anthropic_key(self) -> Optional[str]:
+    async def _own_anthropic_key(self) -> Optional[str]:
         # Honour the user's own key first. We accept both ANTHROPIC_API_KEY
         # (official) and CLAUDE_API_KEY (the name some Vercel templates use).
-        return os.environ.get('ANTHROPIC_API_KEY') or os.environ.get('CLAUDE_API_KEY')
+        # Env wins; otherwise fall back to the key the operator saved *inside
+        # the app* (Operator console → "My Keys" tab), so a pasted key works
+        # with zero hosting-env changes and no redeploy.
+        return (
+            os.environ.get('ANTHROPIC_API_KEY')
+            or os.environ.get('CLAUDE_API_KEY')
+            or await _settings_ai_key('anthropic_api_key')
+        )
 
-    def _own_openai_key(self) -> Optional[str]:
-        return os.environ.get('OPENAI_API_KEY')
+    async def _own_openai_key(self) -> Optional[str]:
+        return (
+            os.environ.get('OPENAI_API_KEY')
+            or await _settings_ai_key('openai_api_key')
+        )
 
     # ----------------------------------------------------------------
     # The send method — picks a backend and runs the call.
@@ -133,7 +163,7 @@ class LlmChat:
 
         # ---- 1. Direct Anthropic ---------------------------------
         if self._provider == 'anthropic':
-            own = self._own_anthropic_key()
+            own = await self._own_anthropic_key()
             if own:
                 try:
                     return await self._send_anthropic_direct(own, text, images)
@@ -148,7 +178,7 @@ class LlmChat:
 
         # ---- 2. Direct OpenAI ------------------------------------
         if self._provider == 'openai':
-            own = self._own_openai_key()
+            own = await self._own_openai_key()
             if own:
                 try:
                     return await self._send_openai_direct(own, text, images)
@@ -171,14 +201,14 @@ class LlmChat:
         text, images = self._extract(message)
 
         if self._provider == 'anthropic':
-            own = self._own_anthropic_key()
+            own = await self._own_anthropic_key()
             if own:
                 async for ev in self._stream_anthropic_direct(own, text, images):
                     yield ev
                 return
 
         if self._provider == 'openai':
-            own = self._own_openai_key()
+            own = await self._own_openai_key()
             if own:
                 async for ev in self._stream_openai_direct(own, text, images):
                     yield ev
@@ -376,7 +406,9 @@ def resolve_llm_key(settings: Optional[dict] = None) -> Optional[str]:
     if emergent:
         return emergent
     status = backend_status()
-    if status['anthropic_byo'] or status['openai_byo']:
+    # BYO via env (env wins) OR via a key pasted in the app ("My Keys" tab).
+    byo_in_app = bool(settings.get('anthropic_api_key') or settings.get('openai_api_key'))
+    if status['anthropic_byo'] or status['openai_byo'] or byo_in_app:
         return BYO_KEY_SENTINEL
     return None
 
