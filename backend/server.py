@@ -1057,10 +1057,13 @@ async def list_sessions(user: dict = Depends(get_current_user), variant: Optiona
 
 @api.post('/chat/sessions')
 async def create_session(req: CreateSessionRequest, user: dict = Depends(get_current_user)):
+    # New chats default to the operator's amAI quality tier (falls back to
+    # DEFAULT_MODEL = max quality when the dial was never touched). An explicit
+    # req.model always wins, so per-chat model choices still work.
     s = ChatSession(
         user_id=user['sub'],
         title=req.title or 'New Chat',
-        model=req.model or DEFAULT_MODEL,
+        model=req.model or await get_default_model(),
         variant=req.variant or 'tbc1',
     )
     await db.chat_sessions.insert_one(s.model_dump())
@@ -2125,8 +2128,10 @@ from ai_build_tests_ext import router as ai_build_tests_router
 app.include_router(ai_build_tests_router)
 from operator_search_ext import router as operator_search_router
 from user_projects_ext import router as user_projects_router, archive_session
+from amai_ext import router as amai_router, get_default_model
 app.include_router(operator_search_router)
 app.include_router(user_projects_router)
+app.include_router(amai_router)
 from operator_backup_ext import router as operator_backup_router
 app.include_router(operator_backup_router)
 from changelog_ext import router as changelog_router
