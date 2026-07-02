@@ -182,6 +182,20 @@ export default function ProjectsTab() {
 
   return (
     <div data-testid="projects-tab">
+      {/* When the whole planning board is empty, explain why (nothing hidden
+          by an owner filter anymore) and point to where the live app project
+          actually lives, so it never looks like data silently vanished. */}
+      {items.length === 0 && (
+        <div className="mb-4 rounded-lg border border-tbc-500/30 bg-tbc-500/5 p-4 text-sm text-tbc-200/80">
+          <p className="font-semibold text-tbc-100">No planning projects yet</p>
+          <p className="mt-1 leading-relaxed">
+            This board is empty. As the operator you now see every project here
+            (no owner filter). Your live deployed app project lives under the{' '}
+            <span className="font-semibold text-tbc-300">Ops</span> tab. To start
+            a new planning entry, use <span className="font-semibold text-tbc-300">New</span> below.
+          </p>
+        </div>
+      )}
       <WorkspaceSwitcher
         selected={workspace}
         onSelect={setWorkspace}
