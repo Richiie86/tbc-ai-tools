@@ -30,6 +30,7 @@ import AIBrainTab from './operator/AIBrainTab';
 import AITestBenchTab from './operator/AITestBenchTab';
 import ErrorsTab from './operator/ErrorsTab';
 import AIBuildTab from './operator/AIBuildTab';
+import MyKeysTab from './operator/MyKeysTab';
 import PreviewWidget from './PreviewWidget';
 import EmergencyLockdownPill from '../components/EmergencyLockdownPill';
 import AnalyticsTab from './operator/AnalyticsTab';
@@ -205,6 +206,7 @@ export default function Operator() {
                 <TabTrigger value="payments"  icon={CreditCard}>Payments</TabTrigger>
                 <TabTrigger value="treasury"  icon={Wallet}>Treasury</TabTrigger>
                 <TabTrigger value="money"     icon={DollarSign}>Money</TabTrigger>
+                <TabTrigger value="keys"      icon={KeyRound}>My Keys</TabTrigger>
                 <TabTrigger value="licenses"  icon={KeyRound}>Licenses</TabTrigger>
                 <TabTrigger value="royalties" icon={Coins}>Royalties</TabTrigger>
                 <TabTrigger value="settings"  icon={SettingsIcon}>Security</TabTrigger>
@@ -233,6 +235,7 @@ export default function Operator() {
               <TabsContent value="payments"  className="mt-5"><PaymentsTab /></TabsContent>
               <TabsContent value="treasury"  className="mt-5"><TreasuryTab /></TabsContent>
               <TabsContent value="money"     className="mt-5"><MoneyTab /></TabsContent>
+              <TabsContent value="keys"      className="mt-5"><MyKeysTab /></TabsContent>
               <TabsContent value="licenses"  className="mt-5"><LicensesTab /></TabsContent>
               <TabsContent value="royalties" className="mt-5"><RoyaltiesTab /></TabsContent>
               <TabsContent value="settings"  className="mt-5"><SettingsTab /></TabsContent>
