@@ -71,13 +71,23 @@ class LlmChat:
     # ----------------------------------------------------------------
     # Routing helpers
     # ----------------------------------------------------------------
-    def _own_anthropic_key(self) -> Optional[str]:
+    async def _own_anthropic_key(self) -> Optional[str]:
         # Honour the user's own key first. We accept both ANTHROPIC_API_KEY
         # (official) and CLAUDE_API_KEY (the name some Vercel templates use).
-        return os.environ.get('ANTHROPIC_API_KEY') or os.environ.get('CLAUDE_API_KEY')
+        # Env wins; otherwise fall back to the key the operator saved *inside
+        # the app* (Secrets card → Operator console), so BYO keys work without
+        # ever touching the hosting env vars.
+        return (
+            os.environ.get('ANTHROPIC_API_KEY')
+            or os.environ.get('CLAUDE_API_KEY')
+            or await _settings_ai_key('anthropic_api_key')
+        )
 
-    def _own_openai_key(self) -> Optional[str]:
-        return os.environ.get('OPENAI_API_KEY')
+    async def _own_openai_key(self) -> Optional[str]:
+        return (
+            os.environ.get('OPENAI_API_KEY')
+            or await _settings_ai_key('openai_api_key')
+        )
 
     # ----------------------------------------------------------------
     # The send method — picks a backend and runs the call.
@@ -87,7 +97,7 @@ class LlmChat:
 
         # ---- 1. Direct Anthropic ---------------------------------
         if self._provider == 'anthropic':
-            own = self._own_anthropic_key()
+            own = await self._own_anthropic_key()
             if own:
                 try:
                     return await self._send_anthropic_direct(own, text)
