@@ -41,9 +41,24 @@ export function InChatDeployControls({ user }) {
     if (!isOperator) return;
     try {
       const { data } = await api.get('/operator/deploy/projects');
-      setProjects(data || []);
-      if (!selectedId && data?.length) {
-        const firstId = data[0].id;
+      // Hide leftover dummy/test entries and pin the primary app to the top
+      // so the picker is easy to scan. The backend also purges these on boot,
+      // but this keeps the UI clean immediately even before that runs.
+      const nameOf = (p) => (p.projectName || p.name || '').trim();
+      const isJunk = (p) => {
+        const n = nameOf(p).toLowerCase();
+        return /^p2 test project/.test(n) || /^clone variant$/.test(n);
+      };
+      const isPrimary = (p) => /tbc ai tools/i.test(nameOf(p));
+      const cleaned = (data || [])
+        .filter((p) => !isJunk(p))
+        .sort((a, b) => {
+          if (isPrimary(a) !== isPrimary(b)) return isPrimary(a) ? -1 : 1;
+          return nameOf(a).localeCompare(nameOf(b));
+        });
+      setProjects(cleaned);
+      if (!selectedId && cleaned.length) {
+        const firstId = cleaned[0].id;
         setSelectedId(firstId);
         try { localStorage.setItem(STORAGE_KEY, firstId); } catch { /* ignore */ }
       }
@@ -239,16 +254,25 @@ export function InChatDeployControls({ user }) {
               </a>
             </div>
           )}
-          {projects.map((p) => (
-            <DropdownMenuItem
-              key={p.id}
-              onClick={() => pick(p.id)}
-              className="text-xs focus:bg-ink-950 focus:text-tbc-100"
-              data-testid={`in-chat-project-option-${p.id}`}
-            >
-              {p.projectName || p.name || p.id}
-            </DropdownMenuItem>
-          ))}
+          {projects.map((p) => {
+            const label = p.projectName || p.name || p.id;
+            const primary = /tbc ai tools/i.test(label);
+            return (
+              <DropdownMenuItem
+                key={p.id}
+                onClick={() => pick(p.id)}
+                className="flex items-center justify-between gap-2 text-xs focus:bg-ink-950 focus:text-tbc-100"
+                data-testid={`in-chat-project-option-${p.id}`}
+              >
+                <span className="truncate">{label}</span>
+                {primary && (
+                  <span className="shrink-0 rounded bg-tbc-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-tbc-300">
+                    this app
+                  </span>
+                )}
+              </DropdownMenuItem>
+            );
+          })}
         </DropdownMenuContent>
       </DropdownMenu>
 

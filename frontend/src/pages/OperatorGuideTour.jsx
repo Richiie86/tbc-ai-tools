@@ -62,7 +62,7 @@ const STEPS = [
   },
   {
     tab: 'settings', icon: SettingsIcon, title: 'Security',
-    body: 'All third-party API keys live here: Stripe, NOWPayments, PayPal, Resend (email), the Emergent Universal Key for LLM calls, your Vercel PAT, and a GitHub PAT for autopilot.',
+    body: 'All third-party API keys live here: Stripe, NOWPayments, PayPal, Resend (email), your universal AI / LLM key for model calls, your Vercel PAT, and a GitHub PAT for autopilot.',
     tip: 'IMPORTANT: pasting a key here will NOT change your operator password — we explicitly told the browser to leave these fields alone.',
   },
   {

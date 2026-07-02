@@ -51,9 +51,7 @@ export function OpsQuickActions({
 
         <a
           data-testid="ops-quick-redeploy"
-          href="https://app.emergent.sh/chat"
-          target="_blank"
-          rel="noreferrer"
+          href="/dashboard"
           className="group relative overflow-hidden rounded-xl border border-indigo-300/60 bg-indigo-500 px-5 py-4 text-left transition hover:bg-indigo-400 hover:border-indigo-200 hover:shadow-[0_0_32px_rgba(129,140,248,0.75)]"
         >
           <div className="absolute inset-0 bg-gradient-to-br from-white/15 to-transparent opacity-0 transition group-hover:opacity-100" />
@@ -64,14 +62,14 @@ export function OpsQuickActions({
             <div className="flex-1">
               <div className="text-sm font-bold text-white">Re-deploy changes</div>
               <div className="text-[11px] text-indigo-100/90 flex items-center gap-1">
-                Opens Emergent deploy <ExternalLink className="h-2.5 w-2.5" />
+                Open the Deploy button in chat <ExternalLink className="h-2.5 w-2.5" />
               </div>
             </div>
           </div>
         </a>
       </div>
       <p className="mt-2 text-[11px] text-tbc-200/40">
-        Heads-up: the deploy itself runs on Emergent&apos;s side. Health check + code review run live inside this app.
+        Deploy, health check and code review all run from the Deploy controls in the chat header.
       </p>
     </section>
   );

@@ -296,9 +296,9 @@ export default function SettingsTab() {
         </div>
       </Section>
 
-      <Section icon={Sparkles} title="Emergent LLM key (AI chat)" anchor="llm-key">
+      <Section icon={Sparkles} title="AI / LLM key (AI chat)" anchor="llm-key">
         <div className="rounded-md border border-tbc-900/40 bg-ink-950/60 p-3 text-xs text-tbc-200/70">
-          Powers GPT, Claude and Gemini in the Builder. Anything set here overrides the env var <code className="text-tbc-300">EMERGENT_LLM_KEY</code>. Rotate at <a href="https://app.emergent.sh" target="_blank" rel="noreferrer" className="text-tbc-300 hover:underline">Emergent → Profile → Universal Key</a>.
+          Powers GPT, Claude and Gemini in the Builder. Paste a universal LLM key here to enable AI chat and build features.
         </div>
         <KeyRow
           label="Universal LLM key"

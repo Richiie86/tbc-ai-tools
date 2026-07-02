@@ -37,9 +37,8 @@ export default function About() {
         <div className="mt-14">
           <h2 className="text-3xl font-bold tracking-tight text-white">The team behind the engine</h2>
           <p className="mt-3 max-w-3xl text-sm text-slate-400">
-            Tradebridge Club have copied the AI engine and the real team behind it is Emergent — a small senior
-            team focused on reliability, privacy and rapid model adoption. New models are integrated within
-            days of release.
+            TradeBridge Club is a small senior team focused on reliability, privacy and rapid model
+            adoption. New models are integrated within days of release.
           </p>
           <div className="mt-6 grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 max-w-4xl">
             {[

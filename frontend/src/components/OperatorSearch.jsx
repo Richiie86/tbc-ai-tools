@@ -77,7 +77,7 @@ const INDEX = [
     keywords: ['paypal'], anchor: 'paypal' },
   { tab: 'settings', section: 'Resend', label: 'Resend (transactional emails)',
     keywords: ['email', 'resend', 'smtp', 'transactional'], anchor: 'resend' },
-  { tab: 'settings', section: 'Emergent LLM', label: 'Emergent LLM key (AI chat)',
+  { tab: 'settings', section: 'AI / LLM', label: 'AI / LLM key (AI chat)',
     keywords: ['llm', 'openai', 'claude', 'gemini', 'ai key', 'universal key'], anchor: 'llm-key' },
   { tab: 'settings', section: 'Payment methods', label: 'Enabled payment methods',
     keywords: ['toggle stripe', 'enable paypal'], anchor: 'payment-methods' },
