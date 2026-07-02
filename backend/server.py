@@ -400,6 +400,30 @@ async def startup():
     except Exception:
         logger.exception('Founder royalty seed failed (non-fatal)')
 
+    # ONE-SHOT: purge leftover dummy/test deploy projects (e.g. "P2 Test
+    # Project", "Clone Variant") that were created manually during early
+    # testing and now clutter the operator's project picker. Guarded by a
+    # flag doc so it runs exactly once and can never touch data the owner
+    # legitimately creates later.
+    try:
+        flag = await db.system_flags.find_one({'_id': 'test_projects_purged_v1'})
+        if not flag:
+            junk_patterns = [
+                {'projectName': {'$regex': r'^P2 Test Project', '$options': 'i'}},
+                {'name': {'$regex': r'^P2 Test Project', '$options': 'i'}},
+                {'projectName': {'$regex': r'^Clone Variant$', '$options': 'i'}},
+                {'name': {'$regex': r'^Clone Variant$', '$options': 'i'}},
+            ]
+            res = await db.deploy_projects.delete_many({'$or': junk_patterns})
+            await db.system_flags.insert_one({
+                '_id': 'test_projects_purged_v1',
+                'deleted': res.deleted_count,
+                'at': datetime.now(timezone.utc),
+            })
+            logger.info('Purged %d dummy test deploy projects (one-shot)', res.deleted_count)
+    except Exception:
+        logger.exception('Test-project purge failed (non-fatal)')
+
     # Start the trial-expiry email scheduler (every hour, idempotent per user).
     try:
         from apscheduler.schedulers.asyncio import AsyncIOScheduler
