@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Rocket, ShieldCheck, Activity, ChevronDown, Loader2 } from 'lucide-react';
+import { Rocket, ShieldCheck, Activity, ChevronDown, Loader2, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import api from '../../lib/api';
 import {
@@ -25,6 +25,7 @@ export function InChatDeployControls({ user }) {
   // null = still loading; true/false = resolved deploy-access flag.
   const [access, setAccess] = useState(null); // {can_deploy, pending_request}
   const [requesting, setRequesting] = useState(false);
+  const [deleting, setDeleting] = useState(null); // project id currently being deleted
 
   const isOperator = user?.role === 'operator';
 
@@ -41,24 +42,20 @@ export function InChatDeployControls({ user }) {
     if (!isOperator) return;
     try {
       const { data } = await api.get('/operator/deploy/projects');
-      // Hide leftover dummy/test entries and pin the primary app to the top
-      // so the picker is easy to scan. The backend also purges these on boot,
-      // but this keeps the UI clean immediately even before that runs.
+      // Sort projects: pin the primary app first, then alphabetical. We show
+      // EVERY project (including old test entries) so the operator can delete
+      // stale ones right here via the trash button — see `del()` below.
       const nameOf = (p) => (p.projectName || p.name || '').trim();
-      const isJunk = (p) => {
-        const n = nameOf(p).toLowerCase();
-        return /^p2 test project/.test(n) || /^clone variant$/.test(n);
-      };
       const isPrimary = (p) => /tbc ai tools/i.test(nameOf(p));
-      const cleaned = (data || [])
-        .filter((p) => !isJunk(p))
+      const sorted = (data || [])
+        .slice()
         .sort((a, b) => {
           if (isPrimary(a) !== isPrimary(b)) return isPrimary(a) ? -1 : 1;
           return nameOf(a).localeCompare(nameOf(b));
         });
-      setProjects(cleaned);
-      if (!selectedId && cleaned.length) {
-        const firstId = cleaned[0].id;
+      setProjects(sorted);
+      if (!selectedId && sorted.length) {
+        const firstId = sorted[0].id;
         setSelectedId(firstId);
         try { localStorage.setItem(STORAGE_KEY, firstId); } catch { /* ignore */ }
       }
@@ -124,6 +121,30 @@ export function InChatDeployControls({ user }) {
   const pick = (id) => {
     setSelectedId(id);
     try { localStorage.setItem(STORAGE_KEY, id); } catch { /* ignore */ }
+  };
+
+  // Permanently remove a stale deploy project from the operator's list.
+  // Hits DELETE /operator/deploy/:id (audited server-side). This only removes
+  // the entry from the deploy picker — it never touches the live Vercel site.
+  const del = async (e, p) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const label = p.projectName || p.name || p.id;
+    if (!window.confirm(`Delete "${label}" from the deploy list?\n\nThis only removes the entry here — your live website is not affected.`)) return;
+    setDeleting(p.id);
+    try {
+      await api.delete(`/operator/deploy/${p.id}`);
+      toast.success(`Deleted "${label}"`);
+      setProjects((prev) => prev.filter((x) => x.id !== p.id));
+      if (selectedId === p.id) {
+        setSelectedId('');
+        try { localStorage.removeItem(STORAGE_KEY); } catch { /* ignore */ }
+      }
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Delete failed');
+    } finally {
+      setDeleting(null);
+    }
   };
 
   const run = async (kind) => {
@@ -246,15 +267,30 @@ export function InChatDeployControls({ user }) {
             return (
               <DropdownMenuItem
                 key={p.id}
+                onSelect={(e) => e.preventDefault()}
                 onClick={() => pick(p.id)}
                 className="flex items-center justify-between gap-2 text-xs focus:bg-ink-950 focus:text-tbc-100"
                 data-testid={`in-chat-project-option-${p.id}`}
               >
                 <span className="truncate">{label}</span>
-                {primary && (
+                {primary ? (
                   <span className="shrink-0 rounded bg-tbc-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-tbc-300">
                     this app
                   </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={(e) => del(e, p)}
+                    disabled={deleting === p.id}
+                    title={`Delete ${label}`}
+                    aria-label={`Delete ${label}`}
+                    className="shrink-0 rounded p-1 text-tbc-200/50 hover:bg-rose-500/15 hover:text-rose-300 disabled:opacity-50"
+                    data-testid={`in-chat-project-delete-${p.id}`}
+                  >
+                    {deleting === p.id
+                      ? <Loader2 className="h-3 w-3 animate-spin" />
+                      : <Trash2 className="h-3 w-3" />}
+                  </button>
                 )}
               </DropdownMenuItem>
             );
