@@ -153,6 +153,9 @@ export default function Dashboard({ variant = 'tbc1' }) {
             ? 'quick question → cheapest model'
             : `${ev.kind} task → best model`;
           toast.info(`Automatic: ${kindLabel}`, { duration: 4000 });
+        } else if (ev.type === 'context7_used') {
+          // Fresh, version-specific library docs were injected via Context7.
+          toast.info('Added up-to-date library docs (Context7)', { duration: 3500 });
         } else if (ev.type === 'fallback_used') {
           // The primary model failed but a fallback caught the stream.
           const failed = (ev.attempted || []).slice(-1)[0] || 'primary model';

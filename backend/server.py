@@ -1190,6 +1190,12 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
         effective_prompt = SYSTEM_PROMPT + learnings_block
     else:
         effective_prompt = SYSTEM_PROMPT
+    # Context7 auto-injection: when the message is a coding/library question,
+    # fetch up-to-date, version-specific docs and append them so answers use
+    # current APIs instead of stale training data. Safe no-op on any failure.
+    context7_block = await build_context_block(req.message)
+    if context7_block:
+        effective_prompt += context7_block
     # The chat instance is built per-attempt inside `event_generator` so the
     # fallback chain can switch providers cleanly. We resolve the *primary*
     # model up front purely as a validation step. The special "auto" id is not
@@ -1265,6 +1271,9 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
                 'kind': auto_kind,
                 'model': primary,
             }) + '\n\n'
+        # Let the UI show that fresh, version-specific docs were pulled in.
+        if context7_block:
+            yield 'data: ' + json.dumps({'type': 'context7_used'}) + '\n\n'
         for idx, model_id in enumerate(attempts):
             # Re-build the LlmChat for this attempt — emergentintegrations
             # binds the model at chat-construction time, so we need a new
@@ -2161,9 +2170,11 @@ from amai_ext import (
     router as amai_router, get_default_model, pick_auto_model,
     record_usage, is_auto_default, AUTO_MODEL_ID,
 )
+from context7_ext import router as context7_router, build_context_block
 app.include_router(operator_search_router)
 app.include_router(user_projects_router)
 app.include_router(amai_router)
+app.include_router(context7_router)
 from operator_backup_ext import router as operator_backup_router
 app.include_router(operator_backup_router)
 from changelog_ext import router as changelog_router

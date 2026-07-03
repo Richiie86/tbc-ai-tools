@@ -3,9 +3,10 @@ import api from '../../lib/api';
 import { Button } from '../../components/ui/button';
 import { toast } from 'sonner';
 import { Switch } from '../../components/ui/switch';
+import { Input } from '../../components/ui/input';
 import {
   BrainCircuit, Loader2, Gauge, Sparkles, Zap, Leaf,
-  CheckCircle2, AlertTriangle, CreditCard, Info, Wand2, TrendingUp, Users,
+  CheckCircle2, AlertTriangle, CreditCard, Info, Wand2, TrendingUp, Users, BookOpen,
 } from 'lucide-react';
 
 /**
@@ -32,12 +33,19 @@ export default function AmAiTab() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(null); // tier id being saved
   const [autoSaving, setAutoSaving] = useState(false);
+  const [c7, setC7] = useState(null);
+  const [c7Saving, setC7Saving] = useState(false);
+  const [c7Key, setC7Key] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const { data } = await api.get('/operator/amai/status');
-      setStatus(data);
+      const [amai, ctx7] = await Promise.all([
+        api.get('/operator/amai/status'),
+        api.get('/operator/context7').catch(() => null),
+      ]);
+      setStatus(amai.data);
+      if (ctx7?.data) setC7(ctx7.data);
     } catch {
       toast.error('Failed to load amAI settings');
     } finally {
@@ -46,6 +54,33 @@ export default function AmAiTab() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  const toggleC7 = async (next) => {
+    setC7Saving(true);
+    try {
+      const { data } = await api.put('/operator/context7', { enabled: next });
+      setC7((c) => ({ ...c, enabled: data.enabled, has_key: data.has_key }));
+      toast.success(next ? 'Context7 ON · fresh docs auto-injected' : 'Context7 OFF');
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Could not toggle Context7');
+    } finally {
+      setC7Saving(false);
+    }
+  };
+
+  const saveC7Key = async () => {
+    setC7Saving(true);
+    try {
+      const { data } = await api.put('/operator/context7', { api_key: c7Key });
+      setC7((c) => ({ ...c, has_key: data.has_key, key_source: c7Key.trim() ? 'settings' : c?.key_source }));
+      setC7Key('');
+      toast.success(c7Key.trim() ? 'Context7 API key saved' : 'Context7 API key cleared');
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Could not save key');
+    } finally {
+      setC7Saving(false);
+    }
+  };
 
   const setTier = async (tierId) => {
     setSaving(tierId);
@@ -199,6 +234,75 @@ export default function AmAiTab() {
           </div>
         )}
       </div>
+
+      {/* Context7 — up-to-date library docs */}
+      {c7 && (
+        <div
+          className="rounded-xl border border-tbc-500/30 bg-gradient-to-br from-tbc-500/[0.06] via-ink-900/60 to-ink-900/60 p-5"
+          data-testid="amai-context7"
+        >
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-tbc-500/15 text-tbc-300">
+                <BookOpen className="h-5 w-5" />
+              </div>
+              <div>
+                <h3 className="flex items-center gap-2 text-base font-bold text-tbc-100">
+                  Context7 docs
+                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                    c7.enabled ? 'bg-emerald-500/20 text-emerald-300' : 'bg-tbc-900/70 text-tbc-300'
+                  }`}>
+                    {c7.enabled ? 'ON' : 'OFF'}
+                  </span>
+                </h3>
+                <p className="mt-1 max-w-xl text-sm text-tbc-200/60">
+                  Automatically pulls up-to-date, version-specific docs from Context7
+                  into the prompt whenever someone asks a coding or library question —
+                  so answers use current APIs instead of stale training data. Only
+                  fires when a known library is detected, so cost stays low.
+                </p>
+              </div>
+            </div>
+            <Switch
+              data-testid="amai-context7-toggle"
+              checked={!!c7.enabled}
+              onCheckedChange={toggleC7}
+              disabled={c7Saving}
+            />
+          </div>
+
+          <div className="mt-4 flex flex-wrap items-center gap-3 text-xs text-tbc-200/50">
+            <span className="rounded-lg bg-ink-950/50 px-2.5 py-1.5">
+              {c7.known_libraries} libraries auto-detected
+            </span>
+            <span className={`rounded-lg px-2.5 py-1.5 ${
+              c7.has_key ? 'bg-emerald-500/10 text-emerald-300' : 'bg-ink-950/50'
+            }`}>
+              {c7.has_key ? `API key set (${c7.key_source})` : 'No key — using free rate limits'}
+            </span>
+          </div>
+
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+            <Input
+              type="password"
+              value={c7Key}
+              onChange={(e) => setC7Key(e.target.value)}
+              placeholder="Optional: paste CONTEXT7_API_KEY (ctx7sk…) for higher limits"
+              className="flex-1 border-tbc-900/70 bg-ink-950/60 text-sm"
+            />
+            <Button
+              onClick={saveC7Key}
+              disabled={c7Saving}
+              className="bg-tbc-600 text-white hover:bg-tbc-500"
+            >
+              {c7Saving ? <Loader2 className="h-4 w-4 animate-spin" /> : (c7Key.trim() ? 'Save key' : 'Clear key')}
+            </Button>
+          </div>
+          <p className="mt-2 text-[11px] text-tbc-200/40">
+            Works without a key. Get a free key at context7.com/dashboard for higher rate limits.
+          </p>
+        </div>
+      )}
 
       {/* Monthly spend */}
       {spend && (
