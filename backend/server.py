@@ -2196,6 +2196,8 @@ from ai_visual_verify_ext import router as ai_visual_verify_router
 app.include_router(ai_visual_verify_router)
 from storage_config_ext import router as storage_config_router
 app.include_router(storage_config_router)
+from deploy_ext import router as deploy_router
+app.include_router(deploy_router)
 from deploy_initial_push_ext import router as deploy_initial_push_router
 app.include_router(deploy_initial_push_router)
 from deploy_suggestions_ext import router as deploy_suggestions_router

@@ -5,6 +5,7 @@ import { Input } from '../../components/ui/input';
 import { toast } from 'sonner';
 import {
   Loader2, Server, Database, Cloud, CheckCircle2, RotateCcw, Save, Zap,
+  Rocket, KeyRound, RefreshCw,
 } from 'lucide-react';
 
 /**
@@ -26,15 +27,32 @@ export default function ServerTab() {
   const [url, setUrl] = useState('');
   const [token, setToken] = useState('');
 
+  // ── Deploy (Render) state ──
+  const [dep, setDep] = useState(null);
+  const [apiKey, setApiKey] = useState('');
+  const [savingKey, setSavingKey] = useState(false);
+  const [services, setServices] = useState([]);
+  const [loadingServices, setLoadingServices] = useState(false);
+  const [deploying, setDeploying] = useState(false);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const { data } = await api.get('/operator/storage/config');
-      setCfg(data);
-      setUrl(data.custom_url || '');
-      setToken('');
-    } catch (e) {
-      toast.error(e?.response?.data?.detail || 'Failed to load storage config');
+      const [storageRes, deployRes] = await Promise.allSettled([
+        api.get('/operator/storage/config'),
+        api.get('/operator/deploy/config'),
+      ]);
+      if (storageRes.status === 'fulfilled') {
+        setCfg(storageRes.value.data);
+        setUrl(storageRes.value.data.custom_url || '');
+        setToken('');
+      } else {
+        toast.error('Failed to load storage config');
+      }
+      if (deployRes.status === 'fulfilled') {
+        setDep(deployRes.value.data);
+        setApiKey('');
+      }
     } finally {
       setLoading(false);
     }
@@ -95,6 +113,69 @@ export default function ServerTab() {
       toast.error(e?.response?.data?.detail || 'Custom server test failed');
     } finally {
       setTesting(false);
+    }
+  };
+
+  // ── Deploy (Render) handlers ──
+  const saveApiKey = async () => {
+    if (!apiKey.trim()) { toast.error('Paste your Render API key first'); return; }
+    setSavingKey(true);
+    try {
+      const { data } = await api.put('/operator/deploy/config', { api_key: apiKey.trim() });
+      setDep(data);
+      setApiKey('');
+      toast.success('Render API key saved');
+      loadServices();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Could not save API key');
+    } finally {
+      setSavingKey(false);
+    }
+  };
+
+  const loadServices = async () => {
+    setLoadingServices(true);
+    try {
+      const { data } = await api.get('/operator/deploy/services');
+      setServices(data.services || []);
+      if (!data.services?.length) toast.info('No Render services found on this account');
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Could not list Render services');
+    } finally {
+      setLoadingServices(false);
+    }
+  };
+
+  const pickService = async (svc) => {
+    try {
+      const { data } = await api.put('/operator/deploy/config', {
+        service_id: svc.id, service_name: svc.name || '',
+      });
+      setDep(data);
+      toast.success(`Selected ${svc.name || svc.id}`);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Could not select service');
+    }
+  };
+
+  const triggerDeploy = async () => {
+    setDeploying(true);
+    try {
+      const { data } = await api.post('/operator/deploy/trigger');
+      toast.success('Deploy triggered on Render', {
+        description: data?.status ? `Status: ${data.status}` : undefined,
+      });
+      // Refresh status shortly after.
+      setTimeout(async () => {
+        try {
+          const { data: s } = await api.get('/operator/deploy/status');
+          setDep((d) => ({ ...(d || {}), last_deploy_status: s.status, last_deploy_id: s.deploy_id }));
+        } catch { /* best-effort */ }
+      }, 3000);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Deploy failed');
+    } finally {
+      setDeploying(false);
     }
   };
 
@@ -251,6 +332,106 @@ export default function ServerTab() {
         MongoDB so a screenshot is never lost. You can switch back to the
         default at any time with one click.
       </p>
+
+      {/* ── Deploy (Render) ───────────────────────────────────────── */}
+      <header className="flex items-center gap-3 pt-4">
+        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-tbc-500/10 text-tbc-300">
+          <Rocket className="h-5 w-5" />
+        </div>
+        <div>
+          <h2 className="text-lg font-bold text-tbc-100">Backend deploy</h2>
+          <p className="text-sm text-tbc-200/60">
+            Paste your Render API key to redeploy the backend from inside the app.
+          </p>
+        </div>
+      </header>
+
+      <section className="rounded-lg border border-tbc-900/60 bg-ink-900/40 p-4 space-y-4">
+        {/* API key */}
+        <div>
+          <label className="mb-1 block text-xs font-medium text-tbc-200/70">
+            <KeyRound className="mr-1 inline h-3.5 w-3.5" />
+            Render API key{' '}
+            <span className="text-tbc-200/40">
+              {dep?.api_key_set ? '(set — leave blank to keep)' : '(get it from Render → Account Settings → API Keys)'}
+            </span>
+          </label>
+          <div className="flex flex-wrap gap-2">
+            <Input
+              type="password"
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              placeholder={dep?.api_key_set ? '•••••••••••••••• (saved)' : 'rnd_xxxxxxxxxxxxxxxxxxxx'}
+              className="flex-1 min-w-[220px] bg-ink-950 font-mono text-sm"
+            />
+            <Button onClick={saveApiKey} disabled={savingKey} className="bg-tbc-500 font-bold text-ink-950 hover:bg-tbc-400">
+              {savingKey ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Save className="mr-1.5 h-4 w-4" />Save key</>}
+            </Button>
+          </div>
+        </div>
+
+        {/* Service picker */}
+        {dep?.api_key_set && (
+          <div>
+            <div className="mb-1 flex items-center justify-between">
+              <label className="text-xs font-medium text-tbc-200/70">
+                Service to deploy
+                {dep?.service_name && (
+                  <span className="ml-2 font-bold text-tbc-100">{dep.service_name}</span>
+                )}
+              </label>
+              <Button onClick={loadServices} disabled={loadingServices} variant="outline" size="sm" className="h-7 text-xs">
+                {loadingServices ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <><RefreshCw className="mr-1 h-3.5 w-3.5" />Load services</>}
+              </Button>
+            </div>
+            {services.length > 0 && (
+              <div className="mt-2 grid gap-1.5">
+                {services.map((svc) => (
+                  <button
+                    key={svc.id}
+                    type="button"
+                    onClick={() => pickService(svc)}
+                    className={`flex items-center justify-between rounded border px-3 py-2 text-left text-sm transition ${
+                      dep?.service_id === svc.id
+                        ? 'border-tbc-500/50 bg-tbc-500/[0.08] text-tbc-100'
+                        : 'border-tbc-900/60 bg-ink-950 text-tbc-200/80 hover:bg-ink-900'
+                    }`}
+                  >
+                    <span className="flex items-center gap-2">
+                      <Server className="h-4 w-4 text-tbc-300" />
+                      <span className="font-medium">{svc.name || svc.id}</span>
+                      {svc.branch && <code className="text-[10px] text-tbc-200/40">{svc.branch}</code>}
+                    </span>
+                    {dep?.service_id === svc.id && <CheckCircle2 className="h-4 w-4 text-tbc-300" />}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Deploy button + status */}
+        <div className="flex flex-wrap items-center gap-3 border-t border-tbc-900/60 pt-4">
+          <Button
+            onClick={triggerDeploy}
+            disabled={deploying || (!dep?.service_id && !dep?.hook_set)}
+            className="bg-emerald-500 font-bold text-ink-950 hover:bg-emerald-400"
+          >
+            {deploying ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Rocket className="mr-1.5 h-4 w-4" />Deploy latest commit</>}
+          </Button>
+          {dep?.last_deploy_status && (
+            <span className="text-xs text-tbc-200/60">
+              Last deploy: <span className="font-bold text-tbc-100">{dep.last_deploy_status}</span>
+              {dep.last_deploy_at && (
+                <span className="text-tbc-200/40"> · {new Date(dep.last_deploy_at).toLocaleString()}</span>
+              )}
+            </span>
+          )}
+          {!dep?.service_id && !dep?.hook_set && (
+            <span className="text-xs text-tbc-200/40">Save your API key and pick a service to enable deploys.</span>
+          )}
+        </div>
+      </section>
     </div>
   );
 }
