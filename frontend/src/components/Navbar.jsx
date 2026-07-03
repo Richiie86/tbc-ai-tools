@@ -50,13 +50,13 @@ export default function Navbar({ minimal = false }) {
   return (
     <header className="sticky top-0 z-40 w-full border-b border-slate-800/80 bg-ink-950/70 backdrop-blur-xl">
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-5">
-        <Link to="/" className="flex items-center gap-2.5">
-          <div className="relative grid h-9 w-9 place-items-center overflow-hidden rounded-lg bg-ink-950 ring-1 ring-tbc-500/30 shadow-lg shadow-tbc-500/20">
+        <Link to="/" className="flex min-w-0 items-center gap-2.5">
+          <div className="relative grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-lg bg-ink-950 ring-1 ring-tbc-500/30 shadow-lg shadow-tbc-500/20">
             <img src="/brand/logo.jpg" alt="TBC AI Tools" className="h-full w-full object-cover" draggable={false} />
           </div>
-          <div className="leading-tight">
-            <div className="text-[15px] font-bold tracking-tight text-white">TBC AI Tools</div>
-            <div className="text-[10px] uppercase tracking-[0.18em] text-tbc-400/80">TradeBridge Club</div>
+          <div className="min-w-0 leading-tight">
+            <div className="truncate text-[15px] font-bold tracking-tight text-white">TBC AI Tools</div>
+            <div className="truncate text-[10px] uppercase tracking-[0.18em] text-tbc-400/80">TradeBridge Club</div>
           </div>
         </Link>
 
@@ -83,14 +83,16 @@ export default function Navbar({ minimal = false }) {
           </nav>
         )}
 
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
           {user ? (
             <>
               {/* Operator-only command palette — sits between the nav
-                  links (Contact) and the credits pill. Hidden for
-                  everyone else (zero visual noise for regular users).
-                  Keyboard: `/` or ⌘K from anywhere on the page. */}
-              {user.role === 'operator' && <OperatorSearch />}
+                  links (Contact) and the credits pill. Hidden on small
+                  screens (and for non-operators) to keep the mobile header
+                  uncluttered. Keyboard: `/` or ⌘K from anywhere. */}
+              {user.role === 'operator' && (
+                <span className="hidden sm:inline-flex"><OperatorSearch /></span>
+              )}
               {/* Always-visible credit chip so users never lose sight of their
                   budget. Tapping it jumps to the Pricing page for a top-up. */}
               <CreditsBadge user={user} testid="nav-credits-badge" />

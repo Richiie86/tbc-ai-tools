@@ -39,19 +39,24 @@ export function DashboardHeader({
         )}
         <div className="hidden whitespace-nowrap text-sm font-semibold text-white sm:block">{brandTitle}</div>
       </div>
-      <div className="flex min-w-0 items-center gap-3 overflow-x-auto [&>*]:shrink-0">
-        {/* Operator-only deploy controls so we can ship code from inside chat. */}
-        <InChatDeployControls user={user} />
-        <NotificationsBell />
-        {/* Credits badge sits right next to the model picker so users
-            always see how much budget they have left while chatting. */}
-        <CreditsBadge user={user} testid="dashboard-credits-badge" />
-        {/* Live "am I signed in?" status — green = OK, amber = network
-            issue, red = session expired. Hovers to a tooltip with the
-            current status. */}
-        <SessionStatusDot position="inline" />
-        <DashboardGuideButton onOpen={onOpenGuide} />
-        <ModelPicker models={models} model={model} setModel={setModel} />
+      <div className="flex min-w-0 flex-1 items-center justify-end gap-2 sm:gap-3">
+        {/* Lower-priority controls live in a horizontal scroll strip so they
+            never push the always-visible credits pill off screen on phones. */}
+        <div className="flex min-w-0 items-center gap-2 overflow-x-auto scrollbar-none sm:gap-3 [&>*]:shrink-0">
+          {/* Operator-only deploy controls so we can ship code from inside chat. */}
+          <InChatDeployControls user={user} />
+          <NotificationsBell />
+          <DashboardGuideButton onOpen={onOpenGuide} />
+          <ModelPicker models={models} model={model} setModel={setModel} />
+        </div>
+        {/* Always-visible cluster: credits (so users never lose sight of their
+            budget) + live session status. Pinned outside the scroll strip. */}
+        <div className="flex shrink-0 items-center gap-2">
+          <CreditsBadge user={user} testid="dashboard-credits-badge" />
+          {/* Live "am I signed in?" status — green = OK, amber = network
+              issue, red = session expired. */}
+          <SessionStatusDot position="inline" />
+        </div>
       </div>
     </div>
   );
@@ -91,7 +96,7 @@ function ModelPicker({ models, model, setModel }) {
 
   return (
     <Select value={model} onValueChange={setModel}>
-      <SelectTrigger className="h-9 w-[230px] border-slate-700 bg-slate-900 text-slate-100">
+      <SelectTrigger className="h-9 w-[140px] border-slate-700 bg-slate-900 text-slate-100 sm:w-[230px]">
         <div className="flex items-center gap-2 text-sm">
           <Cpu className="h-3.5 w-3.5 text-tbc-400" />
           <SelectValue placeholder="Select model" />

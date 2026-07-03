@@ -4,13 +4,36 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
+html, body {
   margin: 0;
+  /* Never let a stray wide element create a horizontal scrollbar / cut-off
+     content on phones. Individual scroll strips opt back in with overflow-x. */
+  max-width: 100%;
+  overflow-x: hidden;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   background: #07090f;
   color: #e5e7eb;
+  /* Respect iOS notches / home indicator so nothing hides under them. */
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+#root, .App { max-width: 100%; }
+
+/* Media should shrink to its container instead of forcing the page wide.
+   (Sized lucide icons use explicit width/height so this only caps overflow.) */
+img, video, canvas, iframe { max-width: 100%; height: auto; }
+
+/* Long unbroken strings (URLs, tokens, IDs) wrap instead of overflowing. */
+p, li, span, a, h1, h2, h3, h4, td, th, dd, dt { overflow-wrap: anywhere; }
+
+/* Comfortable tap targets on touch devices without disturbing desktop. */
+@media (hover: none) and (pointer: coarse) {
+  button, [role='button'], a.btn, .tap-target {
+    min-height: 40px;
+  }
 }
 
 code, pre {
