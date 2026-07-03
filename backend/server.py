@@ -1345,7 +1345,7 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
     # Replay history into the chat object so context is preserved across stateless requests
     # The library tracks history per-instance; we use stream with the new user message.
     # Prior turns are recorded in our DB and replayed as context via a single combined message.
-    # NOTE: emergentintegrations LlmChat maintains its own history only within instance lifetime.
+    # NOTE: llm_router's LlmChat maintains its own history only within instance lifetime.
     # We pass the new user message; for cross-request memory we prepend recent context.
     context_window = history[-20:-1]  # exclude the just-added user message
     if context_window:
@@ -1356,7 +1356,7 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
     else:
         prompt = req.message
 
-    # Build image attachments — emergentintegrations accepts a list of
+    # Build image attachments — llm_router accepts a list of
     # `ImageContent` (one per image) passed alongside the text on the
     # UserMessage. We only forward images; text/PDF attachments stay as
     # plain text appended to the prompt so non-vision models still see
@@ -1373,7 +1373,7 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
                 if image_count >= 6:
                     continue
                 try:
-                    # ImageContent in emergentintegrations only takes the
+                    # ImageContent in llm_router only takes the
                     # raw base64 — mime is auto-detected from the bytes.
                     image_blocks.append(ImageContent(image_base64=att.content))
                     image_count += 1
@@ -1418,7 +1418,7 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
         if tools_used:
             yield 'data: ' + json.dumps({'type': 'tools_used', 'tools': tools_used}) + '\n\n'
         for idx, model_id in enumerate(attempts):
-            # Re-build the LlmChat for this attempt — emergentintegrations
+            # Re-build the LlmChat for this attempt — llm_router
             # binds the model at chat-construction time, so we need a new
             # instance per attempt to switch providers cleanly.
             provider_i, model_name_i = resolve_model(model_id)
@@ -1429,7 +1429,7 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
             ).with_model(provider_i, model_name_i)
             try:
                 # Build the user message — text + any image blocks. The
-                # `file_contents` keyword is what emergentintegrations
+                # `file_contents` keyword is what llm_router
                 # exposes for the multimodal payload; when empty we send
                 # plain text so non-vision providers don't see an empty
                 # list and freak out.
@@ -2379,9 +2379,8 @@ elif _cors_env:
 else:
     app.add_middleware(
         CORSMiddleware,
-        # Production domain + preview/Emergent subdomains. `www.` prefix
-        # supported via the optional capture group.
-        allow_origin_regex=r'^https://([a-z0-9-]+\.)?(preview\.emergentagent\.com|emergent\.host|tbctools\.org|www\.tbctools\.org)(:\d+)?$',
+        # Production domain (+ optional `www.` / other subdomain prefix).
+        allow_origin_regex=r'^https://([a-z0-9-]+\.)?(tbctools\.org|www\.tbctools\.org)(:\d+)?$',
         allow_credentials=True,
         allow_methods=['*'],
         allow_headers=['*'],

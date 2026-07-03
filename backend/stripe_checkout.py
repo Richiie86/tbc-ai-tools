@@ -1,7 +1,6 @@
-"""Native-Stripe drop-in replacement for the checkout helper that used to
-come from `emergentintegrations.payments.stripe.checkout`.
+"""Native-Stripe checkout helper built directly on the official `stripe` SDK.
 
-It preserves the exact API the call sites rely on:
+It exposes the exact API the call sites rely on:
 
     from stripe_checkout import StripeCheckout, CheckoutSessionRequest
 
@@ -85,8 +84,7 @@ class WebhookEventResponse:
 
 
 class StripeCheckout:
-    """Thin async wrapper over the native Stripe SDK that reproduces the
-    surface previously provided by emergentintegrations."""
+    """Thin async wrapper over the native Stripe SDK."""
 
     def __init__(self, api_key: str, webhook_url: str = '', webhook_secret: str = ''):
         self.api_key = api_key or ''

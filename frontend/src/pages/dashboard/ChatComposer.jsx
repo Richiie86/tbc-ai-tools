@@ -4,9 +4,9 @@ import { Textarea } from '../../components/ui/textarea';
 import { Send, Loader2, ImagePlus, X } from 'lucide-react';
 import { toast } from 'sonner';
 
-// Per-image hard cap. emergentintegrations + each provider all have token
-// budgets that explode with large base64 payloads — keeping each image
-// ≤4MB is a good balance between quality and cost.
+// Per-image hard cap. Each provider has token budgets that explode with
+// large base64 payloads — keeping each image ≤4MB is a good balance
+// between quality and cost.
 const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
 // Per-send cap. The backend also enforces 6 images; this is the UI guard.
 const MAX_IMAGES = 6;
