@@ -143,9 +143,10 @@ async def run_suggestions(
         raise HTTPException(412, 'Project has no GitHub repo configured.')
 
     settings = await db.settings.find_one({'_id': 'payment_settings'}) or {}
-    llm_key = settings.get('emergent_llm_key') or os.environ.get('EMERGENT_LLM_KEY')
-    if not llm_key:
-        raise HTTPException(503, 'EMERGENT_LLM_KEY not configured.')
+    from llm_router import _openai_key
+    llm_key = ''  # legacy placeholder — llm_router uses the provider key
+    if not await _openai_key():
+        raise HTTPException(503, 'No OpenAI API key configured (Operator → Security).')
     gh_token = settings.get('github_token') or os.environ.get('GITHUB_TOKEN')
 
     # 30-minute cache — same key shape as the code review module so

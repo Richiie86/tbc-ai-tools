@@ -113,7 +113,7 @@ export default function AutoFixCard() {
         {cfg.enabled && (
           <p className="mt-2 text-[10px] text-amber-300/80">
             <AlertTriangle className="mr-1 inline h-3 w-3 -mt-0.5" />
-            Requires <code>github_token</code> + <code>emergent_llm_key</code> in Security above.
+            Requires <code>github_token</code> + <code>openai_api_key</code> in Security above.
           </p>
         )}
 

@@ -40,6 +40,7 @@ from pydantic import BaseModel, Field
 
 from auth_utils import get_current_operator
 from db import db
+from rate_limit import rate_limit_operator
 from vercel_api_ext import VERCEL_API, vercel_team_qs as vercel_team_params, vercel_token
 
 logger = logging.getLogger('tbc')
@@ -50,6 +51,15 @@ router = APIRouter(prefix='/api/operator/ai-build', tags=['ai-build'])
 GITHUB_API = 'https://api.github.com'
 _MAX_PATCH_BYTES = 80 * 1024
 _MAX_FILES_PER_REQUEST = 12
+
+# Rate limits for the LLM-backed endpoints. These cap how often a single
+# operator account can trigger paid model calls, so a compromised account
+# can't rack up unbounded spend through rapid plan/review/PR loops.
+# Override via env vars without a code change.
+_PLAN_RATE_LIMIT = int(os.environ.get('AI_BUILD_PLAN_LIMIT', '10'))
+_PLAN_RATE_WINDOW = int(os.environ.get('AI_BUILD_PLAN_WINDOW', '60'))
+_PR_RATE_LIMIT = int(os.environ.get('AI_BUILD_PR_LIMIT', '20'))
+_PR_RATE_WINDOW = int(os.environ.get('AI_BUILD_PR_WINDOW', '60'))
 
 # Model used for the cross-AI patch reviewer. The old hardcoded
 # "claude-opus-4-5" is NOT a real model id and the Emergent/litellm gateway
@@ -335,6 +345,9 @@ async def plan(req: PlanRequest, user: dict = Depends(get_current_operator)):
     Stored in `ai_build_plans` so the follow-up `/open-pr` call doesn't
     need to re-run the LLM. Plans expire after 24h via index TTL.
     """
+    # Cap paid LLM planning calls per operator to prevent runaway spend.
+    rate_limit_operator(user, 'ai-build:plan', limit=_PLAN_RATE_LIMIT, window_seconds=_PLAN_RATE_WINDOW)
+
     from llm_router import LlmChat, UserMessage
 
     project = await db.deploy_projects.find_one({'id': req.project_id})
@@ -348,9 +361,10 @@ async def plan(req: PlanRequest, user: dict = Depends(get_current_operator)):
     gh_token = settings.get('github_token') or os.environ.get('GITHUB_TOKEN')
     if not gh_token:
         raise HTTPException(503, 'github_token not set in Operator → Security.')
-    llm_key = settings.get('emergent_llm_key') or os.environ.get('EMERGENT_LLM_KEY')
-    if not llm_key:
-        raise HTTPException(503, 'EMERGENT_LLM_KEY not configured.')
+    from llm_router import _anthropic_key
+    llm_key = ''  # legacy placeholder — llm_router uses the provider key
+    if not await _anthropic_key():
+        raise HTTPException(503, 'No Anthropic API key configured (Operator → Security).')
 
     ref = project.get('gitRef') or 'main'
     async with httpx.AsyncClient(timeout=20.0) as client:
@@ -468,6 +482,9 @@ async def open_pr(req: OpenPRRequest, user: dict = Depends(get_current_operator)
     failure mid-commit leaves the branch with partial changes — operator
     can still inspect the PR or delete the branch.
     """
+    # Cap PR-open calls per operator (these also run a cross-AI review LLM pass).
+    rate_limit_operator(user, 'ai-build:open-pr', limit=_PR_RATE_LIMIT, window_seconds=_PR_RATE_WINDOW)
+
     doc = await db.ai_build_plans.find_one({'plan_id': req.plan_id})
     if not doc:
         raise HTTPException(404, 'Plan not found (expired?)')

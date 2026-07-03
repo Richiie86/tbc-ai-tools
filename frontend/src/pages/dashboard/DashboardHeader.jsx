@@ -1,9 +1,10 @@
-import React from 'react';
-import { Cpu, Menu } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { Cpu, Menu, Search } from 'lucide-react';
 import {
   Select, SelectContent, SelectGroup, SelectItem, SelectLabel,
   SelectTrigger, SelectValue,
 } from '../../components/ui/select';
+import { Input } from '../../components/ui/input';
 import CreditsBadge from '../../components/CreditsBadge';
 import SessionStatusDot from '../../components/SessionStatusDot';
 import { InChatDeployControls } from './InChatDeployControls';
@@ -50,25 +51,91 @@ export function DashboardHeader({
             current status. */}
         <SessionStatusDot position="inline" />
         <DashboardGuideButton onOpen={onOpenGuide} />
-        <Select value={model} onValueChange={setModel}>
-          <SelectTrigger className="h-9 w-[230px] border-slate-700 bg-slate-900 text-slate-100">
-            <div className="flex items-center gap-2 text-sm">
-              <Cpu className="h-3.5 w-3.5 text-tbc-400" />
-              <SelectValue placeholder="Select model" />
-            </div>
-          </SelectTrigger>
-          <SelectContent className="border-slate-800 bg-slate-900 text-slate-100">
-            {Object.entries(models.providers || {}).map(([provider, items]) => (
-              <SelectGroup key={provider}>
-                <SelectLabel className="text-[10px] uppercase tracking-wider text-slate-500">{provider}</SelectLabel>
-                {items.map((m) => (
-                  <SelectItem key={m.id} value={m.id} className="focus:bg-slate-800">{m.label}</SelectItem>
-                ))}
-              </SelectGroup>
-            ))}
-          </SelectContent>
-        </Select>
+        <ModelPicker models={models} model={model} setModel={setModel} />
       </div>
     </div>
+  );
+}
+
+/**
+ * Provider/model dropdown with a built-in search box. The search is essential
+ * once OpenRouter is connected because it adds 300+ models — scrolling would
+ * be unusable. Filtering matches on both the human label and the raw id, and
+ * the currently-selected model is always kept visible so SelectValue can
+ * render it even when it's filtered out of the list.
+ */
+function ModelPicker({ models, model, setModel }) {
+  const [q, setQ] = useState('');
+
+  const filtered = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    const groups = Object.entries(models.providers || {});
+    if (!needle) return groups;
+    return groups
+      .map(([provider, items]) => [
+        provider,
+        items.filter(
+          (m) =>
+            m.id === model ||
+            (m.label || '').toLowerCase().includes(needle) ||
+            (m.id || '').toLowerCase().includes(needle),
+        ),
+      ])
+      .filter(([, items]) => items.length > 0);
+  }, [models.providers, q, model]);
+
+  const totalCount = useMemo(
+    () => Object.values(models.providers || {}).reduce((n, items) => n + items.length, 0),
+    [models.providers],
+  );
+
+  return (
+    <Select value={model} onValueChange={setModel}>
+      <SelectTrigger className="h-9 w-[230px] border-slate-700 bg-slate-900 text-slate-100">
+        <div className="flex items-center gap-2 text-sm">
+          <Cpu className="h-3.5 w-3.5 text-tbc-400" />
+          <SelectValue placeholder="Select model" />
+        </div>
+      </SelectTrigger>
+      <SelectContent className="border-slate-800 bg-slate-900 text-slate-100">
+        {/* Sticky search box. stopPropagation on keydown keeps Radix Select's
+            built-in typeahead from stealing the keystrokes. */}
+        <div className="sticky top-0 z-10 -mx-1 mb-1 border-b border-slate-800 bg-slate-900 px-2 py-2">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-500" />
+            <Input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              onKeyDown={(e) => e.stopPropagation()}
+              placeholder={`Search ${totalCount} models…`}
+              className="h-8 border-slate-700 bg-slate-950 pl-7 text-xs text-slate-100"
+              data-testid="model-search"
+            />
+          </div>
+        </div>
+
+        {!q && models.auto && (
+          <SelectGroup>
+            <SelectLabel className="text-[10px] uppercase tracking-wider text-slate-500">Smart</SelectLabel>
+            <SelectItem value={models.auto.id} className="focus:bg-slate-800">
+              {models.auto.label}
+            </SelectItem>
+          </SelectGroup>
+        )}
+        {filtered.map(([provider, items]) => (
+          <SelectGroup key={provider}>
+            <SelectLabel className="text-[10px] uppercase tracking-wider text-slate-500">{provider}</SelectLabel>
+            {items.map((m) => (
+              <SelectItem key={m.id} value={m.id} className="focus:bg-slate-800">{m.label}</SelectItem>
+            ))}
+          </SelectGroup>
+        ))}
+        {q && filtered.length === 0 && (
+          <div className="px-3 py-6 text-center text-xs text-slate-500">
+            No models match “{q}”.
+          </div>
+        )}
+      </SelectContent>
+    </Select>
   );
 }

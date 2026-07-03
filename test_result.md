@@ -115,7 +115,7 @@ backend:
     status_history:
         - working: "NA"
           agent: "main"
-          comment: "Returns {service, status}. Operator user is seeded at startup with email rac.invetments.swe@gmail.com / password TBC@2025!Admin."
+          comment: "Returns {service, status}. Operator user is seeded at startup from the OPERATOR_EMAIL / OPERATOR_PASSWORD environment variables (no credentials stored here)."
         - working: true
           agent: "testing"
           comment: "✅ PASS - GET /api/ returns {service: 'TBC AI Control', status: 'online'}. Tested successfully."
@@ -526,7 +526,7 @@ test_plan:
 
 agent_communication:
     - agent: "main"
-      message: "Massive expansion: added TBC2 route (/tbc2), editable plans, treasury (bank+crypto), payment settings (API keys stored in DB), manual payment flow (crypto QR + bank transfer with proof submission), PDF receipts (single + date-range export), licenses + royalty system (10% flat to operator), and operator UI tabs for all of the above. Theme switched to dark near-black + champagne gold (matches tradebridgeclub.com). Please test: GET /api/payments/plans (DB-backed), GET /api/payments/methods, GET /api/payments/treasury/active (no treasury → 404), operator CRUD on /api/operator/plans, /api/operator/treasury, /api/operator/settings, /api/operator/licenses, POST /api/license/report-earnings, /api/operator/royalties, manual payment submission/confirm/reject, PDF generation /api/operator/transactions/{id}/receipt and /api/operator/transactions/export?from=...&to=... — verify these return PDFs (binary). Use operator token (rac.invetments.swe@gmail.com / TBC@2025!Admin). For royalty testing: create a license, call /api/license/report-earnings with that key + a fake amount, verify a royalty record appears in /api/operator/royalties."
+      message: "Massive expansion: added TBC2 route (/tbc2), editable plans, treasury (bank+crypto), payment settings (API keys stored in DB), manual payment flow (crypto QR + bank transfer with proof submission), PDF receipts (single + date-range export), licenses + royalty system (10% flat to operator), and operator UI tabs for all of the above. Theme switched to dark near-black + champagne gold (matches tradebridgeclub.com). Please test: GET /api/payments/plans (DB-backed), GET /api/payments/methods, GET /api/payments/treasury/active (no treasury → 404), operator CRUD on /api/operator/plans, /api/operator/treasury, /api/operator/settings, /api/operator/licenses, POST /api/license/report-earnings, /api/operator/royalties, manual payment submission/confirm/reject, PDF generation /api/operator/transactions/{id}/receipt and /api/operator/transactions/export?from=...&to=... — verify these return PDFs (binary). Use operator token (credentials from OPERATOR_EMAIL / OPERATOR_PASSWORD env vars). For royalty testing: create a license, call /api/license/report-earnings with that key + a fake amount, verify a royalty record appears in /api/operator/royalties."
     - agent: "testing"
       message: "26/27 tests passed. All auth (register/login/2FA), chat CRUD, SSE streaming (claude-sonnet-4-6, gemini-3-flash-preview), Stripe checkout/status, contact form, operator routes, and authorization checks working. Only gpt-5.4 model name not available in Emergent LLM API."
     - agent: "main"

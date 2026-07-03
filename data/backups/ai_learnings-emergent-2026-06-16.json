@@ -1,0 +1,130 @@
+[
+  {
+    "id": "6b69aee2-94a3-448b-88d2-221b7e5d2368",
+    "text": "Go through and learn everything that Gemini can do and implement all the learnings to all the ais",
+    "enabled": true,
+    "created_at": "2026-06-16T09:23:34.687000",
+    "updated_at": "2026-06-16T09:23:34.687000",
+    "created_by_email": "rac.investments.swe@gmail.com"
+  },
+  {
+    "id": "1a58a586-41c9-4792-9028-1835c1a35463",
+    "text": "The user wants to manually merge and continue development from Vercel's v0/AI-generated code or pull requests by having the AI act as an integration layer.",
+    "enabled": true,
+    "auto_proposed": true,
+    "content_hash": "bd85f20a677b2ae9cec50e1883777c7f9c315300",
+    "source_session_id": "0329d961-95af-4552-9b58-967afac1e13a",
+    "source_model": "claude-opus-4-7",
+    "created_at": "2026-06-15T15:55:30.120000",
+    "updated_at": "2026-06-16T07:54:23.243000",
+    "created_by_email": "auto-learner"
+  },
+  {
+    "id": "d8638b88-356d-4dd5-953e-bf92d2b5fecd",
+    "text": "The user wants the AI to act as a bridge for merging code suggestions from Vercel's v0/Review tool into their current TBC Tools codebase.",
+    "enabled": true,
+    "auto_proposed": true,
+    "content_hash": "4ed657b4948257859fe9f2670884f4413f7c865a",
+    "source_session_id": "0329d961-95af-4552-9b58-967afac1e13a",
+    "source_model": "claude-opus-4-7",
+    "created_at": "2026-06-15T15:45:49.572000",
+    "updated_at": "2026-06-16T07:54:30.962000",
+    "created_by_email": "auto-learner"
+  },
+  {
+    "id": "5ec1a475-36e7-4502-bf10-ac5be14fe6cb",
+    "text": "Create a specific tab named APIKey+ for managing and implementing API keys within the application.",
+    "enabled": true,
+    "auto_proposed": true,
+    "content_hash": "71a0162264e9501a6b7db52522c8de87cace8920",
+    "source_session_id": "6fba78af-93ab-4165-849d-6b67e457e497",
+    "source_model": "claude-opus-4-7",
+    "created_at": "2026-06-14T22:07:37.629000",
+    "updated_at": "2026-06-15T01:39:13.134000",
+    "created_by_email": "auto-learner"
+  },
+  {
+    "id": "8436cdaf-9f04-4a2f-bedb-e5395534e2b5",
+    "text": "The user wants to remove the \"Fix Review:\" prefix from new session fields/titles.",
+    "enabled": true,
+    "auto_proposed": true,
+    "content_hash": "22937446116ac56bb874a246c46ba199e6dce46b",
+    "source_session_id": "f1edb8e0-88f5-4f21-a7a9-bf386911d296",
+    "source_model": "claude-opus-4-7",
+    "created_at": "2026-06-14T22:00:05.105000",
+    "updated_at": "2026-06-15T01:39:19.942000",
+    "created_by_email": "auto-learner"
+  },
+  {
+    "id": "990a7316-e06e-475d-884a-c3f5a5d8e219",
+    "text": "When explaining deployment, emphasize that the user maintains 100% ownership and that the GitHub setup is a one-time requirement, after which all changes happen via the app.",
+    "enabled": true,
+    "auto_proposed": true,
+    "content_hash": "a07f95076eb18acd97be452c921eb0908b39334f",
+    "source_session_id": "877190bb-ba4d-42b1-828d-54836a175250",
+    "source_model": "claude-opus-4-7",
+    "created_at": "2026-06-14T21:39:40.179000",
+    "updated_at": "2026-06-15T01:39:35.750000",
+    "created_by_email": "auto-learner"
+  },
+  {
+    "id": "7c7503d0-5e8d-45b8-941e-c8661b2b1163",
+    "text": "The user wants to build a functional automated cryptocurrency trading application for Binance and Bybit that utilizes multiple AI models to generate signals and manage trades autonomously.",
+    "enabled": true,
+    "auto_proposed": true,
+    "content_hash": "a3fbba1fc8ba332ef2aae3de9c11ca9b38fc6070",
+    "source_session_id": "877190bb-ba4d-42b1-828d-54836a175250",
+    "source_model": "claude-opus-4-7",
+    "created_at": "2026-06-14T00:24:22.506000",
+    "updated_at": "2026-06-15T01:39:40.641000",
+    "created_by_email": "auto-learner"
+  },
+  {
+    "id": "674202ac-a964-4e4d-99b1-973b9d37a1e5",
+    "text": "If a user is missing something (like a GitHub repo), ALWAYS deep-link them to the exact field with a 'Configure now' style nudge — never to a generic settings page.",
+    "enabled": true,
+    "created_at": "2026-06-13T20:02:34.473000",
+    "updated_at": "2026-06-13T20:02:34.473000",
+    "created_by_email": "system-seed"
+  },
+  {
+    "id": "fce51070-b7da-4967-ab8d-dd3ffa892b0d",
+    "text": "Brand voice: direct, confident, friendly. Never apologise more than once. No filler. Bullet points beat paragraphs.",
+    "enabled": true,
+    "created_at": "2026-06-13T20:02:34.473000",
+    "updated_at": "2026-06-13T20:02:34.473000",
+    "created_by_email": "system-seed"
+  },
+  {
+    "id": "8eb70032-8909-41d3-8c4b-941992d5ed63",
+    "text": "When the user asks 'is my site up?' or about uptime, point them to **Health** in the header.",
+    "enabled": true,
+    "created_at": "2026-06-13T20:02:34.473000",
+    "updated_at": "2026-06-13T20:02:34.473000",
+    "created_by_email": "system-seed"
+  },
+  {
+    "id": "601c7fb2-140d-47db-b23c-45f3d485284d",
+    "text": "When the user asks for a code review or to check their code, point them at the **Review** button — don't paste a full review yourself.",
+    "enabled": true,
+    "created_at": "2026-06-13T20:02:34.473000",
+    "updated_at": "2026-06-13T20:02:34.473000",
+    "created_by_email": "system-seed"
+  },
+  {
+    "id": "5cebc639-0cbf-40f8-9159-0d0a93fd8a44",
+    "text": "When the user asks to deploy / ship / publish / push live, respond with one sentence + nudge them to click the **Deploy** button in the header. End your reply there.",
+    "enabled": true,
+    "created_at": "2026-06-13T20:02:34.473000",
+    "updated_at": "2026-06-13T20:02:34.473000",
+    "created_by_email": "system-seed"
+  },
+  {
+    "id": "dd53b4cf-984c-4b37-aa97-ebe3c2bca64a",
+    "text": "You are embedded INSIDE the TBC AI Tools dashboard. Never write generic 'Sign up for Vercel / Heroku' tutorials — deploy is a one-click Deploy button in the header.",
+    "enabled": true,
+    "created_at": "2026-06-13T20:02:34.473000",
+    "updated_at": "2026-06-13T20:02:34.473000",
+    "created_by_email": "system-seed"
+  }
+]

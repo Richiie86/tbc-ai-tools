@@ -1,15 +1,132 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import { Button } from '../components/ui/button';
 import { Card } from '../components/ui/card';
 import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+} from '../components/ui/dialog';
+import {
   Sparkles, Cpu, ShieldCheck, Zap, Code2, MessagesSquare,
   Bot, GitBranch, Layers, ArrowRight, Check, TrendingUp,
-  LineChart, Lock, Globe, Share2,
+  LineChart, Lock, Globe, Share2, BrainCircuit, BookOpenCheck, Search,
 } from 'lucide-react';
 import ShareButtons from '../components/ShareButtons';
+
+// Extended copy for each capability card. Clicking a card opens a detail
+// dialog ("new view") so the homepage tiles are actually interactive instead
+// of being dead decoration.
+const FEATURES = [
+  {
+    icon: BrainCircuit,
+    title: 'Automatic model routing (amAI)',
+    desc: 'Never pick a model again — amAI sends each message to the right AI and saves you credits.',
+    long: 'amAI reads every message and quietly routes it to the best model for the job: a fast, inexpensive model for quick questions and a powerful one for real engineering. You get great answers without overpaying, and a small note tells you which model was chosen and why.',
+    points: [
+      'Cheap-and-fast for simple questions, powerful for hard problems',
+      'Automatic — no manual switching, no guesswork',
+      'Transparent: see which model handled each message',
+    ],
+    cta: { label: 'Try Automatic mode', to: '/register' },
+  },
+  {
+    icon: BookOpenCheck,
+    title: 'Always-current code docs',
+    desc: 'Fresh, version-specific documentation is pulled into coding answers automatically.',
+    long: 'Ask about React, Next.js, Tailwind, or dozens of other libraries and TBC automatically fetches the newest official docs (via Context7) before answering. You even name a version — "Next.js 14 routing" — and it pins docs to exactly that release, so the code it writes actually runs.',
+    points: [
+      'Newest official docs folded into answers in real time',
+      'Version-aware — target the exact release you use',
+      'Far fewer outdated snippets and deprecated APIs',
+    ],
+    cta: { label: 'Build with current docs', to: '/register' },
+  },
+  {
+    icon: Search,
+    title: 'Live web search & step-by-step reasoning',
+    desc: 'The AI can search the live web for current facts and plan complex tasks methodically.',
+    long: 'When a question needs up-to-date, real-world information, TBC searches the live web and folds the results into its reply instead of relying only on training data. For big, multi-part tasks it can switch on structured step-by-step reasoning so nothing gets missed.',
+    points: [
+      'Live web results for current news, versions, and prices',
+      'Structured step-by-step planning for complex builds',
+      'You see exactly when each tool was used',
+    ],
+    cta: { label: 'See it in action', to: '/register' },
+  },
+  {
+    icon: Code2,
+    title: 'Full-stack code generation',
+    desc: 'React, FastAPI, MongoDB, Stripe, auth, and beyond — clean, idiomatic code you can ship.',
+    long: 'Describe a product and TBC scaffolds the whole stack — a React front end, a FastAPI backend, MongoDB models, Stripe billing, and JWT auth — wired together and ready to run.',
+    points: [
+      'Front end, backend, and database generated together and kept in sync',
+      'Idiomatic, readable code you fully own and can export to GitHub',
+      'Payments, auth, and email flows scaffolded, not stubbed',
+    ],
+    cta: { label: 'Start building', to: '/register' },
+  },
+  {
+    icon: MessagesSquare,
+    title: 'Multi-turn memory',
+    desc: 'Persistent sessions remember every detail of your project as it evolves.',
+    long: 'Every conversation is a persistent session. TBC remembers your architecture decisions, file layout, and prior instructions across turns, so you can keep refining instead of re-explaining.',
+    points: [
+      'Sessions persist across days — pick up exactly where you left off',
+      'Earlier decisions inform later replies automatically',
+      'Full project context travels between messages',
+    ],
+    cta: { label: 'Open your workspace', to: '/dashboard' },
+  },
+  {
+    icon: Cpu,
+    title: 'Pick your model',
+    desc: 'Switch between GPT-5, Claude Sonnet/Opus, and Gemini Pro/Flash in a single click.',
+    long: 'Route each task to the model that suits it. Reach for Claude Opus on hard architecture, GPT-5 for breadth, or Gemini Flash when you want speed — switch mid-conversation without losing context.',
+    points: [
+      'Claude Opus 4.7 & Sonnet 4.6, GPT-5, Gemini 3.1 Pro / 3 Flash',
+      'Change models mid-session — memory carries over',
+      'One shared learning pool improves every model',
+    ],
+    cta: { label: 'See the models', to: '/dashboard' },
+  },
+  {
+    icon: ShieldCheck,
+    title: 'TOTP 2FA',
+    desc: 'Google Authenticator-grade security on every account. Operator console for admins.',
+    long: 'Every account can be protected with time-based one-time passwords, compatible with Google Authenticator and Authy. Operators get a full console to manage members, payments, and security.',
+    points: [
+      'TOTP 2FA compatible with any standard authenticator app',
+      'JWT-secured API with credit-based usage controls',
+      'Operator console for member, payment, and security oversight',
+    ],
+    cta: { label: 'Secure your account', to: '/register' },
+  },
+  {
+    icon: Zap,
+    title: 'Token streaming',
+    desc: 'Responses arrive word by word — no spinners, no waiting.',
+    long: 'Replies stream token-by-token over Server-Sent Events, so you read and react as the model thinks. No more staring at a spinner waiting for a full response to land.',
+    points: [
+      'Server-Sent Events stream every reply in real time',
+      'Start reading and steering before generation finishes',
+      'Works consistently across all supported models',
+    ],
+    cta: { label: 'Try it live', to: '/dashboard' },
+  },
+  {
+    icon: Layers,
+    title: 'Architecture mode',
+    desc: 'Ask for diagrams, schemas, contracts. TBC plans before it codes.',
+    long: 'Before writing a line of code, TBC can plan: data models, API contracts, component trees, and diagrams. Approve the plan, then let it build against a shared blueprint.',
+    points: [
+      'Get schemas, API contracts, and diagrams up front',
+      'Review and approve the plan before any code is written',
+      'Fewer rewrites — the build follows an agreed blueprint',
+    ],
+    cta: { label: 'Plan a build', to: '/dashboard' },
+  },
+];
 
 function Stat({ value, label }) {
   return (
@@ -20,19 +137,32 @@ function Stat({ value, label }) {
   );
 }
 
-function FeatureCard({ icon: Icon, title, desc }) {
+function FeatureCard({ icon: Icon, title, desc, onOpen }) {
   return (
-    <Card className="group relative overflow-hidden border-slate-800 bg-slate-900/60 p-6 hover:border-tbc-500/40 transition-colors">
-      <div className="mb-4 inline-flex h-11 w-11 items-center justify-center rounded-lg bg-tbc-500/10 text-tbc-300 ring-1 ring-tbc-500/20 group-hover:bg-tbc-500/20 transition-colors">
+    <Card
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(); } }}
+      className="group relative cursor-pointer overflow-hidden border-slate-800 bg-slate-900/60 p-6 transition-colors hover:border-tbc-500/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-tbc-500/50"
+    >
+      <div className="mb-4 inline-flex h-11 w-11 items-center justify-center rounded-lg bg-tbc-500/10 text-tbc-300 ring-1 ring-tbc-500/20 transition-colors group-hover:bg-tbc-500/20">
         <Icon className="h-5 w-5" />
       </div>
       <h3 className="text-lg font-semibold text-white">{title}</h3>
       <p className="mt-2 text-sm leading-relaxed text-slate-400">{desc}</p>
+      <span className="mt-4 inline-flex items-center gap-1 text-xs font-medium text-tbc-300 opacity-0 transition-opacity group-hover:opacity-100">
+        Learn more <ArrowRight className="h-3.5 w-3.5" />
+      </span>
     </Card>
   );
 }
 
 export default function Landing() {
+  // Index of the capability card whose detail dialog is open (null = closed).
+  const [openFeature, setOpenFeature] = useState(null);
+  const active = openFeature != null ? FEATURES[openFeature] : null;
+
   return (
     <div className="min-h-screen bg-ink-950 text-slate-100">
       <Navbar />
@@ -43,7 +173,7 @@ export default function Landing() {
         <div className="absolute inset-0 bg-radial-fade" />
         <div className="relative mx-auto max-w-7xl px-5 pt-20 pb-24 md:pt-28 md:pb-32">
           <div className="inline-flex items-center gap-2 rounded-full border border-tbc-500/30 bg-tbc-500/10 px-3 py-1 text-xs font-medium text-tbc-300">
-            <Sparkles className="h-3.5 w-3.5" /> Powered by Claude, GPT-5 & Gemini
+            <Sparkles className="h-3.5 w-3.5" /> Now with amAI smart routing, live web search & always-current docs
           </div>
           <h1 className="mt-6 max-w-4xl text-5xl font-bold leading-[1.05] tracking-tight text-white md:text-7xl">
             Your AI engineer. <br />
@@ -52,8 +182,9 @@ export default function Landing() {
             </span>
           </h1>
           <p className="mt-6 max-w-2xl text-lg leading-relaxed text-slate-300 md:text-xl">
-            TBC AI Tools is a complete copy of an elite AI builder — design, code, debug, and ship
-            production-grade applications through a single conversation. Now available to the TradeBridge Club.
+            Design, code, debug, and ship production-grade apps through a single conversation.
+            TBC AI Tools now picks the best model for you automatically, searches the live web,
+            and pulls in up-to-the-minute documentation — so the code it writes actually works.
           </p>
           <div className="mt-9 flex flex-wrap items-center gap-3">
             <Link to="/register">
@@ -69,8 +200,8 @@ export default function Landing() {
           </div>
 
           <div className="mt-14 grid grid-cols-2 gap-8 border-t border-slate-800/80 pt-8 sm:grid-cols-4 max-w-3xl">
-            <Stat value="3+" label="Frontier Models" />
-            <Stat value="<150ms" label="Avg. Token Latency" />
+            <Stat value="Auto" label="Smart Model Routing" />
+            <Stat value="Live" label="Web Search & Docs" />
             <Stat value="100%" label="Code Ownership" />
             <Stat value="2FA" label="Secure by Default" />
           </div>
@@ -80,9 +211,10 @@ export default function Landing() {
       {/* MODEL STRIP */}
       <section className="border-y border-slate-800/80 bg-slate-900/40 py-8">
         <div className="mx-auto max-w-7xl px-5">
-          <div className="text-center text-xs uppercase tracking-[0.25em] text-slate-500">Choose any model. One conversation.</div>
+          <div className="text-center text-xs uppercase tracking-[0.25em] text-slate-500">Let amAI choose — or pick any model yourself.</div>
           <div className="mt-5 flex flex-wrap items-center justify-center gap-6 text-slate-300">
             {[
+              { name: 'Automatic (amAI)', sub: 'Smart routing', featured: true },
               { name: 'Claude Opus 4.7', sub: 'Anthropic' },
               { name: 'Claude Sonnet 4.6', sub: 'Anthropic' },
               { name: 'GPT-5', sub: 'OpenAI' },
@@ -90,10 +222,19 @@ export default function Landing() {
               { name: 'Gemini 3 Flash', sub: 'Google' },
               { name: 'GPT-4.1', sub: 'OpenAI' },
             ].map((m) => (
-              <div key={m.name} className="flex items-center gap-2 rounded-lg border border-slate-800 bg-ink-950/60 px-3.5 py-2">
-                <Bot className="h-4 w-4 text-tbc-400" />
+              <div
+                key={m.name}
+                className={`flex items-center gap-2 rounded-lg border px-3.5 py-2 ${
+                  m.featured
+                    ? 'border-tbc-500/50 bg-tbc-500/10 ring-1 ring-tbc-500/30'
+                    : 'border-slate-800 bg-ink-950/60'
+                }`}
+              >
+                {m.featured
+                  ? <BrainCircuit className="h-4 w-4 text-tbc-300" />
+                  : <Bot className="h-4 w-4 text-tbc-400" />}
                 <div className="leading-tight">
-                  <div className="text-sm font-semibold text-white">{m.name}</div>
+                  <div className={`text-sm font-semibold ${m.featured ? 'text-tbc-100' : 'text-white'}`}>{m.name}</div>
                   <div className="text-[10px] uppercase tracking-wider text-slate-500">{m.sub}</div>
                 </div>
               </div>
@@ -115,13 +256,17 @@ export default function Landing() {
               default, and obsessively practical.
             </p>
           </div>
-          <div className="mt-12 grid gap-5 md:grid-cols-2 lg:grid-cols-3">
-            <FeatureCard icon={Code2} title="Full-stack code generation" desc="React, FastAPI, MongoDB, Stripe, auth, and beyond — clean, idiomatic code you can ship." />
-            <FeatureCard icon={MessagesSquare} title="Multi-turn memory" desc="Persistent sessions remember every detail of your project as it evolves." />
-            <FeatureCard icon={Cpu} title="Pick your model" desc="Switch between GPT-5, Claude Sonnet/Opus, and Gemini Pro/Flash in a single click." />
-            <FeatureCard icon={ShieldCheck} title="TOTP 2FA" desc="Google Authenticator-grade security on every account. Operator console for admins." />
-            <FeatureCard icon={Zap} title="Token streaming" desc="Responses arrive word by word — no spinners, no waiting." />
-            <FeatureCard icon={Layers} title="Architecture mode" desc="Ask for diagrams, schemas, contracts. TBC plans before it codes." />
+          <p className="mt-3 text-sm text-slate-500">Tap any capability to see how it works.</p>
+          <div className="mt-8 grid gap-5 md:grid-cols-2 lg:grid-cols-3">
+            {FEATURES.map((f, i) => (
+              <FeatureCard
+                key={f.title}
+                icon={f.icon}
+                title={f.title}
+                desc={f.desc}
+                onOpen={() => setOpenFeature(i)}
+              />
+            ))}
           </div>
         </div>
       </section>
@@ -273,6 +418,40 @@ export default function Landing() {
           </div>
         </div>
       </section>
+
+      {/* Capability detail — opens as a focused "new view" over the page. */}
+      <Dialog open={openFeature != null} onOpenChange={(o) => { if (!o) setOpenFeature(null); }}>
+        <DialogContent className="border-slate-800 bg-ink-950 text-slate-100 sm:max-w-lg">
+          {active && (
+            <>
+              <DialogHeader>
+                <div className="mb-3 inline-flex h-12 w-12 items-center justify-center rounded-lg bg-tbc-500/10 text-tbc-300 ring-1 ring-tbc-500/20">
+                  <active.icon className="h-6 w-6" />
+                </div>
+                <DialogTitle className="text-2xl font-bold text-white">{active.title}</DialogTitle>
+                <DialogDescription className="text-base leading-relaxed text-slate-300">
+                  {active.long}
+                </DialogDescription>
+              </DialogHeader>
+              <ul className="mt-2 space-y-3">
+                {active.points.map((p) => (
+                  <li key={p} className="flex items-start gap-3 text-slate-200">
+                    <Check className="mt-1 h-4 w-4 shrink-0 text-tbc-400" />
+                    <span className="text-sm leading-relaxed">{p}</span>
+                  </li>
+                ))}
+              </ul>
+              <div className="mt-6">
+                <Link to={active.cta.to} onClick={() => setOpenFeature(null)}>
+                  <Button className="w-full bg-tbc-500 font-semibold text-slate-950 hover:bg-tbc-400">
+                    {active.cta.label} <ArrowRight className="ml-2 h-4 w-4" />
+                  </Button>
+                </Link>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
 
       <Footer />
     </div>

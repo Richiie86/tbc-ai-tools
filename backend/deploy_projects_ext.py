@@ -86,6 +86,13 @@ class ProjectIn(BaseModel):
     # The operator can still override per-run. Default off — explicit opt-in
     # because auto-commits to GitHub are irreversible.
     auto_heal: bool = False
+    # When true, a deployment that lands in a FAILED terminal state
+    # (ERROR/CANCELED) automatically re-promotes the last known-good
+    # production deployment, so a broken deploy can't silently persist.
+    # Opt-in (like auto_promote/auto_heal) because it changes what production
+    # serves without an operator in the loop. A manual Rollback endpoint is
+    # always available regardless of this flag.
+    auto_rollback: bool = False
 
 
 class ProjectOut(BaseModel):
@@ -145,11 +152,14 @@ def _project_to_out(doc: dict) -> dict:
         'vercel_project_id': doc.get('vercel_project_id'),
         'auto_promote': bool(doc.get('auto_promote', False)),
         'auto_heal': bool(doc.get('auto_heal', False)),
+        'auto_rollback': bool(doc.get('auto_rollback', False)),
         'last_deployment_id': doc.get('last_deployment_id'),
         'last_deployment_url': doc.get('last_deployment_url'),
         'last_deployment_state': doc.get('last_deployment_state'),
         'last_deployed_at': doc.get('last_deployed_at'),
         'last_promoted_at': doc.get('last_promoted_at'),
+        'last_good_deployment_id': doc.get('last_good_deployment_id'),
+        'last_rollback_at': doc.get('last_rollback_at'),
         'created_at': doc.get('created_at'),
         'updated_at': doc.get('updated_at'),
     }
@@ -316,6 +326,74 @@ async def _maybe_auto_promote(
         }, settings)
 
 
+async def _maybe_auto_rollback(
+    project_id: str,
+    failed_deployment_id: str,
+    settings: dict,
+) -> None:
+    """When a deployment lands in a FAILED terminal state, re-promote the
+    project's last known-good deployment so a broken build can't silently
+    persist as (or block) production.
+
+    Opt-in via the project's `auto_rollback` flag. Safe + idempotent: if the
+    known-good deployment is already the one serving production this simply
+    re-asserts it and alerts the operator. If there is no recorded known-good
+    deployment we skip (nothing safe to roll back to) and fire a webhook so
+    the operator knows manual intervention is needed.
+    """
+    project = await db.deploy_projects.find_one({'id': project_id})
+    if not project or not project.get('auto_rollback'):
+        return
+
+    good_id = project.get('last_good_deployment_id')
+    if not good_id or good_id == failed_deployment_id:
+        logger.warning(
+            'Auto-rollback for %s: no distinct known-good deployment to roll back to '
+            '(failed=%s, known_good=%s)', project_id, failed_deployment_id, good_id,
+        )
+        await _fire_webhook('deploy.rollback_skipped', {
+            'project_id': project_id,
+            'failed_deployment_id': failed_deployment_id,
+            'reason': 'no_known_good_deployment',
+        }, settings)
+        return
+
+    try:
+        await _trigger_promote(project_id, settings, good_id)
+        now = datetime.now(timezone.utc)
+        await db.deploy_projects.update_one(
+            {'id': project_id},
+            {'$set': {'last_rollback_at': now, 'updated_at': now}},
+        )
+        logger.warning(
+            'Auto-rolled back %s to last known-good deployment %s after %s failed',
+            project_id, good_id, failed_deployment_id,
+        )
+        await _fire_webhook('deploy.rolled_back', {
+            'project_id': project_id,
+            'failed_deployment_id': failed_deployment_id,
+            'restored_deployment_id': good_id,
+        }, settings)
+        # Best-effort operator ping — never blocks the rollback.
+        try:
+            from webhook_ext import send_event
+            await send_event(
+                f'Auto-rollback · {project.get("projectName") or project_id} · '
+                f'restored {good_id} after {failed_deployment_id} failed',
+                kind='rollback',
+            )
+        except Exception as e:
+            logger.warning('rollback send_event failed: %s', e)
+    except HTTPException as e:
+        logger.error('Auto-rollback FAILED for %s: %s', project_id, e.detail)
+        await _fire_webhook('deploy.rollback_failed', {
+            'project_id': project_id,
+            'failed_deployment_id': failed_deployment_id,
+            'restored_deployment_id': good_id,
+            'error': str(e.detail),
+        }, settings)
+
+
 async def _watch_deployment(project_id: str, deployment_id: str) -> None:
     """Poll Vercel until `deployment_id` reaches a terminal state.
 
@@ -375,6 +453,13 @@ async def _watch_deployment(project_id: str, deployment_id: str) -> None:
                     await _maybe_auto_promote(project_id, deployment_id, res.get('url'), settings)
                 except Exception as e:
                     logger.warning('Auto-promote failed for %s: %s', deployment_id, str(e)[:200])
+            else:
+                # Failed terminal state (ERROR/CANCELED) → attempt auto-rollback
+                # to the last known-good deployment if the project opted in.
+                try:
+                    await _maybe_auto_rollback(project_id, deployment_id, settings)
+                except Exception as e:
+                    logger.warning('Auto-rollback failed for %s: %s', deployment_id, str(e)[:200])
             return
     # Timed out — log and let Ops tab show the last known state.
     logger.warning('Watch %s: timed out after 10 minutes', deployment_id)
@@ -1071,6 +1156,7 @@ class ProjectFlagsUpdate(BaseModel):
     """
     auto_promote: Optional[bool] = None
     auto_heal: Optional[bool] = None
+    auto_rollback: Optional[bool] = None
 
 
 @ops_router.patch('/{project_id}')
@@ -1088,9 +1174,46 @@ async def op_patch_project_flags(
         update['auto_promote'] = bool(payload.auto_promote)
     if payload.auto_heal is not None:
         update['auto_heal'] = bool(payload.auto_heal)
+    if payload.auto_rollback is not None:
+        update['auto_rollback'] = bool(payload.auto_rollback)
     await db.deploy_projects.update_one({'id': project_id}, {'$set': update})
     fresh = await db.deploy_projects.find_one({'id': project_id})
     return _project_to_out(fresh)
+
+
+@ops_router.post('/{project_id}/rollback')
+async def op_rollback_project(
+    project_id: str,
+    op: dict = Depends(get_current_operator),
+):
+    """Manually roll production back to the last known-good deployment.
+
+    Always available to the operator (independent of the `auto_rollback`
+    flag) so a broken production deploy can be recovered with one click.
+    """
+    project = await db.deploy_projects.find_one({'id': project_id})
+    if not project:
+        raise HTTPException(404, 'Project not found')
+    good_id = project.get('last_good_deployment_id')
+    if not good_id:
+        raise HTTPException(
+            400,
+            'No known-good deployment recorded yet. Promote a working deploy '
+            'first, then rollback becomes available.',
+        )
+    settings = await get_settings_doc()
+    result = await _trigger_promote(project_id, settings, good_id)
+    now = datetime.now(timezone.utc)
+    await db.deploy_projects.update_one(
+        {'id': project_id},
+        {'$set': {'last_rollback_at': now, 'updated_at': now}},
+    )
+    await _fire_webhook('deploy.rolled_back', {
+        'project_id': project_id,
+        'restored_deployment_id': good_id,
+        'manual': True,
+    }, settings)
+    return {'ok': True, 'restored_deployment_id': good_id, **result}
 
 
 # ----- AI-agent deploy actions (Bearer-token auth) ---------------------
@@ -1159,6 +1282,10 @@ async def _trigger_promote(project_id: str, settings: dict, deployment_id: Optio
         {'$set': {
             'last_promoted_at': now,
             'last_promoted_deployment_id': target_id,
+            # A successfully promoted deployment is our best "known-good"
+            # production artifact, and becomes the target for auto-rollback
+            # if a later deploy fails.
+            'last_good_deployment_id': target_id,
             'last_deployment_state': 'PROMOTED',
             'updated_at': now,
         }},

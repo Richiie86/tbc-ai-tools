@@ -5,7 +5,7 @@ import { Input } from '../../components/ui/input';
 import { toast } from 'sonner';
 import {
   KeyRound, Save, Loader2, ShieldCheck, ShieldAlert, Eye, EyeOff,
-  RotateCw, CheckCircle2, XCircle, Github, Cloud, Sparkles, Bot, Server,
+  RotateCw, CheckCircle2, XCircle, Github, Cloud, Sparkles, Bot, Server, Zap,
 } from 'lucide-react';
 
 export const KIND_META = {
@@ -37,12 +37,26 @@ export const KIND_META = {
     placeholder: 'Paste your OpenAI key (sk-…) — powers the AI build tools',
     helperUrl: 'https://platform.openai.com/api-keys',
   },
+  openrouter: {
+    label: 'OpenRouter API Key',
+    icon: Sparkles,
+    fieldKey: 'openrouter_api_key',
+    placeholder: 'Paste your OpenRouter key (sk-or-…) — one key unlocks 300+ models',
+    helperUrl: 'https://openrouter.ai/keys',
+  },
   render: {
     label: 'Render API Key',
     icon: Server,
     fieldKey: 'render_api_key',
     placeholder: 'Paste your Render key (rnd_…) — manage the backend host',
     helperUrl: 'https://dashboard.render.com/u/settings/api-keys',
+  },
+  groq: {
+    label: 'Groq API Key',
+    icon: Zap,
+    fieldKey: 'groq_api_key',
+    placeholder: 'Paste your Groq key (gsk_…) — fast open-model inference',
+    helperUrl: 'https://console.groq.com/keys',
   },
 };
 

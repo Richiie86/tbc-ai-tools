@@ -7,6 +7,9 @@ import {
   Users, FolderKanban, Sparkles, CreditCard, Wallet, DollarSign, KeyRound,
   Coins, Settings as SettingsIcon, Activity, ScrollText, Mail, Code2,
   ChevronLeft, ChevronRight, BookOpen, X,
+  TrendingUp, Archive, BrainCircuit, Wrench, Link2, Calculator, Gauge,
+  Megaphone, MessageCircle, FlaskConical, Brain, Network, TestTube,
+  AlertOctagon, Wand2,
 } from 'lucide-react';
 
 /**
@@ -21,66 +24,140 @@ import {
  * Re-launchable any time via the "Guide" button in Operator.jsx — pass
  * `forceOpen={true}` and the parent state machine handles re-show.
  */
-const STORAGE_KEY = 'tbc_operator_tour_seen_v1';
+// Bumped to v2 when the guide expanded from 13 tabs to full coverage of all
+// 29 tabs (incl. amAI + AI Tools) — so anyone who saw the old tour gets the
+// richer one once.
+const STORAGE_KEY = 'tbc_operator_tour_seen_v2';
 
 // Order MUST match the order tabs are rendered in Operator.jsx so the tour
 // reads top-to-bottom for the user.
 const STEPS = [
   {
     tab: 'users', icon: Users, title: 'Users',
-    body: 'Search every account, change plans, grant credits, and reset 2FA. The header chips at the top of this page (Total Users / Paid Customers / Revenue) are summary stats for everything that happens in this tab.',
-    tip: 'Click a row to drill into a user — their sessions, billing history, and credit ledger live there.',
+    body: 'This is your member list — every person who has signed up. From here you can search any account, change someone\'s plan, hand out free credits, or reset their two-factor login if they get locked out. The chips at the very top of the page (Total Users / Paid Customers / Revenue) are live totals for your whole business.',
+    tip: 'Click any row to open that person\'s full profile — their chat sessions, billing history, and credit ledger all live inside.',
+  },
+  {
+    tab: 'analytics', icon: TrendingUp, title: 'Analytics',
+    body: 'Your growth dashboard. Charts here show sign-ups over time, revenue trends, active users, and which plans are selling. Use it to spot what\'s working and when your busiest days are.',
+    tip: 'If a chart looks empty, widen the date range at the top — new accounts may not have enough history yet.',
   },
   {
     tab: 'projects', icon: FolderKanban, title: 'Projects',
-    body: 'Credit packs and subscription plans sold on the public Pricing page. Each project ties a Stripe price (or a manual checkout) to a credit grant.',
-    tip: 'Need a one-off promo? Duplicate an existing plan, change the price, save. The Pricing page picks it up immediately.',
+    body: 'These are the credit packs and one-off products shown on your public Pricing page. Each "project" links a price (Stripe card checkout or a manual bank transfer) to a number of credits the buyer receives.',
+    tip: 'Want a quick promo? Duplicate an existing pack, lower the price, and save — the Pricing page updates instantly.',
+  },
+  {
+    tab: 'user-projects', icon: Archive, title: 'User Projects',
+    body: 'A read-only view of the apps and workspaces your members have created inside the builder. Handy for support ("what did this customer build?") and for spotting power users.',
   },
   {
     tab: 'plans', icon: Sparkles, title: 'Plans',
-    body: 'Long-running subscription plans (Pro / Enterprise / etc). Set the per-month price and how many credits are recharged at each renewal.',
+    body: 'Your recurring subscriptions (like Pro or Enterprise). Set the monthly price and how many credits are topped up automatically at each renewal. This is your steady, repeating income.',
   },
   {
     tab: 'payments', icon: CreditCard, title: 'Payments',
-    body: 'Every payment that ever hit your account: Stripe cards, NOWPayments crypto, PayPal, and manual bank transfers. Use the filters to reconcile a specific window.',
+    body: 'A complete history of every payment you\'ve ever received — card (Stripe), crypto (NOWPayments), PayPal, and manual bank transfers, all in one list. Use the filters to check a specific week or customer when balancing your books.',
   },
   {
     tab: 'treasury', icon: Wallet, title: 'Treasury',
-    body: 'Where the money actually sits — your Stripe balance, your crypto wallet balances, and your pending payouts. The "Sweep" button moves available funds to the configured bank account.',
+    body: 'Where your money is sitting right now: your Stripe balance, crypto wallet balances, and any payouts still pending. The "Sweep" button moves available cash to your connected bank account.',
+    tip: 'Sweeping is safe to do any time — it only moves funds that have already cleared.',
   },
   {
     tab: 'money', icon: DollarSign, title: 'Money',
-    body: 'Profit-and-loss view: gross revenue minus refunds, royalties, and operating costs. Lets you see margin at a glance.',
+    body: 'Your simple profit view. It takes everything you earned and subtracts refunds, partner royalties, and running costs so you can see your real margin at a glance — no spreadsheet needed.',
+  },
+  {
+    tab: 'keys', icon: KeyRound, title: 'My Keys',
+    body: 'Your personal AI provider keys (for example your own Anthropic or OpenAI key). Adding a key here lets your usage run on your own account instead of the shared platform key. Optional, but useful for heavy personal use.',
+    tip: 'No key here? No problem — the platform falls back to the shared key set under Security.',
+  },
+  {
+    tab: 'amai', icon: BrainCircuit, title: 'amAI (smart model routing)',
+    body: 'amAI is the brain that picks the best AI model for each message automatically — a cheap fast model for quick questions, a powerful one for real coding. This tab lets you turn "Automatic" mode on, map which model handles which kind of task, and see this month\'s estimated AI spend broken down by model AND by user.',
+    tip: 'The "by user" spend list shows exactly who is costing you the most this month — great for fair-use decisions.',
+  },
+  {
+    tab: 'tools', icon: Wrench, title: 'AI Tools',
+    body: 'Optional superpowers you can switch on for the AI. "Web Search" lets it pull live results from the internet for up-to-date answers (needs a search key you paste here). "Sequential Thinking" makes it plan complex tasks step-by-step. Context7 (up-to-date coding docs) also lives on the amAI tab.',
+    tip: 'Everything here is a safe on/off switch — if a tool has no key or fails, chat keeps working normally.',
   },
   {
     tab: 'licenses', icon: KeyRound, title: 'Licenses',
-    body: 'Issue / revoke license keys for the desktop app. Each license is bound to one machine and can be transferred up to N times before it locks.',
+    body: 'Issue or revoke license keys for the desktop app. Each key is tied to one computer and can be moved a limited number of times before it locks, which stops sharing.',
   },
   {
     tab: 'royalties', icon: Coins, title: 'Royalties',
-    body: 'Track every revenue-share payout you owe to partners or affiliates. Automatic sweeps run hourly; this tab shows the queue + history.',
+    body: 'If you share revenue with partners or affiliates, this tracks what you owe and what\'s been paid. Automatic payouts run on a schedule; this tab shows both the upcoming queue and the full history.',
   },
   {
-    tab: 'settings', icon: SettingsIcon, title: 'Security',
-    body: 'All third-party API keys live here: Stripe, NOWPayments, PayPal, Resend (email), your universal AI / LLM key for model calls, your Vercel PAT, and a GitHub PAT for autopilot.',
-    tip: 'IMPORTANT: pasting a key here will NOT change your operator password — we explicitly told the browser to leave these fields alone.',
+    tab: 'settings', icon: SettingsIcon, title: 'Security & Keys',
+    body: 'The control room for all your third-party keys: Stripe, NOWPayments, PayPal, Resend (email), your shared AI/LLM key that powers model calls, your Vercel token, and a GitHub token for autopilot deploys.',
+    tip: 'IMPORTANT: typing a key here will NOT change your operator password — these fields are deliberately kept separate.',
   },
   {
     tab: 'ops', icon: Activity, title: 'Ops',
-    body: 'The pulse of your platform — supervisor health, autonomous deploy projects (with one-click Deploy, Clone, Code Review, and the full Autopilot loop), and self-source code download.',
-    tip: 'Try the "Autopilot" button on a project: it reviews the repo with AI, blocks ship if the verdict is `do_not_ship`, and (with auto-fix iterations > 0) commits patches and retries until it ships.',
+    body: 'The health and deployment hub. See if your servers are running, manage auto-deploy projects with one-click Deploy, Clone, Code Review, and the full Autopilot loop, and download your own source code. This is also where the "health check" and "code review" buttons you asked about live.',
+    tip: 'Try Autopilot on a project: it reviews the code with AI, refuses to ship if it finds a blocker, and can auto-fix and retry until it passes.',
+  },
+  {
+    tab: 'links', icon: Link2, title: 'Links',
+    body: 'Manage the short links and shareable URLs your platform hands out — referral links, marketing links, and custom redirects. Edit where each one points without touching code.',
+  },
+  {
+    tab: 'taxcalc', icon: Calculator, title: 'Tax Calc',
+    body: 'A quick calculator for working out tax on a sale or payout. Enter an amount and rate and it does the maths for you — useful for one-off estimates.',
+  },
+  {
+    tab: 'taxameter', icon: Gauge, title: 'Taxameter',
+    body: 'A running tally of tax you\'ve likely accrued across all sales in a period, so there are no surprises at tax time. Think of it as an always-on odometer for what you may owe.',
   },
   {
     tab: 'audit', icon: ScrollText, title: 'Audit',
-    body: 'Tamper-evident log of every operator action: plan changes, refunds, key rotations, ship overrides. Filter by user, action, or time window.',
+    body: 'A tamper-evident diary of every important action taken in the console — plan changes, refunds, key rotations, ship approvals. Filter by person, action, or date if you ever need to investigate something.',
   },
   {
     tab: 'contacts', icon: Mail, title: 'Contacts',
-    body: 'Inbox for the public Contact form on the marketing site. Reply directly from here and the response goes out via Resend.',
+    body: 'The inbox for your public "Contact us" form. Messages from visitors land here and you can reply straight from this tab — the email goes out automatically through Resend.',
   },
   {
     tab: 'codes', icon: Code2, title: 'Codes',
-    body: 'One-time discount codes & gift cards. Generate in bulk, set expiry, restrict to specific plans.',
+    body: 'Create discount codes and gift cards. Generate them in bulk, set an expiry date, and restrict them to certain plans — perfect for launches, promos, and refunds-as-credit.',
+  },
+  {
+    tab: 'marketing', icon: Megaphone, title: 'Marketing',
+    body: 'Tools to promote your platform: announcement banners, campaigns, and promotional copy shown to visitors and members. Update what\'s being advertised without editing the site itself.',
+  },
+  {
+    tab: 'messaging', icon: MessageCircle, title: 'Messaging',
+    body: 'Send announcements or direct messages to your members — like a new-feature note or a maintenance heads-up. Reach everyone at once or target specific people.',
+  },
+  {
+    tab: 'sandbox', icon: FlaskConical, title: 'Sandbox',
+    body: 'A safe playground to test AI prompts, settings, and new features before they go live to real users. Nothing you do here affects customers.',
+  },
+  {
+    tab: 'learnings', icon: Brain, title: 'AI Learnings',
+    body: 'Facts and instructions you teach the AI once so it applies them to every conversation — your tone of voice, house rules, things it should always or never do. One shared memory that improves every model.',
+    tip: 'Keep learnings short and clear, like bullet points — the AI follows them best that way.',
+  },
+  {
+    tab: 'brain', icon: Network, title: 'AI Brain',
+    body: 'A bigger-picture view of the AI\'s knowledge and connections — how learnings, models, and tools fit together. Use it to understand and fine-tune the overall behaviour of your assistant.',
+  },
+  {
+    tab: 'ai-tests', icon: TestTube, title: 'AI Tests',
+    body: 'Run test prompts against your models to check quality and catch regressions after you change settings. A quick way to make sure an update didn\'t make answers worse.',
+  },
+  {
+    tab: 'errors', icon: AlertOctagon, title: 'Errors',
+    body: 'A live feed of problems the app has run into — failed requests, crashes, and warnings. Check here first when something isn\'t working; each entry shows what happened and when.',
+  },
+  {
+    tab: 'ai-build', icon: Wand2, title: 'AI Build',
+    body: 'Let the AI help build and improve this very platform — generate features, fixes, and code changes with assistance. An advanced, developer-focused workspace.',
+    tip: 'Great for power users; if you\'re just getting started, explore the other tabs first.',
   },
 ];
 

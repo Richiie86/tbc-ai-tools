@@ -7,6 +7,9 @@ import {
   KeyRound, Loader2, Wand2, Eye, EyeOff, CheckCircle2, XCircle,
   Plus, ChevronDown, ShieldCheck,
 } from 'lucide-react';
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '../../components/ui/select';
 import { SecretRow } from './SecretsCard';
 
 /**
@@ -25,6 +28,8 @@ import { SecretRow } from './SecretsCard';
 const ALL_KINDS = [
   { kind: 'anthropic', setKey: 'anthropic_api_key' },
   { kind: 'openai', setKey: 'openai_api_key' },
+  { kind: 'openrouter', setKey: 'openrouter_api_key' },
+  { kind: 'groq', setKey: 'groq_api_key' },
   { kind: 'vercel', setKey: 'vercel_token' },
   { kind: 'github', setKey: 'github_token' },
   { kind: 'render', setKey: 'render_api_key' },
@@ -32,13 +37,13 @@ const ALL_KINDS = [
 
 const PRETTY = {
   vercel: 'Vercel', github: 'GitHub', anthropic: 'Anthropic (Claude)',
-  openai: 'OpenAI', render: 'Render', resend: 'Resend', stripe: 'Stripe',
+  openai: 'OpenAI', openrouter: 'OpenRouter (300+ models)', groq: 'Groq',
+  render: 'Render', resend: 'Resend', stripe: 'Stripe',
 };
 
 export default function MyKeysTab() {
   const [settings, setSettings] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [showAdd, setShowAdd] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -121,29 +126,86 @@ export default function MyKeysTab() {
         )}
       </div>
 
-      {/* Add a specific key — providers not yet added */}
-      {missing.length > 0 && (
-        <div className="rounded-xl border border-tbc-500/20 bg-ink-900/40">
-          <button
-            type="button"
-            onClick={() => setShowAdd((s) => !s)}
-            data-testid="toggle-add-specific"
-            className="flex w-full items-center justify-between px-5 py-3 text-left"
-          >
-            <span className="flex items-center gap-2 text-sm font-semibold text-tbc-100">
-              <Plus className="h-4 w-4 text-tbc-300" />
-              Add a specific key
-              <span className="text-xs font-normal text-tbc-200/50">
-                — {missing.map((m) => PRETTY[m.kind] || m.kind).join(', ')}
-              </span>
-            </span>
-            <ChevronDown className={`h-4 w-4 text-tbc-300 transition-transform ${showAdd ? 'rotate-180' : ''}`} />
-          </button>
-          {showAdd && (
-            <div className="space-y-3 border-t border-tbc-500/15 px-5 py-4" data-testid="missing-keys">
-              {missing.map(row)}
-            </div>
-          )}
+      {/* Add a specific key — pick ANY provider from the dropdown and paste
+          its key directly, whether or not it has been added before. */}
+      <AddSpecificKey
+        settings={settings}
+        missing={missing}
+        row={row}
+      />
+    </div>
+  );
+}
+
+/**
+ * Direct provider picker. Instead of only exposing providers that haven't been
+ * added yet, this lets the operator choose ANY supported provider from a
+ * dropdown and immediately get its paste field — so they can add exactly what
+ * they want (e.g. OpenRouter) without relying on auto-detection.
+ */
+function AddSpecificKey({ settings, missing, row }) {
+  const [open, setOpen] = useState(true);
+  // Default to the first not-yet-added provider, else the first provider.
+  const [selected, setSelected] = useState(
+    () => (missing[0]?.kind) || ALL_KINDS[0].kind,
+  );
+
+  const selectedDef = ALL_KINDS.find((k) => k.kind === selected) || ALL_KINDS[0];
+
+  return (
+    <div className="rounded-xl border border-tbc-500/20 bg-ink-900/40">
+      <button
+        type="button"
+        onClick={() => setOpen((s) => !s)}
+        data-testid="toggle-add-specific"
+        className="flex w-full items-center justify-between px-5 py-3 text-left"
+      >
+        <span className="flex items-center gap-2 text-sm font-semibold text-tbc-100">
+          <Plus className="h-4 w-4 text-tbc-300" />
+          Add a specific key
+          <span className="text-xs font-normal text-tbc-200/50">
+            — choose any provider
+          </span>
+        </span>
+        <ChevronDown className={`h-4 w-4 text-tbc-300 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+
+      {open && (
+        <div className="space-y-4 border-t border-tbc-500/15 px-5 py-4">
+          {/* Provider selector */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-tbc-200/70">Provider</label>
+            <Select value={selected} onValueChange={setSelected}>
+              <SelectTrigger
+                data-testid="specific-provider-select"
+                className="h-10 border-tbc-900/60 bg-ink-900 text-tbc-100"
+              >
+                <SelectValue placeholder="Choose a provider" />
+              </SelectTrigger>
+              <SelectContent className="border-tbc-500/20 bg-ink-900 text-tbc-100">
+                {ALL_KINDS.map((k) => {
+                  const isSet = settings[`${k.setKey}_set`];
+                  return (
+                    <SelectItem key={k.kind} value={k.kind} className="focus:bg-tbc-500/15">
+                      <span className="flex items-center gap-2">
+                        {PRETTY[k.kind] || k.kind}
+                        {isSet && (
+                          <span className="rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-300">
+                            added
+                          </span>
+                        )}
+                      </span>
+                    </SelectItem>
+                  );
+                })}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* The field for the chosen provider (paste / test / save / rotate) */}
+          <div data-testid="specific-key-field">
+            {row(selectedDef)}
+          </div>
         </div>
       )}
     </div>
@@ -193,8 +255,9 @@ function SmartPaste({ onSaved }) {
         <div>
           <h3 className="text-base font-bold text-tbc-100">Add new key</h3>
           <p className="text-xs text-tbc-200/60">
-            Paste any key — Anthropic, OpenAI, Vercel, GitHub or Render. We
-            figure out what it is and file it in your list automatically.
+            Paste any key — Anthropic, OpenAI, OpenRouter, Groq, Vercel, GitHub
+            or Render. We figure out what it is and file it in your list
+            automatically.
           </p>
         </div>
       </div>

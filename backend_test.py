@@ -3,18 +3,30 @@
 Comprehensive backend test for TBC AI Control - NEW payment endpoints.
 Tests: plans, treasury, settings, manual payments, PDF receipts, licenses, royalties.
 """
+import os
+import sys
 import requests
 import pyotp
 import time
 import json
 from datetime import datetime
 
-# Backend URL from frontend/.env
-BASE_URL = "https://tbc-self-copy.preview.emergentagent.com/api"
+# Backend URL — override with TEST_BASE_URL when running elsewhere.
+BASE_URL = os.environ.get("TEST_BASE_URL", "https://tbc-self-copy.preview.emergentagent.com/api")
 
-# Operator credentials
-OPERATOR_EMAIL = "rac.invetments.swe@gmail.com"
-OPERATOR_PASSWORD = "TBC@2025!Admin"
+# Operator credentials come EXCLUSIVELY from environment variables so no secret
+# is ever committed to the repo. Set these before running:
+#   export TEST_OPERATOR_EMAIL="operator@example.com"
+#   export TEST_OPERATOR_PASSWORD="your-password"
+OPERATOR_EMAIL = os.environ.get("TEST_OPERATOR_EMAIL", "")
+OPERATOR_PASSWORD = os.environ.get("TEST_OPERATOR_PASSWORD", "")
+
+if not OPERATOR_EMAIL or not OPERATOR_PASSWORD:
+    print(
+        "SKIP: set TEST_OPERATOR_EMAIL and TEST_OPERATOR_PASSWORD env vars to run "
+        "this integration test (no credentials are hardcoded)."
+    )
+    sys.exit(0)
 
 # Test results
 results = {

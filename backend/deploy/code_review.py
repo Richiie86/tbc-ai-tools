@@ -417,11 +417,12 @@ async def run_code_review(project: dict, settings: dict) -> dict:
         + '\n\nReturn the strict JSON review object now.'
     )
 
-    llm_key = (settings or {}).get('emergent_llm_key') or os.environ.get('EMERGENT_LLM_KEY')
-    if not llm_key:
+    from llm_router import _anthropic_key
+    llm_key = ''  # legacy placeholder — llm_router uses the provider key
+    if not await _anthropic_key():
         raise HTTPException(
             503,
-            'Emergent LLM key not configured. Set EMERGENT_LLM_KEY in backend env or operator settings.',
+            'No Anthropic API key configured. Add an ANTHROPIC_API_KEY in Operator → Security.',
         )
 
     chat = LlmChat(
