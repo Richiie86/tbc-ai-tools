@@ -279,7 +279,7 @@ async def _cross_ai_review(llm_key: str, prompt: str, summary: str, files: list[
     Returns `{verdict, summary, concerns, missing_imports, security_flags,
               reviewer_model}` — always returns a dict, even on parse failure.
     """
-    from llm_router import LlmChat, UserMessage
+    from llm_router import LlmChat, UserMessage, resolve_text_model
 
     # Truncate file contents for the reviewer so we don't blow tokens on a
     # 12 × 80KB patch set — heads are what matter for import + signature checks.
@@ -293,13 +293,23 @@ async def _cross_ai_review(llm_key: str, prompt: str, summary: str, files: list[
         f'Proposed files ({len(files)}):\n{files_blob}\n\n'
         'Return the review JSON now.'
     )
-    # Reviewer stays on the operator's BYO Anthropic key when set (no Emergent
-    # spend). Uses a VALID model id (see _CROSS_AI_REVIEW_MODEL).
+    # Reviewer runs on whatever provider key the operator has (Anthropic,
+    # OpenAI, OpenRouter or Gemini) so an OpenRouter-only setup still gets a
+    # cross-AI review instead of silently skipping it.
+    resolved = await resolve_text_model()
+    if not resolved:
+        return {
+            'verdict': 'review_skipped',
+            'summary': 'No AI provider key configured for cross-AI review.',
+            'concerns': [], 'missing_imports': [], 'security_flags': [],
+            'reviewer_model': 'none',
+        }
+    rev_provider, rev_model = resolved
     chat = LlmChat(
         api_key=llm_key,
         session_id=f'ai-build-review-{datetime.now(timezone.utc).timestamp():.0f}',
         system_message=_REVIEWER_SYSTEM_PROMPT,
-    ).with_model('anthropic', _CROSS_AI_REVIEW_MODEL)
+    ).with_model(rev_provider, rev_model)
     try:
         raw = await chat.send_message(UserMessage(text=user_msg))
     except Exception as e:
@@ -308,7 +318,7 @@ async def _cross_ai_review(llm_key: str, prompt: str, summary: str, files: list[
             'verdict': 'review_skipped',
             'summary': f'Reviewer call failed: {str(e)[:200]}',
             'concerns': [], 'missing_imports': [], 'security_flags': [],
-            'reviewer_model': _CROSS_AI_REVIEW_MODEL,
+            'reviewer_model': rev_model,
         }
     text = _strip_codefences(raw or '')
     try:
@@ -321,7 +331,7 @@ async def _cross_ai_review(llm_key: str, prompt: str, summary: str, files: list[
                 'summary': 'Reviewer returned non-JSON',
                 'concerns': [text[:200]] if text else [],
                 'missing_imports': [], 'security_flags': [],
-                'reviewer_model': _CROSS_AI_REVIEW_MODEL,
+                'reviewer_model': rev_model,
             }
         try:
             parsed = json.loads(m.group(0))
@@ -333,7 +343,7 @@ async def _cross_ai_review(llm_key: str, prompt: str, summary: str, files: list[
         'concerns': [str(c)[:280] for c in (parsed.get('concerns') or [])][:12],
         'missing_imports': [str(i)[:200] for i in (parsed.get('missing_imports') or [])][:8],
         'security_flags': [str(s)[:200] for s in (parsed.get('security_flags') or [])][:8],
-        'reviewer_model': _CROSS_AI_REVIEW_MODEL,
+        'reviewer_model': rev_model,
     }
 
 
@@ -361,10 +371,12 @@ async def plan(req: PlanRequest, user: dict = Depends(get_current_operator)):
     gh_token = settings.get('github_token') or os.environ.get('GITHUB_TOKEN')
     if not gh_token:
         raise HTTPException(503, 'github_token not set in Operator → Security.')
-    from llm_router import _anthropic_key
+    from llm_router import resolve_text_model
     llm_key = ''  # legacy placeholder — llm_router uses the provider key
-    if not await _anthropic_key():
-        raise HTTPException(503, 'No Anthropic API key configured (Operator → Security).')
+    resolved = await resolve_text_model()
+    if not resolved:
+        raise HTTPException(503, 'No AI provider key configured (add one in Operator → My Keys — Anthropic, OpenAI, OpenRouter or Gemini).')
+    plan_provider, plan_model = resolved
 
     ref = project.get('gitRef') or 'main'
     async with httpx.AsyncClient(timeout=20.0) as client:
@@ -384,7 +396,7 @@ async def plan(req: PlanRequest, user: dict = Depends(get_current_operator)):
         api_key=llm_key,
         session_id=f'ai-build-{req.project_id}-{datetime.now(timezone.utc).timestamp():.0f}',
         system_message=_SYSTEM_PROMPT,
-    ).with_model('anthropic', 'claude-sonnet-4-5-20250929')
+    ).with_model(plan_provider, plan_model)
     try:
         raw = await chat.send_message(UserMessage(text=user_prompt))
     except Exception as e:

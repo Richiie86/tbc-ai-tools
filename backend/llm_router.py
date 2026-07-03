@@ -131,6 +131,51 @@ async def any_provider_key_available() -> bool:
     )
 
 
+async def resolve_vision_model() -> Optional[tuple]:
+    """Pick a vision-capable (provider, model) from whatever key is configured.
+
+    Callers that need to send an image (e.g. visual build verification) must
+    NOT hardcode a single provider — an operator may only have, say, an
+    OpenRouter key. This returns the best available (provider, model) pair, or
+    ``None`` when no provider key is set at all.
+
+    Preference order favours the cheapest solid vision model per provider,
+    trying a direct provider key first and falling back to OpenRouter (whose
+    single key unlocks the same models via OpenAI-compatible slugs).
+    """
+    if await _openai_key():
+        return ('openai', 'gpt-4o-mini')
+    if await _openrouter_key():
+        # OpenRouter slug for the same cheap vision model.
+        return ('openrouter', 'openai/gpt-4o-mini')
+    if await _anthropic_key():
+        return ('anthropic', 'claude-sonnet-4-5-20250929')
+    if await _gemini_key():
+        return ('gemini', 'gemini-2.0-flash')
+    return None
+
+
+async def resolve_text_model() -> Optional[tuple]:
+    """Pick a strong general (provider, model) from whatever key is configured.
+
+    Used by text-only build steps (planning, code review) so an operator who
+    only has, e.g., an OpenRouter key can still drive the app instead of being
+    forced to add an Anthropic key. Returns ``None`` when no key is set.
+
+    Prefers Anthropic's Sonnet for build quality, then OpenAI, then the same
+    class of model via OpenRouter, then Gemini.
+    """
+    if await _anthropic_key():
+        return ('anthropic', 'claude-sonnet-4-5-20250929')
+    if await _openai_key():
+        return ('openai', 'gpt-4o')
+    if await _openrouter_key():
+        return ('openrouter', 'anthropic/claude-3.5-sonnet')
+    if await _gemini_key():
+        return ('gemini', 'gemini-2.0-flash')
+    return None
+
+
 def _sniff_mime(raw: bytes) -> str:
     """Guess an image mime type from magic bytes; default to PNG."""
     if raw[:8] == b'\x89PNG\r\n\x1a\n':

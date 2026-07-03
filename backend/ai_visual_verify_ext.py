@@ -113,7 +113,7 @@ async def _take_screenshot(url: str, out_path: Path, timeout_s: float = 25.0) ->
 async def _vision_verify(llm_key: str, screenshot_path: Path, prompt: str, summary: str) -> dict:
     """Send the screenshot + operator's prompt to a vision model and parse
     the JSON verdict. Always returns a dict — never raises."""
-    from llm_router import LlmChat, UserMessage, ImageContent
+    from llm_router import LlmChat, UserMessage, ImageContent, resolve_vision_model
     import json
     import re
 
@@ -122,11 +122,21 @@ async def _vision_verify(llm_key: str, screenshot_path: Path, prompt: str, summa
     except Exception as e:
         return {'verdict': 'review_skipped', 'summary': f'screenshot read failed: {e}', 'concerns': []}
 
+    # Pick whatever vision-capable provider the operator actually has a key for
+    # (OpenAI, OpenRouter, Anthropic or Gemini) instead of hardcoding OpenAI —
+    # otherwise an OpenRouter-only setup fails with a "No OpenAI key" error.
+    resolved = await resolve_vision_model()
+    if not resolved:
+        return {'verdict': 'review_skipped',
+                'summary': 'No AI provider key configured for visual verification.',
+                'concerns': []}
+    provider, model = resolved
+
     chat = LlmChat(
         api_key=llm_key,
         session_id=f'ai-visual-{datetime.now(timezone.utc).timestamp():.0f}',
         system_message=_VISION_SYSTEM_PROMPT,
-    ).with_model('openai', 'gpt-4o-mini')
+    ).with_model(provider, model)
 
     msg = UserMessage(
         text=(
@@ -161,7 +171,7 @@ async def _vision_verify(llm_key: str, screenshot_path: Path, prompt: str, summa
         'verdict': parsed.get('verdict') if parsed.get('verdict') in ('pass', 'warn', 'fail') else 'review_skipped',
         'summary': (parsed.get('summary') or '')[:280],
         'concerns': [str(c)[:280] for c in (parsed.get('concerns') or [])][:8],
-        'reviewer_model': 'gpt-4o-mini',
+        'reviewer_model': f'{provider}:{model}',
     }
 
 
