@@ -10,7 +10,7 @@ import {
 import {
   Sparkles, Cpu, ShieldCheck, Zap, Code2, MessagesSquare,
   Bot, GitBranch, Layers, ArrowRight, Check, TrendingUp,
-  LineChart, Lock, Globe, Share2,
+  LineChart, Lock, Globe, Share2, BrainCircuit, BookOpenCheck, Search,
 } from 'lucide-react';
 import ShareButtons from '../components/ShareButtons';
 
@@ -18,6 +18,42 @@ import ShareButtons from '../components/ShareButtons';
 // dialog ("new view") so the homepage tiles are actually interactive instead
 // of being dead decoration.
 const FEATURES = [
+  {
+    icon: BrainCircuit,
+    title: 'Automatic model routing (amAI)',
+    desc: 'Never pick a model again — amAI sends each message to the right AI and saves you credits.',
+    long: 'amAI reads every message and quietly routes it to the best model for the job: a fast, inexpensive model for quick questions and a powerful one for real engineering. You get great answers without overpaying, and a small note tells you which model was chosen and why.',
+    points: [
+      'Cheap-and-fast for simple questions, powerful for hard problems',
+      'Automatic — no manual switching, no guesswork',
+      'Transparent: see which model handled each message',
+    ],
+    cta: { label: 'Try Automatic mode', to: '/register' },
+  },
+  {
+    icon: BookOpenCheck,
+    title: 'Always-current code docs',
+    desc: 'Fresh, version-specific documentation is pulled into coding answers automatically.',
+    long: 'Ask about React, Next.js, Tailwind, or dozens of other libraries and TBC automatically fetches the newest official docs (via Context7) before answering. You even name a version — "Next.js 14 routing" — and it pins docs to exactly that release, so the code it writes actually runs.',
+    points: [
+      'Newest official docs folded into answers in real time',
+      'Version-aware — target the exact release you use',
+      'Far fewer outdated snippets and deprecated APIs',
+    ],
+    cta: { label: 'Build with current docs', to: '/register' },
+  },
+  {
+    icon: Search,
+    title: 'Live web search & step-by-step reasoning',
+    desc: 'The AI can search the live web for current facts and plan complex tasks methodically.',
+    long: 'When a question needs up-to-date, real-world information, TBC searches the live web and folds the results into its reply instead of relying only on training data. For big, multi-part tasks it can switch on structured step-by-step reasoning so nothing gets missed.',
+    points: [
+      'Live web results for current news, versions, and prices',
+      'Structured step-by-step planning for complex builds',
+      'You see exactly when each tool was used',
+    ],
+    cta: { label: 'See it in action', to: '/register' },
+  },
   {
     icon: Code2,
     title: 'Full-stack code generation',
@@ -137,7 +173,7 @@ export default function Landing() {
         <div className="absolute inset-0 bg-radial-fade" />
         <div className="relative mx-auto max-w-7xl px-5 pt-20 pb-24 md:pt-28 md:pb-32">
           <div className="inline-flex items-center gap-2 rounded-full border border-tbc-500/30 bg-tbc-500/10 px-3 py-1 text-xs font-medium text-tbc-300">
-            <Sparkles className="h-3.5 w-3.5" /> Powered by Claude, GPT-5 & Gemini
+            <Sparkles className="h-3.5 w-3.5" /> Now with amAI smart routing, live web search & always-current docs
           </div>
           <h1 className="mt-6 max-w-4xl text-5xl font-bold leading-[1.05] tracking-tight text-white md:text-7xl">
             Your AI engineer. <br />
@@ -146,8 +182,9 @@ export default function Landing() {
             </span>
           </h1>
           <p className="mt-6 max-w-2xl text-lg leading-relaxed text-slate-300 md:text-xl">
-            TBC AI Tools is a complete copy of an elite AI builder — design, code, debug, and ship
-            production-grade applications through a single conversation. Now available to the TradeBridge Club.
+            Design, code, debug, and ship production-grade apps through a single conversation.
+            TBC AI Tools now picks the best model for you automatically, searches the live web,
+            and pulls in up-to-the-minute documentation — so the code it writes actually works.
           </p>
           <div className="mt-9 flex flex-wrap items-center gap-3">
             <Link to="/register">
@@ -163,8 +200,8 @@ export default function Landing() {
           </div>
 
           <div className="mt-14 grid grid-cols-2 gap-8 border-t border-slate-800/80 pt-8 sm:grid-cols-4 max-w-3xl">
-            <Stat value="3+" label="Frontier Models" />
-            <Stat value="<150ms" label="Avg. Token Latency" />
+            <Stat value="Auto" label="Smart Model Routing" />
+            <Stat value="Live" label="Web Search & Docs" />
             <Stat value="100%" label="Code Ownership" />
             <Stat value="2FA" label="Secure by Default" />
           </div>
@@ -174,9 +211,10 @@ export default function Landing() {
       {/* MODEL STRIP */}
       <section className="border-y border-slate-800/80 bg-slate-900/40 py-8">
         <div className="mx-auto max-w-7xl px-5">
-          <div className="text-center text-xs uppercase tracking-[0.25em] text-slate-500">Choose any model. One conversation.</div>
+          <div className="text-center text-xs uppercase tracking-[0.25em] text-slate-500">Let amAI choose — or pick any model yourself.</div>
           <div className="mt-5 flex flex-wrap items-center justify-center gap-6 text-slate-300">
             {[
+              { name: 'Automatic (amAI)', sub: 'Smart routing', featured: true },
               { name: 'Claude Opus 4.7', sub: 'Anthropic' },
               { name: 'Claude Sonnet 4.6', sub: 'Anthropic' },
               { name: 'GPT-5', sub: 'OpenAI' },
@@ -184,10 +222,19 @@ export default function Landing() {
               { name: 'Gemini 3 Flash', sub: 'Google' },
               { name: 'GPT-4.1', sub: 'OpenAI' },
             ].map((m) => (
-              <div key={m.name} className="flex items-center gap-2 rounded-lg border border-slate-800 bg-ink-950/60 px-3.5 py-2">
-                <Bot className="h-4 w-4 text-tbc-400" />
+              <div
+                key={m.name}
+                className={`flex items-center gap-2 rounded-lg border px-3.5 py-2 ${
+                  m.featured
+                    ? 'border-tbc-500/50 bg-tbc-500/10 ring-1 ring-tbc-500/30'
+                    : 'border-slate-800 bg-ink-950/60'
+                }`}
+              >
+                {m.featured
+                  ? <BrainCircuit className="h-4 w-4 text-tbc-300" />
+                  : <Bot className="h-4 w-4 text-tbc-400" />}
                 <div className="leading-tight">
-                  <div className="text-sm font-semibold text-white">{m.name}</div>
+                  <div className={`text-sm font-semibold ${m.featured ? 'text-tbc-100' : 'text-white'}`}>{m.name}</div>
                   <div className="text-[10px] uppercase tracking-wider text-slate-500">{m.sub}</div>
                 </div>
               </div>
