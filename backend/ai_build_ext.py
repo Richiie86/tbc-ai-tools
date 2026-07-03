@@ -62,7 +62,7 @@ _PR_RATE_LIMIT = int(os.environ.get('AI_BUILD_PR_LIMIT', '20'))
 _PR_RATE_WINDOW = int(os.environ.get('AI_BUILD_PR_WINDOW', '60'))
 
 # Model used for the cross-AI patch reviewer. The old hardcoded
-# "claude-opus-4-5" is NOT a real model id and the Emergent/litellm gateway
+# "claude-opus-4-5" is NOT a real model id and the provider gateway
 # rejected it ("Invalid model name passed in model=claude-opus-4-5"),
 # crashing every cross-AI review. Default to the proven-working Sonnet 4.5;
 # operators can override with the SECOND_OPINION_MODEL env var.

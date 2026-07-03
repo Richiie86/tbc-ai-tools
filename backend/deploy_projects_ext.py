@@ -1817,7 +1817,7 @@ def _build_self_zip() -> bytes:
                     zf.writestr(
                         str(Path('tbctools-self') / rel),
                         '# Live secrets were stripped before download.\n'
-                        '# Copy keys from your own deployment / Emergent dashboard.\n',
+                        '# Copy keys from your own deployment dashboard.\n',
                     )
                     continue
                 try:

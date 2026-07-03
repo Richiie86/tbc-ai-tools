@@ -102,7 +102,7 @@
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
 
-user_problem_statement: "Build TBC AI Control — a self-replica AI coding assistant (E1-style) for TradeBridge Club. Features: chat with GPT-5/Claude/Gemini via Emergent LLM key, TOTP 2FA login (operator: rac.invetments.swe@gmail.com), Stripe payments (Starter/Pro/Enterprise), operator console, contact form."
+user_problem_statement: "Build TBC AI Control — a self-replica AI coding assistant (E1-style) for TradeBridge Club. Features: chat with GPT-5/Claude/Gemini via the LLM provider key, TOTP 2FA login (operator: rac.invetments.swe@gmail.com), Stripe payments (Starter/Pro/Enterprise), operator console, contact form."
 
 backend:
   - task: "Health endpoint /api/"
@@ -175,10 +175,10 @@ backend:
     status_history:
         - working: "NA"
           agent: "main"
-          comment: "POST /api/chat/stream returns SSE with delta/done/error events. Uses emergentintegrations LlmChat. Saves user + assistant messages to MongoDB. Decrements credits. GET /api/chat/models lists providers."
+          comment: "POST /api/chat/stream returns SSE with delta/done/error events. Uses llm_router LlmChat. Saves user + assistant messages to MongoDB. Decrements credits. GET /api/chat/models lists providers."
         - working: true
           agent: "testing"
-          comment: "✅ PASS - Chat streaming infrastructure working correctly. GET /api/chat/models returns all providers (OpenAI, Anthropic, Gemini). SSE streaming tested successfully with claude-sonnet-4-6 and gemini-3-flash-preview - both return delta events and done event, messages saved to DB correctly. Minor: gpt-5.4 model name not available in Emergent LLM API (returns 400 error), but streaming infrastructure itself is fully functional. Recommend using claude-sonnet-4-6 or other available models."
+          comment: "✅ PASS - Chat streaming infrastructure working correctly. GET /api/chat/models returns all providers (OpenAI, Anthropic, Gemini). SSE streaming tested successfully with claude-sonnet-4-6 and gemini-3-flash-preview - both return delta events and done event, messages saved to DB correctly. Minor: gpt-5.4 model name not available in the LLM provider API (returns 400 error), but streaming infrastructure itself is fully functional. Recommend using claude-sonnet-4-6 or other available models."
 
   - task: "Stripe checkout, status polling, webhook"
     implemented: true
@@ -528,11 +528,11 @@ agent_communication:
     - agent: "main"
       message: "Massive expansion: added TBC2 route (/tbc2), editable plans, treasury (bank+crypto), payment settings (API keys stored in DB), manual payment flow (crypto QR + bank transfer with proof submission), PDF receipts (single + date-range export), licenses + royalty system (10% flat to operator), and operator UI tabs for all of the above. Theme switched to dark near-black + champagne gold (matches tradebridgeclub.com). Please test: GET /api/payments/plans (DB-backed), GET /api/payments/methods, GET /api/payments/treasury/active (no treasury → 404), operator CRUD on /api/operator/plans, /api/operator/treasury, /api/operator/settings, /api/operator/licenses, POST /api/license/report-earnings, /api/operator/royalties, manual payment submission/confirm/reject, PDF generation /api/operator/transactions/{id}/receipt and /api/operator/transactions/export?from=...&to=... — verify these return PDFs (binary). Use operator token (credentials from OPERATOR_EMAIL / OPERATOR_PASSWORD env vars). For royalty testing: create a license, call /api/license/report-earnings with that key + a fake amount, verify a royalty record appears in /api/operator/royalties."
     - agent: "testing"
-      message: "26/27 tests passed. All auth (register/login/2FA), chat CRUD, SSE streaming (claude-sonnet-4-6, gemini-3-flash-preview), Stripe checkout/status, contact form, operator routes, and authorization checks working. Only gpt-5.4 model name not available in Emergent LLM API."
+      message: "26/27 tests passed. All auth (register/login/2FA), chat CRUD, SSE streaming (claude-sonnet-4-6, gemini-3-flash-preview), Stripe checkout/status, contact form, operator routes, and authorization checks working. Only gpt-5.4 model name not available in the LLM provider API."
     - agent: "main"
       message: "Switched DEFAULT_MODEL to claude-sonnet-4-6 and removed gpt-5.4 from model list. Updated plan feature descriptions. Backend is fully working."
     - agent: "testing"
-      message: "✅ Backend testing complete. Executed comprehensive test suite covering all 25 flows. Results: 26/27 tests PASSED. All core functionality working: auth (register/login/2FA), chat sessions CRUD, chat streaming (Claude & Gemini), Stripe payments, contact form, operator console, authorization. Minor issue: gpt-5.4 model name not available in Emergent LLM API, but streaming infrastructure fully functional (verified with Claude and Gemini). Backend is production-ready."
+      message: "✅ Backend testing complete. Executed comprehensive test suite covering all 25 flows. Results: 26/27 tests PASSED. All core functionality working: auth (register/login/2FA), chat sessions CRUD, chat streaming (Claude & Gemini), Stripe payments, contact form, operator console, authorization. Minor issue: gpt-5.4 model name not available in the LLM provider API, but streaming infrastructure fully functional (verified with Claude and Gemini). Backend is production-ready."
     - agent: "testing"
       message: "✅ NEW ENDPOINTS TESTING COMPLETE (referrals + projects + brand settings). Executed comprehensive test suite for all new endpoints. Results: 22/22 tests PASSED (100%). All features working: Brand settings (public GET returns correct values, operator GET/PUT updates referral_pct successfully), Referral system (auto-generated codes from email slugs, click tracking, signup tracking, commission calculation, operator list with stats), Projects CRUD (GET/POST/PUT/DELETE all working, authorization enforced). Test flow: (1) Public brand settings verified, (2) Registered user, got referral code 'test-ref-1781209829', (3) Tracked 2 clicks, verified count, (4) Registered second user with referral code, verified signups=1, (5) Operator endpoints all working, (6) Updated referral_pct to 15% and back to 10%, (7) Created/updated/deleted project, (8) Regular user correctly denied access (403). All endpoints production-ready."
     - agent: "testing"

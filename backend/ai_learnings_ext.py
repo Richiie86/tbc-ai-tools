@@ -160,7 +160,7 @@ async def digest(
     button so the operator gets a one-paragraph personality changelog for
     sharing / archiving.
 
-    Uses a small LLM call (Gemini Flash via Emergent Universal Key) to
+    Uses a small LLM call (Gemini Flash) to
     summarise — falls back to a deterministic bullet list if the LLM is
     unreachable so the endpoint never fails in CI.
     """

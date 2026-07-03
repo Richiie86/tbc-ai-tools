@@ -4,7 +4,7 @@ When the AI code review verdict is `do_not_ship`, this module:
   1. Fetches the current contents of every file mentioned in the findings
      (via the GitHub Contents API with `github_token` from settings).
   2. Asks the LLM for STRICT JSON patches (`[{path, content, rationale}]`)
-     using the same Emergent LLM key the rest of the platform uses.
+     using the same LLM provider key the rest of the platform uses.
   3. Commits each patch to the project's tracked branch via PUT
      `/repos/{repo}/contents/{path}` (one commit per file, sharing a base
      commit message + suffix so the history reads as a coherent fix).

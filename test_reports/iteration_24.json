@@ -3,7 +3,7 @@
   "backend_issues": {
     "critical": [],
     "minor": [
-      {"endpoint": "POST /api/operator/ai-build/plan", "issue": "Live happy-path still 503 (no github_token / EMERGENT_LLM_KEY) — graceful, by design. The new `review` field is added at line 442 of ai_build_ext.py only when /plan succeeds, so the field-presence assertion cannot be exercised against this preview. Code-reviewed: returns None when no files, otherwise calls _cross_ai_review which always yields a dict (verdict='review_skipped' on LLM failure). No regression."}
+      {"endpoint": "POST /api/operator/ai-build/plan", "issue": "Live happy-path still 503 (no github_token / ANTHROPIC_API_KEY) — graceful, by design. The new `review` field is added at line 442 of ai_build_ext.py only when /plan succeeds, so the field-presence assertion cannot be exercised against this preview. Code-reviewed: returns None when no files, otherwise calls _cross_ai_review which always yields a dict (verdict='review_skipped' on LLM failure). No regression."}
     ]
   },
   "frontend_issues": {
@@ -16,7 +16,7 @@
     "/app/test_reports/pytest/iter24.xml"
   ],
   "action_items": [
-    "(OPTIONAL) Set github_token + EMERGENT_LLM_KEY + vercel_token in payment_settings to exercise the live happy-path of /plan (with review field), /open-pr, and /preview-url against a real Vercel deployment. All endpoints already pass the graceful-degradation paths.",
+    "(OPTIONAL) Set github_token + ANTHROPIC_API_KEY + vercel_token in payment_settings to exercise the live happy-path of /plan (with review field), /open-pr, and /preview-url against a real Vercel deployment. All endpoints already pass the graceful-degradation paths.",
     "(NOTE — pre-existing, NOT iter24 regression) /app/backend/tests/test_iter23_ai_build.py has 2 tests (test_discard_planned_then_verify, test_open_pr_already_opened_409) that fail with KeyError('MONGO_URL') because they call `os.environ['MONGO_URL']` without loading /app/backend/.env first. iter24 tests fixed this by adding `load_dotenv('/app/backend/.env')` in an autouse fixture. E1 can apply the same patch to iter23 to make it pass cleanly under pytest invocation from /app/backend/."
   ],
   "critical_code_review_comments": [
@@ -34,6 +34,6 @@
   "seed_data_creation": "Inserted + cleaned 3 synthetic docs per test run (ai_build_plans planned/opened, deploy_projects with last_code_review.second_opinion). All cleaned in finally blocks. Existing 'plan_opened_*' synthetic from iter23 (created by previous testing agent) is still in DB and was used to verify the preview-probe button renders in the live UI history.",
   "retest_needed": false,
   "main_agent_can_self_test": true,
-  "context_for_next_testing_agent": "iter24 regression suite at /app/backend/tests/test_iter24_cross_ai_review.py — 10 tests, all passing. Covers: preview-url 401/404/409/200-graceful, /plan still 503 cleanly, escalation rule 3 branches (promote / no-promote when primary blocks / no-promote when second approves), source-level presence of verdict_promoted_by in code_review.py, and the 412 ship-gate carries second_opinion (synthetic deploy_projects fixture). To exercise the LIVE cross-AI path, set EMERGENT_LLM_KEY + github_token in payment_settings — the iter23 test_plan_happy_path_or_503 will then return 200 and the response will include a `review` field with verdict/concerns/missing_imports/security_flags. UI: ReviewPanel renders only after a real /plan call — currently no testid in DOM because no plan has been generated this session.",
+  "context_for_next_testing_agent": "iter24 regression suite at /app/backend/tests/test_iter24_cross_ai_review.py — 10 tests, all passing. Covers: preview-url 401/404/409/200-graceful, /plan still 503 cleanly, escalation rule 3 branches (promote / no-promote when primary blocks / no-promote when second approves), source-level presence of verdict_promoted_by in code_review.py, and the 412 ship-gate carries second_opinion (synthetic deploy_projects fixture). To exercise the LIVE cross-AI path, set ANTHROPIC_API_KEY + github_token in payment_settings — the iter23 test_plan_happy_path_or_503 will then return 200 and the response will include a `review` field with verdict/concerns/missing_imports/security_flags. UI: ReviewPanel renders only after a real /plan call — currently no testid in DOM because no plan has been generated this session.",
   "rca of the issue": "N/A — all iter24 scope verified passing. Live LLM paths intentionally not exercised (no keys configured in this preview); all graceful-degradation paths confirmed."
 }

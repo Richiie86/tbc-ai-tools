@@ -3,7 +3,7 @@ and Vercel /preview-url endpoint.
 
 Verifies:
   - /api/operator/ai-build/preview-url/{plan_id} endpoints behave per spec
-  - AI Build /plan still 503s cleanly when github_token/EMERGENT_LLM_KEY missing
+  - AI Build /plan still 503s cleanly when github_token / LLM key missing
   - existing /code-review escalation rule: when primary verdict != do_not_ship
     and second_opinion.verdict == do_not_ship, final verdict gets promoted to
     do_not_ship with verdict_promoted_by='second_opinion'. We exercise this by
@@ -22,7 +22,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from tests._creds import OP_EMAIL, OP_PASSWORD
 
 BASE_URL = (os.environ.get('REACT_APP_BACKEND_URL')
-            or 'https://tbc-self-copy.preview.emergentagent.com').rstrip('/')
+            or 'http://localhost:8000').rstrip('/')
 
 AI_BUILD = f'{BASE_URL}/api/operator/ai-build'
 

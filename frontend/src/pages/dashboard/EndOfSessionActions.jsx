@@ -5,7 +5,7 @@ import { Rocket, ShieldCheck, Wrench, HeartPulse } from 'lucide-react';
  * Big end-of-session action bar — Deploy / Run Code Review /
  * Run Health Check / Fix Errors.
  *
- * Mirrors the prominent button strip Emergent shows after an agent turn,
+ * A prominent button strip shown after an agent turn,
  * so the operator can act on a finished chat without scrolling up to find
  * the small per-message Quick Actions. Rendered ONCE at the bottom of the
  * message list, only when streaming is finished and the last message is

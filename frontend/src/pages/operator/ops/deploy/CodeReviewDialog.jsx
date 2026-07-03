@@ -26,7 +26,7 @@ export function CodeReviewDialog({ open, onOpenChange, review, project }) {
   const missing = Array.isArray(review.missing_files) ? review.missing_files : [];
   // Per-severity dot counts so the operator gets an at-a-glance "traffic
   // light" before they scan the full findings list. Matches the
-  // colour-coded dots the Emergent agent shows when it runs its own
+  // colour-coded dots the agent shows when it runs its own
   // review — operator asked explicitly for the same visual language.
   const counts = findings.reduce((acc, f) => {
     const sev = (f.severity || 'low').toLowerCase();
@@ -60,8 +60,8 @@ export function CodeReviewDialog({ open, onOpenChange, review, project }) {
               >
                 {review.verdict || 'unknown'}
               </span>
-              {/* Traffic-light dot summary — same visual language the Emergent
-                  agent uses when it runs its own review. Each dot pulses if
+              {/* Traffic-light dot summary — same visual language the agent
+                  uses when it runs its own review. Each dot pulses if
                   the count > 0 so the eye is drawn to high severities. */}
               {findings.length > 0 && (
                 <div

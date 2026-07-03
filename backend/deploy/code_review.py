@@ -248,8 +248,8 @@ _SECOND_OPINION_PROMPT = (
 
 # Model used for the cross-AI second opinion. Defaults to the same
 # proven-working model as the primary reviewer (Sonnet 4.5) — the old
-# hardcoded "claude-opus-4-5" is NOT a real model name and the Emergent/
-# litellm gateway rejected it ("Invalid model name passed in
+# hardcoded "claude-opus-4-5" is NOT a real model name and the provider
+# gateway rejected it ("Invalid model name passed in
 # model=claude-opus-4-5"), which crashed every second-opinion pass.
 # Operators can override this with a valid model id (Anthropic or, via the
 # gateway, another provider) using the SECOND_OPINION_MODEL env var.
@@ -275,7 +275,7 @@ async def _second_opinion(snapshot: dict, first_review: dict, llm_key: str) -> d
     )
     # Second opinion runs over the same snapshot + the first reviewer's
     # verdict. Uses a VALID model id (see _SECOND_OPINION_MODEL) — keeps the
-    # pass on the operator's BYO Anthropic key when set (no Emergent spend).
+    # pass on the operator's own Anthropic key when set.
     chat = LlmChat(
         api_key=llm_key,
         session_id=f'code-review-second-{datetime.now(timezone.utc).timestamp():.0f}',

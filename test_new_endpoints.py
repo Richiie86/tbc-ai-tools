@@ -9,7 +9,7 @@ import pyotp
 import time
 import json
 
-BASE_URL = os.environ.get("TEST_BASE_URL", "https://tbc-self-copy.preview.emergentagent.com/api")
+BASE_URL = os.environ.get("TEST_BASE_URL", "https://tbctools.org/api")
 
 # Credentials from environment only — nothing sensitive is committed.
 #   export TEST_OPERATOR_EMAIL="operator@example.com"

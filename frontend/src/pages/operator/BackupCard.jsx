@@ -9,7 +9,7 @@ import api from '../../lib/api';
  * (deploy projects, promo codes, KYC bypass list, app settings).
  *
  * Workflow:
- *   1. On the source environment (e.g. Emergent preview), click Export
+ *   1. On the source environment (e.g. a preview environment), click Export
  *      → a JSON file downloads to your device.
  *   2. On the target environment (e.g. tbctools.org production), click
  *      Import → paste the JSON or select the downloaded file → submit.

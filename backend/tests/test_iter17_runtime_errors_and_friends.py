@@ -163,14 +163,14 @@ class TestRuntimeErrorsOperator:
 
     def test_rca_returns_full_shape_and_persists_to_doc(self, op_session):
         """POST /rca — real LLM call, ~2-3s. We tolerate either a 200 with
-        the documented shape, or a 502 if EMERGENT_LLM_KEY is missing
+        the documented shape, or a 502 if no LLM key is configured
         (preview env). Anything else is a regression."""
         r = op_session.post(
             f'{BASE_URL}/api/operator/runtime-errors/{pytest.iter17_first_id}/rca',
             timeout=60,
         )
         if r.status_code == 503:
-            pytest.skip('EMERGENT_LLM_KEY not configured — RCA endpoint unavailable')
+            pytest.skip('No LLM key configured — RCA endpoint unavailable')
         assert r.status_code == 200, f'{r.status_code} {r.text[:300]}'
         rca = r.json()
         for k in ('root_cause', 'suggested_change', 'confidence', 'generated_at'):

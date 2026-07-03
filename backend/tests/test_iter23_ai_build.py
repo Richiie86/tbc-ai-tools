@@ -5,7 +5,7 @@ Covers:
   - GET /history returns {entries, count}
   - POST /plan with bad project_id → 404
   - POST /plan with adversarial prompt → blocked paths never appear in `files`
-  - POST /plan happy path is OPTIONAL (skip if github_token / EMERGENT_LLM_KEY missing
+  - POST /plan happy path is OPTIONAL (skip if github_token / LLM key missing
     or if no deploy project exists — we don't want to flake on infra)
   - DELETE /plan/{id} on planned → 200, on opened → 404, on missing → 404
   - We DO NOT exercise /open-pr against real GitHub — it would pollute the repo.
@@ -20,7 +20,7 @@ import asyncio
 from tests._creds import OP_EMAIL, OP_PASSWORD
 
 BASE_URL = (os.environ.get('REACT_APP_BACKEND_URL')
-            or 'https://tbc-self-copy.preview.emergentagent.com').rstrip('/')
+            or 'http://localhost:8000').rstrip('/')
 
 AI_BUILD = f'{BASE_URL}/api/operator/ai-build'
 

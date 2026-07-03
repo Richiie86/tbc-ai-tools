@@ -14,7 +14,7 @@ Production: [www.tbctools.org](https://www.tbctools.org)
 | Backend   | FastAPI (Python), Motor (async MongoDB)                      |
 | Database  | MongoDB                                                      |
 | Auth      | JWT sessions, bcrypt password hashing, operator role         |
-| AI        | Emergent LLM gateway (Anthropic / OpenAI), code review + fix |
+| AI        | Multi-provider LLM (Anthropic / OpenAI / Gemini / others), code review + fix |
 | Infra     | Upstash Redis (rate limiting), Vercel/GitHub deploy hooks    |
 
 ```
@@ -28,7 +28,7 @@ tests/      pytest integration suites
 - Node.js 18+ and npm/yarn
 - Python 3.11+
 - A running MongoDB instance
-- At least one LLM provider key (Emergent, Anthropic, or OpenAI)
+- At least one LLM provider key (Anthropic, OpenAI, Gemini, or others)
 
 ## Setup
 
@@ -67,7 +67,7 @@ and [`frontend/.env.example`](frontend/.env.example). Key ones:
 | `JWT_SECRET`         |    Yes   | Signs session tokens (`openssl rand -base64 48`)|
 | `OPERATOR_EMAIL`     |    Yes   | Bootstrap operator login                       |
 | `OPERATOR_PASSWORD`  |    Yes   | Bootstrap operator password (rotate after use) |
-| `EMERGENT_LLM_KEY`   | One LLM  | LLM gateway key (or `ANTHROPIC_API_KEY`/`OPENAI_API_KEY`) |
+| `ANTHROPIC_API_KEY`  | One LLM  | LLM provider key (or `OPENAI_API_KEY`/`GEMINI_API_KEY`/`OPENROUTER_API_KEY`/`GROQ_API_KEY`) |
 | `CORS_ORIGINS`       |    No    | Comma-separated allow-list (default: prod regex)|
 | `GITHUB_TOKEN`       |    No    | Repo review + deploy                           |
 | `SECOND_OPINION_MODEL`|   No    | Override cross-AI reviewer model               |

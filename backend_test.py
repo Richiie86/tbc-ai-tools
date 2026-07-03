@@ -12,7 +12,7 @@ import json
 from datetime import datetime
 
 # Backend URL — override with TEST_BASE_URL when running elsewhere.
-BASE_URL = os.environ.get("TEST_BASE_URL", "https://tbc-self-copy.preview.emergentagent.com/api")
+BASE_URL = os.environ.get("TEST_BASE_URL", "https://tbctools.org/api")
 
 # Operator credentials come EXCLUSIVELY from environment variables so no secret
 # is ever committed to the repo. Set these before running:

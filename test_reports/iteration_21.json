@@ -30,10 +30,10 @@
     "backend": "100% (14/14)",
     "frontend": "100% (all selectors render, all flows pass)"
   },
-  "test_credentials": "Operator: rac.investments.swe@gmail.com / REDACTED (no TOTP). Skip button on /setup-2fa works. REACT_APP_BACKEND_URL=https://tbc-self-copy.preview.emergentagent.com.",
+  "test_credentials": "Operator: rac.investments.swe@gmail.com / REDACTED (no TOTP). Skip button on /setup-2fa works. REACT_APP_BACKEND_URL=https://tbc-self-copy.the old preview host.",
   "seed_data_creation": "None. Each test cleans up via PUT {url:'', enabled:true} and PATCH login_lockdown_enabled:false. Final env state confirmed clean (configured=false, lockdown=false).",
   "retest_needed": false,
   "main_agent_can_self_test": true,
-  "context_for_next_testing_agent": "Webhook bridge shipped + tested end-to-end. To re-run: REACT_APP_BACKEND_URL=https://tbc-self-copy.preview.emergentagent.com python -m pytest backend/tests/test_webhook_ext.py -v. Tests use httpbin.org/post which is public — if that ever rate-limits in CI, swap to a local httptest server fixture. The send_event call sites (runtime_errors_ext, ai_test_bench_ext, deploy_projects_ext) are NOT exercised end-to-end by this iteration — they're only verified via the explicit /test endpoint and via static-code inspection of the imports. To test those code paths you'd need to trigger a real critical error / nightly drift / promote.",
+  "context_for_next_testing_agent": "Webhook bridge shipped + tested end-to-end. To re-run: REACT_APP_BACKEND_URL=https://tbc-self-copy.the old preview host python -m pytest backend/tests/test_webhook_ext.py -v. Tests use httpbin.org/post which is public — if that ever rate-limits in CI, swap to a local httptest server fixture. The send_event call sites (runtime_errors_ext, ai_test_bench_ext, deploy_projects_ext) are NOT exercised end-to-end by this iteration — they're only verified via the explicit /test endpoint and via static-code inspection of the imports. To test those code paths you'd need to trigger a real critical error / nightly drift / promote.",
   "rca_of_the_issue": "N/A — no bugs found. Feature ships clean. The original PUT/test pair, mask-host, https-only validation, kill-switch toggle, and clear flow all work first try; the FE card wires up cleanly to the BE; and the lockdown 503 paths still fire (the inline `from webhook_ext import send_event` + try/except wrapper is correctly defensive)."
 }

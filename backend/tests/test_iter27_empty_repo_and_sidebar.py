@@ -234,7 +234,7 @@ class TestCodeReviewEmptyRepoFastPath:
             # run_code_review(project: dict, settings: dict) is the public
             # entrypoint. We pass a settings dict with a sham llm key
             # because the upstream config check will reject empty creds.
-            settings = {'emergent_llm_key': 'sham-key-iter27-test'}
+            settings = {'anthropic_api_key': 'sham-key-iter27-test'}
             result = await cr.run_code_review(project_doc, settings)
             assert isinstance(result, dict), f'expected dict, got {type(result)}'
             assert result.get('verdict') == 'repo_empty', (

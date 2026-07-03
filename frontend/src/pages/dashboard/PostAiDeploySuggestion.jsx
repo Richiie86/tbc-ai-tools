@@ -23,7 +23,7 @@ const writePreview = (url) => {
  * 1. After an AI streaming completion (`visible=true`, no preview yet) it
  *    asks the operator to ship — Review / Health / Redeploy buttons.
  * 2. After a successful deploy it morphs into a "Your Preview is ready"
- *    pill (Emergent-style) with a clickable thumbnail that pops the live
+ *    pill with a clickable thumbnail that pops the live
  *    URL in a new tab.
  *
  * Hidden for non-operators and when no deploy project is picked.
@@ -159,7 +159,7 @@ export function PostAiDeploySuggestion({ user, visible, onDismiss }) {
 }
 
 /**
- * "Your Preview is ready" pill — Emergent-style. Sits above the message
+ * "Your Preview is ready" pill — agent-style. Sits above the message
  * field, shows a tiny live-preview thumbnail (sandboxed iframe), and
  * clicking opens the full URL in a new tab.
  *

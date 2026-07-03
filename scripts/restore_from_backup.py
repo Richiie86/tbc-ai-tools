@@ -32,7 +32,7 @@ SINGLETONS = {
 }
 
 # Flat-array exports (one file == one collection), e.g. the AI learnings
-# recovered from Emergent. Maps collection name -> glob pattern.
+# recovered from the old host. Maps collection name -> glob pattern.
 FLAT_EXPORTS = {
     "ai_learnings": "data/backups/ai_learnings-*.json",
 }

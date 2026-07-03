@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
 One-time data migration: copy every collection from the OLD MongoDB
-(Emergent's database) into the NEW MongoDB Atlas database.
+(the old source database) into the NEW MongoDB Atlas database.
 
 It is SAFE to run more than once: by default it only copies a collection if
 the destination collection is empty, so it won't duplicate data. Use
 --overwrite to force a clean re-copy (drops the destination collection first).
 
 Required environment variables:
-  OLD_MONGO_URL   full connection string of the CURRENT/Emergent database
+  OLD_MONGO_URL   full connection string of the CURRENT/old database
   MONGO_URL       full connection string of the NEW Atlas database
   DB_NAME         database name to copy into on the new side (e.g. tbctools)
   OLD_DB_NAME     (optional) source db name if different from DB_NAME
@@ -45,7 +45,7 @@ def main() -> int:
     old_db_name = os.environ.get('OLD_DB_NAME', '').strip() or _db_name_from_uri(old_uri, new_db_name)
 
     if not old_uri:
-        print('ERROR: OLD_MONGO_URL is not set (the old/Emergent database).')
+        print('ERROR: OLD_MONGO_URL is not set (the old/source database).')
         return 1
     if not new_uri:
         print('ERROR: MONGO_URL is not set (the new Atlas database).')

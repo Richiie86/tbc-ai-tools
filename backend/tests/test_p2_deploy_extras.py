@@ -222,8 +222,7 @@ class TestCodeReview:
             if 'application/json' in ct:
                 detail = r.json().get('detail', '').lower()
                 assert ('github' in detail or 'token' in detail
-                        or 'llm' in detail or 'rate' in detail
-                        or 'emergent' in detail), (
+                        or 'llm' in detail or 'rate' in detail), (
                     f"unexpected error detail: {detail}"
                 )
 

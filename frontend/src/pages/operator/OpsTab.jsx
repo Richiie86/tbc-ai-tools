@@ -85,7 +85,7 @@ export default function OpsTab() {
 
   // One-tap "Deploy this app" → ships the configured self-repo to Vercel via
   // POST /operator/deploy/self/deploy. Replaces the old card that only linked
-  // out to Emergent's now-defunct deploy panel. Surfaces the backend's
+  // out to the old now-defunct deploy panel. Surfaces the backend's
   // actionable preconditions (missing Vercel token, unconfigured/empty repo,
   // blocked review) as toasts with a one-click jump to the right settings.
   const selfDeploy = async () => {

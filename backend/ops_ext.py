@@ -21,7 +21,7 @@ router = APIRouter(prefix='/api/operator/ops')
 # ---------------------------------------------------------------------------
 # Path / environment resolution
 #
-# This module was originally written for Emergent's Kubernetes pod where the
+# This module was originally written for a Kubernetes pod where the
 # repo always lived at `/app` and `sudo supervisorctl` managed the services.
 # In other hosting environments (Vercel/serverless containers, a fresh VM,
 # local dev) `/app` may not exist, supervisor may be absent, and git may not
@@ -206,7 +206,7 @@ def _check_services() -> list[dict]:
     a stopped sidecar because the row would just say "non-critical · ok".
     """
     CORE_SERVICES = {'backend', 'frontend', 'mongodb'}
-    # supervisor only exists in the Emergent pod image. Where it's absent
+    # supervisor only exists in the legacy pod image. Where it's absent
     # (serverless / managed container / local dev) there's nothing to query —
     # the platform's process management is handled by the host. Surface a
     # single skipped info row instead of an empty section or a red failure.

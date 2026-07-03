@@ -20,7 +20,7 @@ import pymongo
 
 from tests._creds import OPERATOR_EMAIL, OPERATOR_PASSWORD, require_operator_creds
 
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://tbc-self-copy.preview.emergentagent.com").rstrip("/")
+BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "http://localhost:8000").rstrip("/")
 API = f"{BASE_URL}/api"
 # Credentials come from env vars (see tests/_creds.py) — no secrets in source.
 OPERATOR_PASS = OPERATOR_PASSWORD

@@ -5,7 +5,7 @@ What this module does
 Gives the operator a single dial that decides *how good / how expensive* the
 AI should be, mapped onto real models the app already supports (see
 ``server.py:MODEL_PROVIDERS``). It also reports which bill each request lands
-on (the operator's own Anthropic/OpenAI key vs. the shared Emergent budget)
+on (which of the operator's own provider keys is active)
 and shows an estimated cost per request / per 100 requests at every level.
 
 Design guarantees (so nothing silently gets worse)

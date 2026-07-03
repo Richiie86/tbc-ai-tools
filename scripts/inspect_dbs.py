@@ -1,4 +1,4 @@
-"""Read-only comparison of the OLD Emergent source DB and the current DB.
+"""Read-only comparison of the OLD source DB and the current DB.
 
 Reads connection info from env vars only. Performs NO writes.
 """
@@ -30,7 +30,7 @@ def summarize(label, url_key, name_key):
         return {}
 
 
-src = summarize("OLD Emergent source", "SOURCE_MONGO_URL", "SOURCE_DB_NAME")
+src = summarize("OLD source", "SOURCE_MONGO_URL", "SOURCE_DB_NAME")
 cur = summarize("CURRENT (live)", "MONGO_URL", "DB_NAME")
 
 print("\n=== DIFF (collections only in source, or with more docs in source) ===")

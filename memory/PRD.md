@@ -52,7 +52,7 @@ gold theme. Domain: **tbctools.org**.
 - ✅ **Sidebar "Fix review:" cleanup** — `_create_fix_review_chat` now stamps `kind='fix_review'` on the inserted `chat_sessions` doc; `GET /api/chat/sessions` adds `kind: {$ne:'fix_review'}` filter. Backfilled 3 existing fix-review chats for the operator account. Sidebar shows only chats the user started themselves; fix-review chats still reachable via the deep-link returned in the 412 deploy body.
 - ✅ **Cross-AI VISUAL verification (`ai_visual_verify_ext.py`)** — after a PR opens, a background task polls for the Vercel preview URL (≤3 min), shells out to Playwright CLI for a 1280×800 screenshot, sends it to GPT-4o-mini vision with the operator's prompt as context, parses a strict `{verdict:pass/warn/fail, summary, concerns[]}` and stamps it on the `ai_build_plans` doc. Auto-merge sweep in `auto_fix_loop_ext.py` blocks merges when `visual_verify.verdict=='fail'` — visual regressions never auto-ship.
 - ✅ **`VisualVerifyChip` in AI Build history** — pill next to each PreviewButton showing the visual verdict (emerald/amber/rose). Click to re-run a fresh screenshot + verification.
-- ✅ **Floating "View Preview" button rendered** — Dashboard.jsx imports `ViewPreviewButton` and now actually renders it (fix from previous session where it was imported but never mounted). Positioned `bottom-20` so it sits above the "Made with Emergent" badge instead of being obscured.
+- ✅ **Floating "View Preview" button rendered** — Dashboard.jsx imports `ViewPreviewButton` and now actually renders it (fix from previous session where it was imported but never mounted). Positioned `bottom-20` so it sits above the "Made with the platform" badge instead of being obscured.
 - ✅ **Dashboard.jsx decomposition (Task 2)** — extracted the ~170-line `handleInlineAction` into `useInlineChatActions.js` hook. Byte-for-byte identical behaviour; cleaner Dashboard.jsx.
 - ✅ **Tested live**: iter27 — 11/11 backend tests green, all frontend flows live-verified (sidebar filter end-to-end, FAB position+href, VisualVerifyChip in history).
 
@@ -77,7 +77,7 @@ gold theme. Domain: **tbctools.org**.
 - ⏭️ **Dashboard.jsx decomposition — DEFERRED** to a future session. File is currently 506 LOC and 100% passing tests; a clean split (SessionsSidebar / ChatHeader / MessageList / ChatComposer) is straightforward but high-touch and would benefit from a dedicated review iteration.
 
 ## Implemented — Feb 2026 (previous session, batch 15)
-- ✅ **End-of-Session action bar in chat** — `EndOfSessionActions.jsx` renders BIG pill buttons under the last assistant message of every completed session, matching the Emergent-style strip the operator showed in the screenshot:
+- ✅ **End-of-Session action bar in chat** — `EndOfSessionActions.jsx` renders BIG pill buttons under the last assistant message of every completed session, matching the the platform-style strip the operator showed in the screenshot:
   - 🚀 **Deploy** (blue→tbc gradient)
   - 🛡️ **Run Code Review** (emerald gradient)
   - 🛠️ **Fix Errors** (amber→rose gradient) — only visible when the assistant's last message contains `error / exception / traceback / failed / crash / undefined / cannot read`. Click → deep-links to `/operator?tab=ai-build` with the assistant's text pre-filled as a fix prompt.
@@ -137,12 +137,12 @@ gold theme. Domain: **tbctools.org**.
   - **Hard server-side blocklist** (`BLOCKED_PATH_PATTERNS`): `.env`, `backend/auth*`, `backend/*payment*.py`, `backend/*stripe*.py`, `backend/*nowpayments*.py`, `backend/*paypal*.py`, `backend/models.py`, `secrets_ext.py`, `.git/`, `package-lock.json`, `yarn.lock`. Two-tier defence (context-build skip + post-LLM strip) against prompt-injection bypasses.
   - Per-request caps: 12 files, 80 KB / file, 4 KB prompt — sane guards against hallucinated mega-refactors.
   - Frontend: `AIBuildTab.jsx` — project dropdown, prompt box (4000-char limit), Plan button → diff preview with per-file collapse, Open PR / Discard buttons, recent-requests history with PR links.
-  - Model: Claude Sonnet 4.5 (via Emergent LLM key + `emergentintegrations`).
-  - Tested iter23: 12/12 effective BE (2 skips are by-design 503s when github_token/EMERGENT_LLM_KEY absent on this preview) + AI Build UI 100% on rendering, disabled-state, dropdown, 503-handling.
+  - Model: Claude Sonnet 4.5 (via the LLM provider key + `llm_router`).
+  - Tested iter23: 12/12 effective BE (2 skips are by-design 503s when github_token/ANTHROPIC_API_KEY absent on this preview) + AI Build UI 100% on rendering, disabled-state, dropdown, 503-handling.
 - ✅ **Inline-deploy UX fix** — `Dashboard.jsx handleInlineAction`:
   - When the AI code-review ship-gate returns 412 `review_blocked`, the chat's inline Deploy button now offers `fix` (navigate to `fix_chat_session_id`) / `force` (re-POST with `bypass_review=true`) / blank-cancel instead of a useless red toast.
 
-**To unblock AI Build end-to-end:** set `github_token` (PAT with Contents:Write + Pull Requests:Write) and `emergent_llm_key` in Operator → Security. Until then `/plan` returns a clean 503 with the instruction.
+**To unblock AI Build end-to-end:** set `github_token` (PAT with Contents:Write + Pull Requests:Write) and `anthropic_api_key` in Operator → Security. Until then `/plan` returns a clean 503 with the instruction.
 
 ## Implemented — Feb 2026 (previous session, batch 8)
 - ✅ **Production hotfixes (3)** — preview-only fixes; user must redeploy:
@@ -318,7 +318,7 @@ Total: **83/84 assertions PASS** across 7 iterations. One bug found (throttle-ro
   - `SandboxAIPanel.jsx` lives above the file tree (always discoverable, not gated on file-open).
     Operator picks model, types instruction, gets a JSON proposal with file diffs, can either
     "Load into editor" or "Apply & commit" (which reuses `PUT /operator/self/file` → webhook auto-deploy).
-  - Hard-validated: single-file mode enforced, model whitelist, 503 on missing EMERGENT_LLM_KEY,
+  - Hard-validated: single-file mode enforced, model whitelist, 503 on missing ANTHROPIC_API_KEY,
     502 on LLM/JSON failures, every proposal logged to `sandbox_ai_sessions` for replay.
   - Backend test suite: 12/12 PASS (`/app/backend/tests/test_sandbox_ai_learnings.py`).
 
@@ -454,7 +454,7 @@ Total: **83/84 assertions PASS** across 7 iterations. One bug found (throttle-ro
       2. Every `deploy_projects.domain` (auto-attached when operator
          sets a domain via Ops tab inline editor)
       3. Operator-managed `cors_settings.extra_origins` collection
-      4. Always-allowed regex (preview / emergent.host / tbctools.org)
+      4. Always-allowed regex (preview / the old preview host / tbctools.org)
   - PATCH /domain and POST /cors-origins/add both call
     `invalidate_cors_cache()` so a newly-attached domain is honoured
     immediately — no redeploy, no env-var edit.
@@ -683,7 +683,7 @@ Total: **83/84 assertions PASS** across 7 iterations. One bug found (throttle-ro
     `open-dashboard-guide`).
 
 - ✅ **Password-overwrite bug fix + Operator quick guide** (Feb 2026):
-  - **Bug fix (HIGH)**: pasting any API key (Emergent LLM Universal Key,
+  - **Bug fix (HIGH)**: pasting any API key (the LLM provider Universal Key,
     Stripe, NOWPayments, Resend, PayPal, Vercel PAT, GitHub PAT) into the
     operator's Security/Ops tabs was silently overwriting the operator's
     SAVED LOGIN PASSWORD in the browser. Chrome / 1Password / LastPass /
@@ -693,7 +693,7 @@ Total: **83/84 assertions PASS** across 7 iterations. One bug found (throttle-ro
     `data-1p-ignore="true"`, `data-lpignore="true"`, `data-bwignore="true"`,
     `data-form-type="other"`, `spellCheck={false}`. Applied to the shared
     `KeyRow` in `SettingsTab.jsx` (covers Stripe, NOWPayments, PayPal,
-    Resend, Emergent LLM, Vercel, AI API key, deploy_webhook_secret) and the
+    Resend, the LLM provider, Vercel, AI API key, deploy_webhook_secret) and the
     two standalone inputs in `OpsDeploySection.jsx` (Vercel + GitHub token).
   - **Operator quick guide**: new `OperatorGuideTour.jsx` walks first-time
     users through every tab (Users → Projects → Plans → Payments → Treasury
@@ -781,7 +781,7 @@ Total: **83/84 assertions PASS** across 7 iterations. One bug found (throttle-ro
     `Deploy · Preview · Redeploy · Copy URL · Clone · Download · Code Review · Health`.
   - **Copy URL / Clone (POST /clone) / Inline domain editor (PATCH /domain)**.
   - **Run code review** — `POST /api/operator/deploy/{id}/code-review` snapshots
-    repo via GitHub API → `gpt-4o` via emergentintegrations → structured
+    repo via GitHub API → `gpt-4o` via llm_router → structured
     JSON verdict, summary, findings, missing-files; persisted on the project
     as `last_code_review` and rendered in `CodeReviewDialog`.
   - **Per-project code download** — proxies GitHub's zipball as a streaming
@@ -843,7 +843,7 @@ Total: **83/84 assertions PASS** across 7 iterations. One bug found (throttle-ro
   - **Run code review** — `POST /api/operator/deploy/{id}/code-review` (AI mirror
     on `/api/projects/{id}/code-review`). Pulls a snapshot of the repo via the
     GitHub API (capped at ~10-30 high-signal files, 40k chars), hands it to
-    `gpt-4o` via `emergentintegrations.LlmChat` with a strict JSON schema
+    `gpt-4o` via `llm_router.LlmChat` with a strict JSON schema
     prompt, parses + persists `last_code_review` on the project doc. Modal
     UI renders verdict, summary, findings (severity-coded), suggested fixes,
     and any missing-files callouts. Optional `github_token` in operator
@@ -1052,7 +1052,7 @@ Total: **83/84 assertions PASS** across 7 iterations. One bug found (throttle-ro
   the cookie first, then falls back to `Authorization: Bearer` so curl/scripts
   and the existing `test_credentials.md` flow keep working. New endpoint:
   `POST /api/auth/logout` clears the cookie. CORS tightened: `allow_origins=['*']`
-  replaced with `allow_origin_regex` matching tbctools.org + preview.emergentagent.com,
+  replaced with `allow_origin_regex` matching tbctools.org,
   which `allow_credentials=True` now requires.
 - ✅ **Operator → Audit tab** (Feb 2026): centralized `audit_log` collection +
   `record_audit()` helper hooked into every destructive operator endpoint
@@ -1063,7 +1063,7 @@ Total: **83/84 assertions PASS** across 7 iterations. One bug found (throttle-ro
   paginated table (50/page) + per-page CSV export. Endpoint:
   `GET /api/operator/audit?limit&skip&action&actor`.
 - ✅ **About page copy + compact team cards** (Feb 2026): updated team blurb
-  attributing the engine to Emergent; team cards reduced to ~⅓ size with
+  attributing the engine to the platform; team cards reduced to ~⅓ size with
   smaller avatars/names/role text.
 - ✅ **Bulk Users → Export CSV** (Feb 2026): one-click download of selected
   users as CSV (email, name, plan, credits, status, role, totp_enabled,
@@ -1116,7 +1116,7 @@ Total: **83/84 assertions PASS** across 7 iterations. One bug found (throttle-ro
   auto-migration (`active`/`paused`→`dev`, `done`→`launched`) on list + update.
 - ✅ React + FastAPI + MongoDB stack with dark ink / champagne gold theme.
 - ✅ Auth (email/password) + TOTP 2FA.
-- ✅ Multi-LLM chat (GPT-5, Claude, Gemini) via **Emergent LLM Key**, SSE streaming.
+- ✅ Multi-LLM chat (GPT-5, Claude, Gemini) via **the LLM provider key**, SSE streaming.
 - ✅ TBC1 + TBC2 dashboards with session history.
 - ✅ Stripe Checkout (native Apple Pay / Google Pay on supported devices).
 - ✅ **PayPal Orders v2 REST** (sandbox + live, operator-configurable) — redirect flow.
@@ -1162,9 +1162,9 @@ Total: **83/84 assertions PASS** across 7 iterations. One bug found (throttle-ro
 - Migrate auth to httpOnly cookies.
 
 ## Deployment
-- **Deploy button** (top-right of Emergent chat) → publishes to `*.emergent.host`.
+- **Deploy button** (top-right of the chat) → publishes to `the old preview host`.
 - **Custom domain** (`tbctools.org`): Deployments → Domains → Add custom domain →
-  copy CNAME/A record from Emergent → paste into DNS registrar (GoDaddy/Cloudflare/etc.).
+  copy CNAME/A record from the old host → paste into DNS registrar (GoDaddy/Cloudflare/etc.).
 - After deploy: Operator Console → Settings → paste Stripe / PayPal / NOWPayments keys.
 
 ## Operator credentials

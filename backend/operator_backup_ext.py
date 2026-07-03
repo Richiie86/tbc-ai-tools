@@ -5,7 +5,7 @@ Why this exists
 ---------------
 The operator created deploy projects, promo codes, KYC bypass entries,
 and auto-fix config in one environment. To bring them across to another
-(e.g. from the Emergent preview pod into the live production app at
+(e.g. from a preview environment into the live production app at
 tbctools.org), they need a self-service copy mechanism — without ever
 exposing the raw Mongo connection.
 

@@ -30,7 +30,7 @@
   ],
   "critical_code_review_comments": [
     "deploy_projects_ext._build_self_zip walks /app synchronously inside asyncio.to_thread — fine today (~580 KB output) but if the codebase grows past ~50 MB this will block the thread pool. Worth streaming with a zipfile.ZipFile written to a tempfile and StreamingResponse over file.read(64*1024).",
-    "_run_code_review imports emergentintegrations and `os` inside the function body — `os` is already imported at module scope (line 30). The inner `import os` is dead code and can be removed.",
+    "_run_code_review imports llm_router and `os` inside the function body — `os` is already imported at module scope (line 30). The inner `import os` is dead code and can be removed.",
     "_fetch_repo_snapshot caps total_chars to 40k and per-file 6k; for large repos this means only ~10 files reach the LLM. Worth surfacing `files_sampled` count on the UI dialog so the operator knows how much of the repo was actually reviewed (already returned in payload, just not rendered).",
     "Per-project /download endpoint streams from GitHub but doesn't catch httpx.ReadTimeout / NetworkError inside `_stream_github_zip` — a slow GitHub will cause the StreamingResponse to abort mid-flight with a generic 500 in the browser. Wrap the iter in a try/except and log; the response can't be amended once started but at least the server log will explain.",
     "Frontend OpsDeploySection.jsx is 800+ lines — consider extracting CodeReviewDialog and ProjectRow into their own files now that they each have non-trivial state machines (review fetch, domain editor, copy-url icon swap).",
