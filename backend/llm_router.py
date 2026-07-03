@@ -218,6 +218,7 @@ class LlmChat:
         system_message: str = '',
         *,
         max_tokens: int = 4096,
+        key_overrides: Optional[dict] = None,
     ) -> None:
         # api_key is accepted for signature compatibility but no longer used
         # for auth — each provider is authenticated with its own key.
@@ -227,6 +228,14 @@ class LlmChat:
         self._max_tokens = max_tokens
         self._provider: Optional[str] = None
         self._model: Optional[str] = None
+        # Per-request key overrides: {provider: key}. Used by the BYOK add-on so
+        # a user's chat runs on THEIR OWN key instead of the operator/app key.
+        # Empty for normal (app-credit) chats.
+        self._key_overrides: dict = key_overrides or {}
+
+    def _override_key(self, provider: str) -> Optional[str]:
+        k = self._key_overrides.get(provider)
+        return k if isinstance(k, str) and k.strip() else None
 
     def with_model(self, provider: str, model: str) -> 'LlmChat':
         self._provider = (provider or '').lower()
@@ -278,7 +287,7 @@ class LlmChat:
     # Anthropic
     # ==================================================================
     async def _anthropic(self, text: str, images: list, *, stream: bool):
-        key = await _anthropic_key()
+        key = self._override_key('anthropic') or await _anthropic_key()
         if not key:
             raise ProviderKeyMissing(
                 'No Anthropic API key configured. Add one in Operator → Security '
@@ -341,7 +350,7 @@ class LlmChat:
         return {'max_tokens': self._max_tokens}
 
     async def _openai(self, text: str, images: list, *, stream: bool):
-        key = await _openai_key()
+        key = self._override_key('openai') or await _openai_key()
         if not key:
             raise ProviderKeyMissing(
                 'No OpenAI API key configured. Add one in Operator → Security '
@@ -357,7 +366,7 @@ class LlmChat:
     # The model id is the full OpenRouter slug (e.g. "meta-llama/llama-3.1-70b-instruct").
     # ==================================================================
     async def _openrouter(self, text: str, images: list, *, stream: bool):
-        key = await _openrouter_key()
+        key = self._override_key('openrouter') or await _openrouter_key()
         if not key:
             raise ProviderKeyMissing(
                 'No OpenRouter API key configured. Add one in Operator → Security '
@@ -438,7 +447,7 @@ class LlmChat:
     # Gemini (google-genai)
     # ==================================================================
     async def _gemini(self, text: str, images: list, *, stream: bool):
-        key = await _gemini_key()
+        key = self._override_key('gemini') or await _gemini_key()
         if not key:
             raise ProviderKeyMissing(
                 'No Gemini API key configured. Add one in Operator → Security '

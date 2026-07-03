@@ -9,7 +9,7 @@ import { Label } from '../components/ui/label';
 import {
   User as UserIcon, Lock, ShieldCheck, Share2, Sparkles, Calculator,
   LogOut, Loader2, Cpu, ChevronLeft, Check, Copy, Coins, Users, MousePointerClick,
-  BadgeDollarSign, Crown, Zap,
+  BadgeDollarSign, Crown, Zap, KeyRound, Trash2, Plug,
 } from 'lucide-react';
 
 /**
@@ -24,6 +24,7 @@ const SECTIONS = [
   { id: 'security', label: 'Security', icon: ShieldCheck },
   { id: 'referrals', label: 'Referrals & Rewards', icon: Share2 },
   { id: 'plan', label: 'Plan & Pricing', icon: Sparkles },
+  { id: 'byok', label: 'Bring your own keys', icon: KeyRound },
   { id: 'calculator', label: 'Credits calculator', icon: Calculator },
 ];
 
@@ -94,6 +95,7 @@ export default function Settings() {
             {active === 'security' && <SecuritySection user={user} refresh={refresh} />}
             {active === 'referrals' && <ReferralsSection />}
             {active === 'plan' && <PlanSection user={user} />}
+            {active === 'byok' && <ByokSection refresh={refresh} />}
             {active === 'calculator' && <CalculatorSection user={user} />}
 
             {/* Sign out on mobile (nav bottom is hidden on small screens) */}
@@ -398,6 +400,209 @@ function MiniStat({ icon: Icon, label, value }) {
         <Icon className="h-3.5 w-3.5 text-tbc-300" />
       </div>
       <div className="mt-1 text-lg font-bold text-tbc-100">{value}</div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Bring Your Own Keys (BYOK)                                          */
+/* ------------------------------------------------------------------ */
+const BYOK_PROVIDER_META = {
+  anthropic:  { label: 'Anthropic (Claude)', placeholder: 'sk-ant-...', hint: 'console.anthropic.com' },
+  openai:     { label: 'OpenAI (GPT)',        placeholder: 'sk-...',     hint: 'platform.openai.com' },
+  gemini:     { label: 'Google Gemini',       placeholder: 'AIza...',    hint: 'aistudio.google.com' },
+  openrouter: { label: 'OpenRouter (300+ models)', placeholder: 'sk-or-...', hint: 'openrouter.ai/keys' },
+};
+
+function ByokSection({ refresh }) {
+  const [status, setStatus] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+
+  const load = async () => {
+    try { const { data } = await api.get('/byok/status'); setStatus(data); }
+    catch { toast.error('Could not load your key settings'); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
+
+  const activate = async () => {
+    setBusy(true);
+    try {
+      const { data } = await api.post('/byok/activate');
+      setStatus(data);
+      toast.success('Bring Your Own Keys is on — add your provider keys below.');
+      refresh?.();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Could not activate');
+    } finally { setBusy(false); }
+  };
+
+  const deactivate = async () => {
+    if (!window.confirm('Turn off Bring Your Own Keys?\n\nYour chat will go back to costing 1 credit per message. Your saved keys are kept so you can switch it back on any time.')) return;
+    setBusy(true);
+    try {
+      const { data } = await api.post('/byok/deactivate');
+      setStatus(data);
+      toast.success('Bring Your Own Keys turned off.');
+      refresh?.();
+    } catch { toast.error('Could not turn it off'); }
+    finally { setBusy(false); }
+  };
+
+  if (loading) return <Card title="Bring your own keys"><Loader2 className="h-6 w-6 animate-spin text-tbc-400" /></Card>;
+  if (!status) return <Card title="Bring your own keys" desc="Could not load your key settings right now." />;
+
+  const enabled = status.enabled;
+  const nextCharge = status.next_charge_at ? new Date(status.next_charge_at).toLocaleDateString() : null;
+
+  return (
+    <Card
+      title="Bring your own keys"
+      desc={`Run the AI on your own provider accounts. ${status.monthly_cost} credits/month — then every message you send is free, billed straight to your own API key instead of your credits.`}
+    >
+      {/* Status banner */}
+      <div className="mb-5 flex flex-col gap-3 rounded-xl border border-tbc-900/60 bg-ink-950/60 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-3">
+          <div className={`grid h-11 w-11 place-items-center rounded-full ${enabled ? 'bg-emerald-500/15 text-emerald-300' : 'bg-tbc-500/15 text-tbc-300'}`}>
+            <Plug className="h-5 w-5" />
+          </div>
+          <div>
+            <div className="text-sm font-semibold text-tbc-50">
+              {enabled ? 'Active' : 'Not active'}
+              <span className="ml-2 rounded-full bg-tbc-500/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-tbc-300">
+                {status.monthly_cost} credits/mo
+              </span>
+            </div>
+            <div className="text-xs text-tbc-200/60">
+              {enabled
+                ? (nextCharge ? `Renews on ${nextCharge}. You have ${status.credits} credits.` : `You have ${status.credits} credits.`)
+                : `Costs ${status.monthly_cost} credits to switch on. You have ${status.credits} credits.`}
+            </div>
+          </div>
+        </div>
+        {enabled ? (
+          <Button onClick={deactivate} disabled={busy} variant="outline"
+            className="border-rose-500/40 text-rose-300 hover:bg-rose-500/10">
+            {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null} Turn off
+          </Button>
+        ) : (
+          <Button onClick={activate} disabled={busy || status.credits < status.monthly_cost}
+            className="bg-tbc-500 font-semibold text-ink-950 hover:bg-tbc-400">
+            {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+            {status.credits < status.monthly_cost ? 'Not enough credits' : `Activate for ${status.monthly_cost} credits`}
+          </Button>
+        )}
+      </div>
+
+      {!enabled && (
+        <p className="mb-4 rounded-lg border border-tbc-900/60 bg-ink-950/40 px-3 py-2 text-xs text-tbc-200/60">
+          Add and manage your keys after you activate. Keys are stored securely and never shown in full again.
+        </p>
+      )}
+
+      {/* Provider key rows */}
+      <div className={`space-y-3 ${enabled ? '' : 'pointer-events-none opacity-50'}`} aria-disabled={!enabled}>
+        {status.providers.map((p) => (
+          <ByokKeyRow key={p.id} provider={p} onChanged={load} />
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+function ByokKeyRow({ provider, onChanged }) {
+  const meta = BYOK_PROVIDER_META[provider.id] || { label: provider.id, placeholder: '', hint: '' };
+  const [value, setValue] = useState('');
+  const [editing, setEditing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [testing, setTesting] = useState(false);
+
+  const test = async () => {
+    if (!value.trim()) { toast.error('Paste a key first'); return; }
+    setTesting(true);
+    try {
+      const { data } = await api.post('/byok/keys/test', { provider: provider.id, value: value.trim() });
+      if (data.ok) toast.success(`Key looks good${data.identity ? ` — ${data.identity}` : ''}`);
+      else toast.error(data.error || 'Key failed validation');
+    } catch (err) { toast.error(err?.response?.data?.detail || 'Could not test the key'); }
+    finally { setTesting(false); }
+  };
+
+  const save = async () => {
+    if (!value.trim()) { toast.error('Paste a key first'); return; }
+    setBusy(true);
+    try {
+      await api.put('/byok/keys', { provider: provider.id, value: value.trim() });
+      toast.success(`${meta.label} key saved`);
+      setValue(''); setEditing(false);
+      onChanged?.();
+    } catch (err) { toast.error(err?.response?.data?.detail || 'Could not save the key'); }
+    finally { setBusy(false); }
+  };
+
+  const clear = async () => {
+    setBusy(true);
+    try {
+      await api.delete(`/byok/keys/${provider.id}`);
+      toast.success(`${meta.label} key removed`);
+      onChanged?.();
+    } catch { toast.error('Could not remove the key'); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div className="rounded-xl border border-tbc-900/60 bg-ink-950/60 p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-sm font-semibold text-tbc-50">
+            {meta.label}
+            {provider.set && (
+              <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-300">Set</span>
+            )}
+          </div>
+          <div className="truncate text-xs text-tbc-200/50">
+            {provider.set ? `Saved: ${provider.masked}` : `Get one at ${meta.hint}`}
+          </div>
+        </div>
+        {provider.set && !editing && (
+          <div className="flex shrink-0 gap-2">
+            <Button type="button" variant="ghost" onClick={() => setEditing(true)}
+              className="h-8 px-2 text-xs text-tbc-200/70 hover:bg-ink-900">Replace</Button>
+            <Button type="button" variant="ghost" onClick={clear} disabled={busy}
+              className="h-8 px-2 text-xs text-rose-300/80 hover:bg-rose-500/10">
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        )}
+      </div>
+
+      {(!provider.set || editing) && (
+        <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+          <Input
+            type="password"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            placeholder={meta.placeholder}
+            className="border-tbc-900/60 bg-ink-950 font-mono text-xs text-tbc-100"
+            autoComplete="off"
+          />
+          <div className="flex shrink-0 gap-2">
+            <Button type="button" onClick={test} disabled={testing || busy} variant="outline"
+              className="border-tbc-900/60 text-tbc-200 hover:bg-ink-900">
+              {testing ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Test'}
+            </Button>
+            <Button type="button" onClick={save} disabled={busy || testing}
+              className="bg-tbc-500 font-semibold text-ink-950 hover:bg-tbc-400">
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save'}
+            </Button>
+            {editing && (
+              <Button type="button" variant="ghost" onClick={() => { setEditing(false); setValue(''); }}
+                className="text-tbc-200/70 hover:bg-ink-900">Cancel</Button>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

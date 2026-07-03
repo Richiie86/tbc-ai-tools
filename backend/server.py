@@ -54,6 +54,7 @@ from deploy_projects_ext import setup_routers as setup_deploy_routers
 from notifications_ext import setup as setup_notifications
 from github_webhook_ext import router as github_webhook_router
 from birthday_ext import router as birthday_router, birthday_scheduler_loop
+from byok_ext import router as byok_router, run_byok_billing_pass
 from analytics_ext import router as analytics_router
 from alerts_ext import router as alerts_router
 from secrets_ext import router as secrets_router
@@ -556,6 +557,19 @@ async def startup():
 
         scheduler.add_job(_birthday_job, 'interval', hours=6, next_run_time=datetime.now(timezone.utc) + timedelta(minutes=3))
 
+        # BYOK monthly billing — every 6h, charges the flat 50-credit/month
+        # add-on fee for users whose renewal date has passed (idempotent per
+        # 30-day period). Users without enough credits are switched off.
+        async def _byok_billing_job():
+            try:
+                res = await run_byok_billing_pass()
+                if res.get('charged') or res.get('disabled'):
+                    logger.info('BYOK billing run: %s', res)
+            except Exception:
+                logger.exception('BYOK billing job failed')
+
+        scheduler.add_job(_byok_billing_job, 'interval', hours=6, next_run_time=datetime.now(timezone.utc) + timedelta(minutes=6))
+
         # Growth-alert evaluator — every 6h, fires at most once per UTC day.
         async def _alerts_job():
             try:
@@ -713,6 +727,12 @@ def _public_user(u: dict) -> dict:
         'plan_expires_at': expires_at.isoformat() if isinstance(expires_at, datetime) else expires_at,
         'plan_days_remaining': days_remaining,
         'plan_is_expired': is_expired,
+        'byok_enabled': bool(u.get('byok_enabled', False)),
+        'byok_next_charge_at': (
+            u['byok_next_charge_at'].isoformat()
+            if isinstance(u.get('byok_next_charge_at'), datetime)
+            else u.get('byok_next_charge_at')
+        ),
     }
 
 
@@ -1258,8 +1278,16 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
     if not db_user:
         raise HTTPException(404, 'User not found')
 
-    # Credit check (operator bypass)
-    if db_user.get('role') != 'operator' and db_user.get('credits', 0) <= 0:
+    # BYOK: if the user has the Bring-Your-Own-Keys add-on active with at least
+    # one saved provider key, their chat runs on THEIR key and doesn't spend app
+    # credits — so they can keep chatting even at a zero balance.
+    from byok_ext import get_user_key_overrides
+    byok_overrides = get_user_key_overrides(db_user)
+    byok_active = bool(byok_overrides)
+
+    # Credit check (operator bypass; BYOK users bypass too — they pay their own
+    # provider, and the 50-credit/month add-on fee is billed separately).
+    if db_user.get('role') != 'operator' and not byok_active and db_user.get('credits', 0) <= 0:
         raise HTTPException(402, 'No credits remaining. Please upgrade your plan.')
 
     # Trial / time-limited plan expiry check (operator bypass)
@@ -1426,7 +1454,11 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
                 api_key=llm_key,
                 session_id=session_id,
                 system_message=effective_prompt,
+                key_overrides=byok_overrides,
             ).with_model(provider_i, model_name_i)
+            # Did THIS attempt run on the user's own BYOK key? Only then do we
+            # skip the per-message credit charge below.
+            byok_served = bool(byok_overrides.get(provider_i))
             try:
                 # Build the user message — text + any image blocks. The
                 # `file_contents` keyword is what llm_router
@@ -1483,8 +1515,9 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
             {'id': session_id},
             {'$set': {'updated_at': datetime.now(timezone.utc)}},
         )
-        # Decrement credits (non-operator)
-        if db_user.get('role') != 'operator':
+        # Decrement credits (non-operator). BYOK-served messages are free —
+        # the user paid their own provider, so we don't spend an app credit.
+        if db_user.get('role') != 'operator' and not byok_served:
             await db.users.update_one({'id': user['sub']}, {'$inc': {'credits': -1}})
         # Log estimated spend for the amAI monthly summary (fire-and-forget).
         if full_response.strip():
@@ -2287,6 +2320,7 @@ setup_deploy_routers(app)
 app.include_router(setup_notifications(db))
 app.include_router(github_webhook_router)
 app.include_router(birthday_router)
+app.include_router(byok_router)
 app.include_router(self_edit_router)
 app.include_router(analytics_router)
 app.include_router(alerts_router)

@@ -1,6 +1,6 @@
 """Pydantic models for TBC AI Tools."""
 from pydantic import BaseModel, Field, EmailStr
-from typing import Optional, List, Literal
+from typing import Optional, List, Literal, Dict
 from datetime import datetime, timezone
 import uuid
 
@@ -94,6 +94,16 @@ class User(BaseModel):
     dob: Optional[str] = None
     # Year of the last birthday payout so we never double-grant in a year.
     birthday_rewarded_year: Optional[int] = None
+    # ----- BYOK (Bring Your Own Keys) add-on -----
+    # When enabled, the user's chat runs on THEIR OWN provider API keys, so
+    # those messages don't burn app credits. The add-on itself costs a flat
+    # 50 credits/month (deducted on activation, then every 30 days by the
+    # billing scheduler). `byok_keys` maps provider -> raw key (stored the same
+    # way operator keys are; never returned to the client except masked).
+    byok_enabled: bool = False
+    byok_keys: Dict[str, str] = Field(default_factory=dict)
+    byok_activated_at: Optional[datetime] = None
+    byok_next_charge_at: Optional[datetime] = None
     created_at: datetime = Field(default_factory=_now)
 
 
