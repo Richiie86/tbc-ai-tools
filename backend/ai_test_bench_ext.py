@@ -28,14 +28,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-try:
-    from emergentintegrations.llm.chat import LlmChat, UserMessage
-except ModuleNotFoundError:
-    # Emergent-only package is not available off-Emergent (e.g. Render).
-    # The AI test bench degrades gracefully: _run_probe catches the
-    # resulting error and reports it instead of crashing app startup.
-    LlmChat = None  # type: ignore
-    UserMessage = None  # type: ignore
+from llm_router import LlmChat, UserMessage
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 
 from auth_utils import get_current_operator
@@ -93,7 +86,7 @@ async def _run_probe(
         ).with_model(provider, model_id)
         async def _run():
             full = ''
-            from emergentintegrations.llm.chat import TextDelta, StreamDone
+            from llm_router import TextDelta, StreamDone
             async for ev in chat.stream_message(UserMessage(text=prompt)):
                 if isinstance(ev, TextDelta):
                     full += ev.content
@@ -116,17 +109,29 @@ async def _run_probe(
     }
 
 
+async def _any_provider_key() -> bool:
+    """True if at least one provider key (Anthropic/OpenAI/Gemini) is
+    available from env or operator settings. Probes route per-provider via
+    llm_router, so no single 'universal' key is needed anymore."""
+    from llm_router import _anthropic_key, _openai_key, _gemini_key
+    return bool(
+        (await _anthropic_key())
+        or (await _openai_key())
+        or (await _gemini_key())
+    )
+
+
 async def _get_llm_key() -> str:
-    """Pull the configured Emergent Universal Key from settings, mirroring
-    how server.py builds chat clients. Raises 503 if the operator hasn't
-    set it up yet."""
-    s = await db.settings.find_one({'_id': 'payment_settings'}) or {}
-    # Honour BYO Anthropic/OpenAI keys; only 503 when no provider is set at all.
-    from llm_router import resolve_llm_key, NO_LLM_PROVIDER_MSG
-    key = resolve_llm_key(s)
-    if not key:
-        raise HTTPException(503, NO_LLM_PROVIDER_MSG)
-    return key
+    """Ensure at least one provider key is configured, else 503. The returned
+    value is a legacy placeholder — llm_router authenticates each provider
+    with its own key internally, so probes ignore this string."""
+    if not await _any_provider_key():
+        raise HTTPException(
+            503,
+            'No AI provider key configured. Add an Anthropic, OpenAI, or '
+            'Gemini key in Operator → Security.',
+        )
+    return ''
 
 
 async def _build_probes() -> list[dict]:
@@ -320,9 +325,9 @@ async def _nightly_drift_alert() -> dict:
     if existing:
         return {'skipped': True, 'reason': 'already ran today'}
 
-    api_key = os.environ.get('EMERGENT_LLM_KEY') or ''
-    if not api_key:
+    if not await _any_provider_key():
         return {'skipped': True, 'reason': 'no llm key'}
+    api_key = ''  # legacy placeholder — llm_router uses per-provider keys
 
     # Snapshot yesterday's results so we can diff after the run.
     yesterday_cutoff = datetime.now(timezone.utc) - timedelta(hours=24)

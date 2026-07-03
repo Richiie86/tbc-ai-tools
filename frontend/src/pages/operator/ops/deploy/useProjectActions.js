@@ -217,6 +217,47 @@ export function useProjectActions(project, onDeployed) {
     }
   };
 
+  // --- manual rollback to last known-good deployment ------------------
+  // Re-promotes the last deployment that was successfully promoted, so a
+  // broken production deploy can be recovered in one click.
+  const rollback = async () => {
+    if (!project.last_good_deployment_id) {
+      toast.error('No known-good deployment yet — promote a working deploy first.');
+      return;
+    }
+    setBusy('rollback');
+    try {
+      const { data } = await api.post(`/operator/deploy/${project.id}/rollback`, {});
+      toast.success(`Rolled back to last known-good deployment · ${data?.restored_deployment_id || ''}`);
+      onDeployed();
+    } catch (e) {
+      const detail = e?.response?.data?.detail;
+      toast.error(typeof detail === 'string' ? detail : 'Rollback failed');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  // --- auto-rollback toggle (PATCH /api/operator/deploy/{id}) ----------
+  // When ON, a deploy that fails (ERROR/CANCELED) auto-restores the last
+  // known-good deployment so a broken build can't silently persist.
+  const toggleAutoRollback = async (next) => {
+    setBusy('auto-rollback');
+    try {
+      await api.patch(`/operator/deploy/${project.id}`, { auto_rollback: next });
+      toast.success(
+        next
+          ? 'Auto-rollback ON · failed deploys auto-restore the last known-good version'
+          : 'Auto-rollback OFF'
+      );
+      onDeployed();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Could not toggle auto-rollback');
+    } finally {
+      setBusy(null);
+    }
+  };
+
   // --- self-healing toggle (PATCH /api/operator/deploy/{id}) -----------
   // When ON, autopilot runs `auto_fix_max_iterations=3` by default for
   // this project so the AI silently fixes do_not_ship verdicts and reships.
@@ -299,6 +340,7 @@ export function useProjectActions(project, onDeployed) {
     setReviewOpen, setCloneOpen, setPromoteOpen, setAutopilotOpen, setGateBlock,
     // actions
     trigger, promote, toggleAutoPromote, toggleAutoHeal, pushInitial,
+    rollback, toggleAutoRollback,
     openFixChat, bypassAndShip, submitClone, copyUrl,
   };
 }

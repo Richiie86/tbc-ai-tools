@@ -486,18 +486,17 @@ async def run_rca(error_id: str, _op: dict = Depends(get_current_operator)):
     if not doc:
         raise HTTPException(404, 'Error not found')
 
+    from llm_router import any_provider_key_available
+    api_key = ''  # legacy placeholder — llm_router uses per-provider keys
+    if not await any_provider_key_available():
+        raise HTTPException(503, 'No AI provider key configured (Operator → Security).')
+
     # Operator-configurable RCA model — falls back to claude-sonnet (the
     # iter17-validated default) when no setting is present. Set via
     # `settings.rca_model` in MongoDB or via the Operator → Security tab.
     settings = await db.settings.find_one({'_id': 'payment_settings'}) or {}
-    # Honour BYO Anthropic/OpenAI keys; only 503 when no provider is set at all.
-    from llm_router import resolve_llm_key, NO_LLM_PROVIDER_MSG
-    api_key = resolve_llm_key(settings)
-    if not api_key:
-        raise HTTPException(503, NO_LLM_PROVIDER_MSG)
-
     rca_model_id = (settings.get('rca_model') or '').strip()
-    # Map provider for emergentintegrations.
+    # Map model id to its provider.
     _rca_provider_map = {
         'claude-opus-4-7': 'anthropic',
         'claude-sonnet-4-6': 'anthropic',
@@ -523,10 +522,7 @@ async def run_rca(error_id: str, _op: dict = Depends(get_current_operator)):
         "suggested_change (string), confidence (low|medium|high)."
     )
     try:
-        # Use the BYO-aware router (direct Anthropic/OpenAI when the operator
-        # set their own key, Emergent fallback otherwise). Non-streaming —
-        # the RCA payload is tiny so we just collect the full text.
-        from llm_router import LlmChat, UserMessage
+        from llm_router import LlmChat, UserMessage, TextDelta, StreamDone
         chat = LlmChat(
             api_key=api_key,
             session_id=f'rca-{uuid.uuid4()}',
@@ -535,7 +531,12 @@ async def run_rca(error_id: str, _op: dict = Depends(get_current_operator)):
                 'Be terse. Only return valid JSON.'
             ),
         ).with_model(rca_provider, rca_model_id)
-        full = await chat.send_message(UserMessage(text=prompt))
+        full = ''
+        async for ev in chat.stream_message(UserMessage(text=prompt)):
+            if isinstance(ev, TextDelta):
+                full += ev.content
+            elif isinstance(ev, StreamDone):
+                break
     except Exception as e:
         raise HTTPException(502, f'LLM RCA failed: {e}')
 

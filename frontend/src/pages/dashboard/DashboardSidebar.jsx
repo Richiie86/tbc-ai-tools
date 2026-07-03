@@ -12,7 +12,7 @@ import CreditsBadge from '../../components/CreditsBadge';
 import api from '../../lib/api';
 import {
   Cpu, Plus, Trash2, MessageSquare, LogOut, Sparkles,
-  ChevronLeft, ShieldCheck, Edit3,
+  ChevronLeft, ShieldCheck, Edit3, Settings as SettingsIcon,
 } from 'lucide-react';
 
 /** Left sidebar: branding, new-session button, grouped session list, footer actions. */
@@ -64,9 +64,14 @@ export function DashboardSidebar({
                   >
                     <MessageSquare className={`h-3.5 w-3.5 shrink-0 ${currentId === s.id ? 'text-tbc-400' : 'text-slate-500'}`} />
                     <span className="flex-1 truncate">{s.title}</span>
+                    {/* Rename + delete are always visible (previously hover-only,
+                        which made them unreachable on touch devices). They dim
+                        when the row isn't hovered/focused to stay tidy. */}
                     <button
                       onClick={(e) => { e.stopPropagation(); renameSession(s.id); }}
-                      className="hidden rounded p-1 text-slate-400 hover:bg-slate-700 hover:text-white group-hover:block"
+                      title="Rename project"
+                      aria-label={`Rename ${s.title}`}
+                      className="rounded p-1 text-slate-400 opacity-70 transition hover:bg-slate-700 hover:text-white focus:opacity-100 group-hover:opacity-100"
                     >
                       <Edit3 className="h-3 w-3" />
                     </button>
@@ -74,27 +79,30 @@ export function DashboardSidebar({
                       <AlertDialogTrigger asChild>
                         <button
                           onClick={(e) => e.stopPropagation()}
-                          className="hidden rounded p-1 text-slate-400 hover:bg-rose-500/20 hover:text-rose-300 group-hover:block"
+                          title="Delete project"
+                          aria-label={`Delete ${s.title}`}
+                          className="rounded p-1 text-slate-400 opacity-70 transition hover:bg-rose-500/20 hover:text-rose-300 focus:opacity-100 group-hover:opacity-100"
                         >
                           <Trash2 className="h-3 w-3" />
                         </button>
                       </AlertDialogTrigger>
                       <AlertDialogContent className="border-slate-800 bg-slate-900 text-slate-100">
                         <AlertDialogHeader>
-                          <AlertDialogTitle>Delete chat?</AlertDialogTitle>
+                          <AlertDialogTitle>Delete this project?</AlertDialogTitle>
                           <AlertDialogDescription className="text-slate-400">
-                            This permanently removes all messages in “{s.title}”.
+                            This removes “{s.title}” and all its messages from your account.
+                            Are you sure you want to delete it?
                           </AlertDialogDescription>
                         </AlertDialogHeader>
                         <AlertDialogFooter>
                           <AlertDialogCancel className="border-slate-700 bg-slate-800 text-slate-100 hover:bg-slate-700">
-                            Cancel
+                            No, keep it
                           </AlertDialogCancel>
                           <AlertDialogAction
                             onClick={(e) => deleteSession(s.id, e)}
                             className="bg-rose-500 text-white hover:bg-rose-400"
                           >
-                            Delete
+                            Yes, delete
                           </AlertDialogAction>
                         </AlertDialogFooter>
                       </AlertDialogContent>
@@ -122,6 +130,9 @@ export function DashboardSidebar({
             <ShieldCheck className="h-3.5 w-3.5" /> Operator console
           </Link>
         )}
+        <Link to="/settings" className="mb-1 flex items-center gap-2 rounded-md px-2.5 py-2 text-xs font-medium text-slate-300 hover:bg-slate-800" data-testid="sidebar-settings">
+          <SettingsIcon className="h-3.5 w-3.5" /> Settings
+        </Link>
         <Link to="/pricing" className="mb-1 flex items-center gap-2 rounded-md px-2.5 py-2 text-xs font-medium text-slate-300 hover:bg-slate-800">
           <Sparkles className="h-3.5 w-3.5" /> Upgrade plan
         </Link>

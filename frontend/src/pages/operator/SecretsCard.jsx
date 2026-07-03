@@ -5,15 +5,15 @@ import { Input } from '../../components/ui/input';
 import { toast } from 'sonner';
 import {
   KeyRound, Save, Loader2, ShieldCheck, ShieldAlert, Eye, EyeOff,
-  RotateCw, CheckCircle2, XCircle, Github, Cloud,
+  RotateCw, CheckCircle2, XCircle, Github, Cloud, Sparkles, Bot, Server, Zap,
 } from 'lucide-react';
 
-const KIND_META = {
+export const KIND_META = {
   vercel: {
     label: 'Vercel Personal Access Token',
     icon: Cloud,
     fieldKey: 'vercel_token',
-    placeholder: 'Paste new Vercel PAT (vcp_…) — gets you a token at vercel.com/account/tokens',
+    placeholder: 'Paste new Vercel PAT — get one at vercel.com/account/tokens',
     helperUrl: 'https://vercel.com/account/tokens',
   },
   github: {
@@ -22,6 +22,48 @@ const KIND_META = {
     fieldKey: 'github_token',
     placeholder: 'Paste new GitHub PAT — needs Contents: Write for auto-fix to commit patches',
     helperUrl: 'https://github.com/settings/personal-access-tokens',
+  },
+  anthropic: {
+    label: 'Anthropic (Claude) API Key',
+    icon: Sparkles,
+    fieldKey: 'anthropic_api_key',
+    placeholder: 'Paste your Anthropic key (sk-ant-…) — powers the AI build tools',
+    helperUrl: 'https://console.anthropic.com/settings/keys',
+  },
+  openai: {
+    label: 'OpenAI API Key',
+    icon: Bot,
+    fieldKey: 'openai_api_key',
+    placeholder: 'Paste your OpenAI key (sk-…) — powers the AI build tools',
+    helperUrl: 'https://platform.openai.com/api-keys',
+  },
+  gemini: {
+    label: 'Google Gemini API Key',
+    icon: Sparkles,
+    fieldKey: 'gemini_api_key',
+    placeholder: 'Paste your Gemini key (AIza…) — powers the AI build tools',
+    helperUrl: 'https://aistudio.google.com/app/apikey',
+  },
+  openrouter: {
+    label: 'OpenRouter API Key',
+    icon: Sparkles,
+    fieldKey: 'openrouter_api_key',
+    placeholder: 'Paste your OpenRouter key (sk-or-…) — one key unlocks 300+ models',
+    helperUrl: 'https://openrouter.ai/keys',
+  },
+  render: {
+    label: 'Render API Key',
+    icon: Server,
+    fieldKey: 'render_api_key',
+    placeholder: 'Paste your Render key (rnd_…) — manage the backend host',
+    helperUrl: 'https://dashboard.render.com/u/settings/api-keys',
+  },
+  groq: {
+    label: 'Groq API Key',
+    icon: Zap,
+    fieldKey: 'groq_api_key',
+    placeholder: 'Paste your Groq key (gsk_…) — fast open-model inference',
+    helperUrl: 'https://console.groq.com/keys',
   },
 };
 
@@ -82,7 +124,7 @@ export default function SecretsCard({ settings, onChanged }) {
   );
 }
 
-function SecretRow({ kind, isSet, masked, rotatedAt, onChanged }) {
+export function SecretRow({ kind, isSet, masked, rotatedAt, onChanged }) {
   const meta = KIND_META[kind];
   const Icon = meta.icon;
   const [draft, setDraft] = useState('');

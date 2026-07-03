@@ -34,7 +34,7 @@
     "backend": "90% (9/10 PASS, 1 SKIPPED due to env email config — see minor issue)",
     "frontend": "100% (GC bar, localStorage persistence, GC fire, archived pill, severity badges all verified)"
   },
-  "test_credentials": "Operator: rac.investments.swe@gmail.com / 123Admin@98 — boots without TOTP enforcement; on first login redirects to /setup-2fa, just navigate directly to /operator.",
+  "test_credentials": "Operator: rac.investments.swe@gmail.com / REDACTED — boots without TOTP enforcement; on first login redirects to /setup-2fa, just navigate directly to /operator.",
   "seed_data_creation": "Test creates and deletes TEST_iter18_stale_*, TEST_iter18_nosev_*, TEST_iter18_archived_pill_*. All cleaned at end of run. One transient runtime_errors doc per parametrize case (signature: e.g. 'stripe payment declined / cannot connect to backend [<hex>]') is left behind because the public ingest endpoint has no operator delete in the test flow — these will be visible in the operator Errors dashboard as new entries but are bounded (4 per run).",
   "retest_needed": false,
   "main_agent_can_self_test": true,

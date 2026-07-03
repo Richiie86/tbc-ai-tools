@@ -23,7 +23,7 @@
   ],
   "updated_files": [],
   "success_rate": {"backend": "N/A (frontend-only request)", "frontend": "100% — every flow in the request was exercised and passed"},
-  "test_credentials": "Operator: rac.investments.swe@gmail.com / 123Admin@98 (lands on /setup-2fa after login but direct nav to /operator?tab=ops is allowed because tbc_session cookie is set).",
+  "test_credentials": "Operator: rac.investments.swe@gmail.com / REDACTED (lands on /setup-2fa after login but direct nav to /operator?tab=ops is allowed because tbc_session cookie is set).",
   "seed_data_creation": "Saved 'test-domain.tbctools.org' onto the self project then restored 'tbctools.org'. Also triggered live POST /deploy (production) and POST /deploy (preview) — Vercel state went to 'queued' → 'INITIALIZING' → 'READY' during the run. POST /redeploy was also fired against the resulting deployment. The self row now shows 'Last deploy: READY · 6/13/2026 3:00:09 PM' and last_deployment_id is set (Promote button is now enabled).",
   "retest_needed": false,
   "should_main_agent_self_test": false,

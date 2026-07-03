@@ -30,7 +30,7 @@
   ],
   "updated_files": [],
   "success_rate": { "backend": "n/a (frontend-only retest; backend reported at 93/93 prior)", "frontend": "100% — 40/41 assertions pass; the single fail is a harness artifact, not a product bug." },
-  "test_credentials": "Operator rac.investments.swe@gmail.com / 123Admin@98 — post-login lands on /setup-2fa, click data-testid='skip-2fa-setup' to reach /operator. httpOnly tbc_session cookie authenticates /api calls.",
+  "test_credentials": "Operator rac.investments.swe@gmail.com / REDACTED — post-login lands on /setup-2fa, click data-testid='skip-2fa-setup' to reach /operator. httpOnly tbc_session cookie authenticates /api calls.",
   "seed_data_creation": "Alert thresholds were modified during the persistence test (signup_drop_pct=33, revenue_stall_days=4) and a Slack webhook was saved (https://hooks.slack.com/services/T_QA/B_QA/SECRET — stored masked). Per request 'NO need to revert any settings'. The operator can clear these via the Analytics → Growth-alerts UI if desired.",
   "retest_needed": false,
   "main_agent_can_self_test": true,

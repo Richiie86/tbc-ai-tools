@@ -89,7 +89,7 @@ async def _check_mongo() -> dict:
 def _check_env_keys() -> list[dict]:
     """Required envs must be set; optional ones surface as info-only rows."""
     env_required = ['MONGO_URL', 'DB_NAME', 'JWT_SECRET']
-    env_optional = ['EMERGENT_LLM_KEY', 'RESEND_API_KEY', 'STRIPE_API_KEY']
+    env_optional = ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'GEMINI_API_KEY', 'RESEND_API_KEY', 'STRIPE_API_KEY']
     out: list[dict] = []
     for k in env_required:
         present = bool(os.environ.get(k))
@@ -106,7 +106,8 @@ async def _check_settings_keys() -> list[dict]:
     """DB-backed API keys (presence only)."""
     s = await db.settings.find_one({'_id': 'payment_settings'}) or {}
     keys = [
-        'emergent_llm_key', 'stripe_secret_key', 'paypal_client_id',
+        'anthropic_api_key', 'openai_api_key', 'gemini_api_key',
+        'stripe_secret_key', 'paypal_client_id',
         'resend_api_key', 'nowpayments_api_key',
     ]
     return [
@@ -378,9 +379,10 @@ async def ops_restart(
 async def ops_deploy_info(_user: dict = Depends(get_current_operator)):
     """Return context for the in-app Deploy / Redeploy card.
 
-    Note: Emergent's production deploy is triggered from the Emergent chat UI's
-    Deploy button — there's no public API to fire it server-side. This endpoint
-    surfaces the info the operator needs to act on it confidently.
+    Note: production deploys are triggered by your host's own pipeline (e.g. a
+    git push to the deploy branch, or your hosting provider's dashboard) — there
+    is no public API to fire it server-side. This endpoint surfaces the info the
+    operator needs to act on it confidently.
     """
     lines = ['', '', '', '']
     if shutil.which('git'):
@@ -406,5 +408,5 @@ async def ops_deploy_info(_user: dict = Depends(get_current_operator)):
         },
         'preview_url': os.environ.get('REACT_APP_BACKEND_URL') or '',
         'production_domain': 'tbctools.org',
-        'hint': 'Production deploy is triggered from the Emergent chat panel · top-right Deploy button.',
+        'hint': 'Production deploy is triggered by your hosting pipeline (git push to the deploy branch, or your host dashboard).',
     }

@@ -33,7 +33,7 @@
     "/app/backend/tests/test_iter30_settings_collection_fix.py (NEW — 12 tests, all passing)"
   ],
   "success_rate": {"backend": "100% (12/12 iter30 + 42/42 iter28+iter29 regression = 54/54)", "frontend": "not tested (backend-only request)"},
-  "test_credentials": "Operator rac.investments.swe@gmail.com / 123Admin@98 (no 2FA enrolled — login returns token directly because RESET_OPERATOR_PASSWORD=true clears TOTP on boot).",
+  "test_credentials": "Operator rac.investments.swe@gmail.com / REDACTED (no 2FA enrolled — login returns token directly because RESET_OPERATOR_PASSWORD=true clears TOTP on boot).",
   "seed_data_creation": "Inserted+cleaned within tests: TEST_iter30_signup_true_<uuid>@example.com + TEST_iter30_signup_false_<uuid>@example.com (users), removed in teardown. default_can_deploy flag is flipped during the PATCH test and restored to its original value in the finally block. No persistent test data leaked.",
   "retest_needed": false,
   "main_agent_can_self_test": true,

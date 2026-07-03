@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import api from '../../lib/api';
 import {
   Brain, Loader2, Sparkles, TrendingUp, Network, Bot, GitBranch, LayoutGrid,
+  ChevronDown, Circle,
 } from 'lucide-react';
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -85,9 +86,12 @@ export default function AIBrainTab() {
         <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-tbc-300">
           <Bot className="h-3 w-3" /> Maturity per model
         </div>
+        <p className="mb-2 text-[11px] text-tbc-200/40">
+          Tip: click any card to see the exact models behind it and which one is active.
+        </p>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
           {(maturity?.models || []).map((m) => (
-            <ModelCard key={m.model} m={m} />
+            <ModelCard key={m.model} m={m} defaultModel={maturity?.default_model} />
           ))}
         </div>
       </section>
@@ -195,23 +199,37 @@ const MODEL_LABEL = {
   other:  { name: 'Other',       color: 'text-tbc-200',     border: 'border-tbc-900/60', bg: 'bg-ink-900/50' },
 };
 
-function ModelCard({ m }) {
+function ModelCard({ m, defaultModel }) {
   const cfg = MODEL_LABEL[m.model] || MODEL_LABEL.other;
   // Maturity bar = how much of the auto-proposed pool was approved.
   // Visual ceiling capped at 100% by hand to avoid > 100 from edge data.
   const ratio = m.approval_rate != null ? Math.min(1, Math.max(0, m.approval_rate)) : null;
+  const breakdown = m.breakdown || [];
+  const hasBreakdown = breakdown.length > 0;
+  const [open, setOpen] = useState(false);
+
   return (
     <div
       data-testid={`ai-brain-model-${m.model}`}
-      className={`rounded-lg border p-3 ${cfg.border} ${cfg.bg}`}
+      className={`rounded-lg border p-3 ${cfg.border} ${cfg.bg} ${hasBreakdown ? 'cursor-pointer transition hover:brightness-110' : ''}`}
+      onClick={hasBreakdown ? () => setOpen((o) => !o) : undefined}
+      role={hasBreakdown ? 'button' : undefined}
+      tabIndex={hasBreakdown ? 0 : undefined}
+      onKeyDown={hasBreakdown ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpen((o) => !o); } } : undefined}
+      aria-expanded={hasBreakdown ? open : undefined}
     >
       <div className={`flex items-center justify-between text-[11px] font-semibold uppercase tracking-wider ${cfg.color}`}>
         <span>{cfg.name}</span>
-        {m.last_7d_added > 0 && (
-          <span className="rounded-full bg-emerald-500/20 px-1.5 py-0.5 text-[9px] text-emerald-300">
-            +{m.last_7d_added} · 7d
-          </span>
-        )}
+        <div className="flex items-center gap-1">
+          {m.last_7d_added > 0 && (
+            <span className="rounded-full bg-emerald-500/20 px-1.5 py-0.5 text-[9px] text-emerald-300">
+              +{m.last_7d_added} · 7d
+            </span>
+          )}
+          {hasBreakdown && (
+            <ChevronDown className={`h-3.5 w-3.5 text-tbc-200/50 transition-transform ${open ? 'rotate-180' : ''}`} />
+          )}
+        </div>
       </div>
       <div className="mt-2 text-2xl font-bold text-tbc-100">
         {m.total}
@@ -235,6 +253,42 @@ function ModelCard({ m }) {
           />
         </div>
       </div>
+
+      {/* Expanded: the exact models behind this card. */}
+      {hasBreakdown && open && (
+        <ul
+          className="mt-3 space-y-1 border-t border-tbc-900/60 pt-2"
+          data-testid={`ai-brain-model-breakdown-${m.model}`}
+        >
+          {breakdown.map((row) => {
+            const isActive = defaultModel && row.model === defaultModel;
+            return (
+              <li
+                key={row.model}
+                className="flex items-center justify-between gap-2 rounded bg-ink-950/70 px-1.5 py-1 text-[10px]"
+              >
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <Circle
+                    className={`h-2 w-2 shrink-0 ${isActive ? 'fill-emerald-400 text-emerald-400' : 'fill-tbc-200/30 text-tbc-200/30'}`}
+                  />
+                  <span className="truncate font-mono text-tbc-100" title={row.model}>
+                    {row.model}
+                  </span>
+                  {isActive && (
+                    <span className="shrink-0 rounded-full bg-emerald-500/20 px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-wider text-emerald-300">
+                      active
+                    </span>
+                  )}
+                </span>
+                <span className="shrink-0 text-tbc-200/50">
+                  {row.total}
+                  {row.pending > 0 && <span className="ml-1 text-amber-300/70">+{row.pending}</span>}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </div>
   );
 }

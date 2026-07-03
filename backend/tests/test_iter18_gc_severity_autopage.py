@@ -12,7 +12,7 @@ BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://tbc-self-copy.previe
 API = f'{BASE_URL}/api'
 
 OP_EMAIL = 'rac.investments.swe@gmail.com'
-OP_PASS = '123Admin@98'
+OP_PASS = os.environ.get('TEST_OPERATOR_PASSWORD', 'set-TEST_OPERATOR_PASSWORD-to-run')
 
 MONGO_URL = os.environ.get('MONGO_URL', 'mongodb://localhost:27017')
 DB_NAME = os.environ.get('DB_NAME', 'test_database')

@@ -2,15 +2,27 @@
 """
 Test NEW endpoints: referrals + projects + brand settings.
 """
+import os
+import sys
 import requests
 import pyotp
 import time
 import json
 
-BASE_URL = "https://tbc-self-copy.preview.emergentagent.com/api"
+BASE_URL = os.environ.get("TEST_BASE_URL", "https://tbc-self-copy.preview.emergentagent.com/api")
 
-OPERATOR_EMAIL = "rac.invetments.swe@gmail.com"
-OPERATOR_PASSWORD = "TBC@2025!Admin"
+# Credentials from environment only — nothing sensitive is committed.
+#   export TEST_OPERATOR_EMAIL="operator@example.com"
+#   export TEST_OPERATOR_PASSWORD="your-password"
+OPERATOR_EMAIL = os.environ.get("TEST_OPERATOR_EMAIL", "")
+OPERATOR_PASSWORD = os.environ.get("TEST_OPERATOR_PASSWORD", "")
+
+if not OPERATOR_EMAIL or not OPERATOR_PASSWORD:
+    print(
+        "SKIP: set TEST_OPERATOR_EMAIL and TEST_OPERATOR_PASSWORD env vars to run "
+        "this integration test (no credentials are hardcoded)."
+    )
+    sys.exit(0)
 
 results = {
     "passed": 0,

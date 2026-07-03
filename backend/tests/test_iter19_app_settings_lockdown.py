@@ -18,10 +18,12 @@ import bcrypt
 import pymongo
 
 
+from tests._creds import OPERATOR_EMAIL, OPERATOR_PASSWORD, require_operator_creds
+
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://tbc-self-copy.preview.emergentagent.com").rstrip("/")
 API = f"{BASE_URL}/api"
-OPERATOR_EMAIL = "rac.investments.swe@gmail.com"
-OPERATOR_PASS = "123Admin@98"
+# Credentials come from env vars (see tests/_creds.py) — no secrets in source.
+OPERATOR_PASS = OPERATOR_PASSWORD
 
 # Direct DB access for seeding/cleanup
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
@@ -33,6 +35,7 @@ db = _client[DB_NAME]
 # ---------- helpers ----------
 
 def _operator_token() -> str:
+    require_operator_creds()
     r = requests.post(f"{API}/auth/login", json={"email": OPERATOR_EMAIL, "password": OPERATOR_PASS}, timeout=20)
     assert r.status_code == 200, f"operator login failed: {r.status_code} {r.text}"
     body = r.json()

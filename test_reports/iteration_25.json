@@ -32,7 +32,7 @@
     "/app/backend/tests/test_iter28_final_verification.py (new — 14 tests, all passing)"
   ],
   "success_rate": {"backend": "100% (14/14)", "frontend": "100% on rendering + selectors + URL-tab single-click; EOS live click flow code-reviewed only (no chat data + no AI keys to exercise in preview)"},
-  "test_credentials": "Operator rac.investments.swe@gmail.com / 123Admin@98. Login redirects to /setup-2fa per RESET_OPERATOR_PASSWORD=true; cookie session works. No 2FA required this run.",
+  "test_credentials": "Operator rac.investments.swe@gmail.com / REDACTED. Login redirects to /setup-2fa per RESET_OPERATOR_PASSWORD=true; cookie session works. No 2FA required this run.",
   "seed_data_creation": "Inserted + cleaned 1 changelog test entry (TEST_iter28_*), 2 ai_build_plans (TEST_gc_old_*, TEST_gc_opened_*). All cleaned via finally/teardown blocks.",
   "retest_needed": false,
   "main_agent_can_self_test": true,

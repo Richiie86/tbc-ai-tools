@@ -6,6 +6,7 @@ import { Button } from '../../components/ui/button';
 import {
   MessageSquare, Cpu, ListOrdered, CreditCard,
   ChevronLeft, ChevronRight, BookOpen, X,
+  BrainCircuit, Globe, BookOpenCheck, Settings as SettingsIcon, Gift,
 } from 'lucide-react';
 
 /**
@@ -16,27 +17,54 @@ import {
  * visit (`tbc_dashboard_tour_seen_v1` in localStorage) and is re-launchable
  * any time via the `DashboardGuideButton` exported below.
  */
-const STORAGE_KEY = 'tbc_dashboard_tour_seen_v1';
+// Bumped to v2 when the guide grew from 4 steps to full beginner coverage
+// (Automatic mode, web search, live docs, referrals, security) — so returning
+// users get the richer walkthrough once.
+const STORAGE_KEY = 'tbc_dashboard_tour_seen_v2';
 
 const STEPS = [
   {
     icon: MessageSquare, title: 'The chat',
-    body: 'Type a question in the box at the bottom; the AI streams its answer in real-time above. New messages now pin to the bottom only when you ARE at the bottom — scroll up to read older replies without the stream yanking you back, then click "Jump to latest" to follow the stream again.',
+    body: 'This is your workspace. Type anything into the box at the bottom — a question, or "build me a...". The AI writes its answer live, word by word, in the space above. If you scroll up to re-read something, the answer won\'t yank you back down; just click "Jump to latest" to follow along again.',
+    tip: 'Be specific. "Build a login page with email and password" works better than "make a login".',
   },
   {
-    icon: Cpu, title: 'Pick the model',
-    body: 'The top-left model picker switches between Claude Sonnet 4.5 (default, balanced), Opus (deep reasoning), Haiku (fastest), GPT-4o, Gemini, and more. Credits are consumed per message — heavier models cost more.',
-    tip: 'Stick with the default for chat; switch to Opus when you have a hard problem; switch to Haiku when you just need a quick lookup.',
+    icon: Cpu, title: 'Pick your model',
+    body: 'Top-left is the model picker — the different "brains" you can chat with: Claude Sonnet (balanced, the default), Opus (deepest thinking for hard problems), Haiku (fastest for quick lookups), plus GPT and Gemini. Each message spends a few credits; stronger models cost a little more.',
+    tip: 'Not sure which to pick? Choose "Automatic" (next step) and let the app decide for you.',
+  },
+  {
+    icon: BrainCircuit, title: 'Automatic mode (amAI)',
+    body: 'See the "Automatic" option in the model picker? Turn it on and you never have to choose a model again. amAI reads each message and quietly routes it to the right brain — a cheap fast one for simple questions, a powerful one for real coding — so you get good answers without wasting credits.',
+    tip: 'When it picks for you, a small note tells you which model it chose and why.',
+  },
+  {
+    icon: Globe, title: 'Live web search',
+    body: 'When your question needs current, real-world information, the AI can search the live web and fold the results into its answer — so it isn\'t limited to what it learned during training. When this happens you\'ll see a small "Used Web Search" note appear.',
+    tip: 'Great for "what\'s the latest version of...", recent news, or up-to-date prices.',
+  },
+  {
+    icon: BookOpenCheck, title: 'Always-current code docs',
+    body: 'Ask a coding question about a library like React, Next.js, or Tailwind and the app automatically pulls the newest official documentation into the answer (via Context7). That means fewer outdated examples and code that actually works with today\'s versions.',
+    tip: 'You can even name a version — "Next.js 14 routing" — and it fetches docs for that exact version.',
   },
   {
     icon: ListOrdered, title: 'Your sessions',
-    body: 'Every conversation is a session, listed on the left. Click any session to resume it; the AI remembers everything you said inside that session. Click "New chat" to start fresh.',
-    tip: 'Sessions are private to your account — only the operator can see metadata, never the contents.',
+    body: 'Every conversation is saved as a "session" in the left sidebar. Click any one to jump back in — the AI remembers everything you discussed inside it, so you can pick up right where you left off. Hit "New session" to start a clean slate.',
+    tip: 'Your chats are private to your account. The operator can see basic stats, never what you typed.',
   },
   {
     icon: CreditCard, title: 'Credits & billing',
-    body: 'The chip in the top-right shows how many credits you have left. When you run out you can buy a credit pack from the Pricing page or upgrade to a subscription plan. Open the same chip later to see your usage history.',
-    tip: 'You can always re-run this guide from the "Guide" button in the sidebar.',
+    body: 'The chip in the top-right shows how many credits you have left — credits are what each message spends. When they run low, buy a top-up pack or upgrade to a monthly plan from the Pricing page. Click the chip any time to see your usage history.',
+  },
+  {
+    icon: Gift, title: 'Refer a friend',
+    body: 'Down in the sidebar you\'ll find your personal referral link. Share it, and when a friend signs up you both get rewarded. It\'s the easiest way to earn extra credits.',
+  },
+  {
+    icon: SettingsIcon, title: 'Settings & security',
+    body: 'The Settings link (sidebar) is where you update your profile, change your password, and turn on two-factor authentication (2FA) for an extra layer of protection. We strongly recommend enabling 2FA.',
+    tip: 'You can always replay this guide from the "Guide" button in the sidebar.',
   },
 ];
 

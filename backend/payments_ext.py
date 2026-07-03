@@ -671,6 +671,85 @@ async def op_activate_treasury(dest_id: str, _: dict = Depends(get_current_opera
 
 
 # ===================================================================
+# OPERATOR: USAGE METERS ("Taxameter")
+# Tracks how much of each provider's credit/quota is used vs left, with a
+# refill link per provider. Values are operator-maintained (manual) so the
+# tab works with zero extra API keys; the shape leaves room for live sync
+# to be layered on per-provider later.
+# ===================================================================
+_USAGE_METERS_ID = 'usage_meters'
+
+# Seeded when the operator first opens the tab. Refill links point straight
+# at each provider's billing/usage page.
+_DEFAULT_USAGE_METERS = [
+    {'id': 'vercel',    'provider': 'Vercel',        'unit': 'USD',     'used': 0, 'total': 0, 'refill_url': 'https://vercel.com/account/billing'},
+    {'id': 'github',    'provider': 'GitHub',        'unit': 'USD',     'used': 0, 'total': 0, 'refill_url': 'https://github.com/settings/billing'},
+    {'id': 'render',    'provider': 'Render',        'unit': 'USD',     'used': 0, 'total': 0, 'refill_url': 'https://dashboard.render.com/billing'},
+    {'id': 'openai',    'provider': 'OpenAI',        'unit': 'USD',     'used': 0, 'total': 0, 'refill_url': 'https://platform.openai.com/account/billing/overview'},
+    {'id': 'anthropic', 'provider': 'Anthropic',     'unit': 'USD',     'used': 0, 'total': 0, 'refill_url': 'https://console.anthropic.com/settings/billing'},
+    {'id': 'groq',      'provider': 'Groq',          'unit': 'USD',     'used': 0, 'total': 0, 'refill_url': 'https://console.groq.com/settings/billing'},
+    {'id': 'gemini',    'provider': 'Google Gemini', 'unit': 'USD',     'used': 0, 'total': 0, 'refill_url': 'https://aistudio.google.com/app/apikey'},
+    {'id': 'mongodb',   'provider': 'MongoDB Atlas', 'unit': 'USD',     'used': 0, 'total': 0, 'refill_url': 'https://cloud.mongodb.com'},
+    {'id': 'resend',    'provider': 'Resend',        'unit': 'emails',  'used': 0, 'total': 0, 'refill_url': 'https://resend.com/settings/billing'},
+    {'id': 'cloudflare','provider': 'Cloudflare',    'unit': 'USD',     'used': 0, 'total': 0, 'refill_url': 'https://dash.cloudflare.com'},
+]
+
+_ALLOWED_UNITS = {'USD', 'EUR', 'credits', 'requests', 'tokens', 'emails', 'GB'}
+
+
+def _sanitize_meter(m: dict) -> dict:
+    """Coerce a client-supplied meter into a safe, stored shape."""
+    def _f(v):
+        try:
+            n = float(v)
+            return n if n >= 0 else 0.0
+        except (TypeError, ValueError):
+            return 0.0
+    mid = str(m.get('id') or '').strip()[:40] or secrets.token_hex(4)
+    unit = m.get('unit') if m.get('unit') in _ALLOWED_UNITS else 'USD'
+    url = str(m.get('refill_url') or '').strip()[:400]
+    if url and not url.startswith(('http://', 'https://')):
+        url = ''
+    return {
+        'id': mid,
+        'provider': str(m.get('provider') or 'Provider').strip()[:60],
+        'unit': unit,
+        'used': _f(m.get('used')),
+        'total': _f(m.get('total')),
+        'refill_url': url,
+        'notes': str(m.get('notes') or '').strip()[:200],
+    }
+
+
+@router.get('/operator/usage-meters')
+async def op_get_usage_meters(_: dict = Depends(get_current_operator)):
+    db = await get_db()
+    doc = await db.settings.find_one({'_id': _USAGE_METERS_ID})
+    if not doc:
+        await db.settings.insert_one({'_id': _USAGE_METERS_ID, 'meters': _DEFAULT_USAGE_METERS})
+        return {'meters': _DEFAULT_USAGE_METERS, 'updated_at': None}
+    return {'meters': doc.get('meters', _DEFAULT_USAGE_METERS), 'updated_at': doc.get('updated_at')}
+
+
+@router.put('/operator/usage-meters')
+async def op_update_usage_meters(payload: dict = Body(...), _: dict = Depends(get_current_operator)):
+    raw = payload.get('meters')
+    if not isinstance(raw, list):
+        raise HTTPException(400, 'meters must be a list')
+    if len(raw) > 50:
+        raise HTTPException(400, 'Too many meters (max 50)')
+    meters = [_sanitize_meter(m) for m in raw if isinstance(m, dict)]
+    now = datetime.now(timezone.utc).isoformat()
+    db = await get_db()
+    await db.settings.update_one(
+        {'_id': _USAGE_METERS_ID},
+        {'$set': {'meters': meters, 'updated_at': now}},
+        upsert=True,
+    )
+    return {'success': True, 'meters': meters, 'updated_at': now}
+
+
+# ===================================================================
 # OPERATOR: SETTINGS
 # ===================================================================
 @router.get('/operator/settings')
@@ -692,8 +771,6 @@ async def op_get_settings(_: dict = Depends(get_current_operator)):
         'enable_crypto_auto': doc.get('enable_crypto_auto', False),
         'enable_crypto_manual': doc.get('enable_crypto_manual', True),
         'enable_bank': doc.get('enable_bank', True),
-        'emergent_llm_key_set': bool(doc.get('emergent_llm_key')),
-        'emergent_llm_key_masked': _mask_key(doc.get('emergent_llm_key')),
         'resend_api_key_set': bool(doc.get('resend_api_key')),
         'resend_api_key_masked': _mask_key(doc.get('resend_api_key')),
         'sender_email': doc.get('sender_email') or os.environ.get('SENDER_EMAIL', ''),
@@ -712,10 +789,20 @@ async def op_get_settings(_: dict = Depends(get_current_operator)):
         'openai_api_key_set': bool(doc.get('openai_api_key')),
         'openai_api_key_masked': _mask_key(doc.get('openai_api_key')),
         'openai_api_key_rotated_at': doc.get('openai_api_key_rotated_at'),
+        'gemini_api_key_set': bool(doc.get('gemini_api_key')),
+        'gemini_api_key_masked': _mask_key(doc.get('gemini_api_key')),
+        'gemini_api_key_rotated_at': doc.get('gemini_api_key_rotated_at'),
+        'openrouter_api_key_set': bool(doc.get('openrouter_api_key')),
+        'openrouter_api_key_masked': _mask_key(doc.get('openrouter_api_key')),
+        'openrouter_api_key_rotated_at': doc.get('openrouter_api_key_rotated_at'),
         # Render API key — lets the operator manage the backend host from here.
         'render_api_key_set': bool(doc.get('render_api_key')),
         'render_api_key_masked': _mask_key(doc.get('render_api_key')),
         'render_api_key_rotated_at': doc.get('render_api_key_rotated_at'),
+        # Groq API key — fast open-model inference (Llama, Mixtral, etc.).
+        'groq_api_key_set': bool(doc.get('groq_api_key')),
+        'groq_api_key_masked': _mask_key(doc.get('groq_api_key')),
+        'groq_api_key_rotated_at': doc.get('groq_api_key_rotated_at'),
         # Outbound webhook for ship-and-watch events.
         'deploy_webhook_url': doc.get('deploy_webhook_url') or '',
         'deploy_webhook_secret_set': bool(doc.get('deploy_webhook_secret')),
@@ -750,7 +837,7 @@ async def op_update_settings(payload: dict, _: dict = Depends(get_current_operat
         'default_plan_id',
         # Deploy & AI surface — same gate as the rest of the settings doc.
         'vercel_token', 'vercel_team_id', 'ai_api_key',
-        'anthropic_api_key', 'openai_api_key', 'render_api_key',
+        'anthropic_api_key', 'openai_api_key', 'gemini_api_key', 'openrouter_api_key', 'render_api_key', 'groq_api_key',
         'deploy_webhook_url', 'deploy_webhook_secret',
         'self_repo', 'self_git_ref', 'self_vercel_project_id',
         'github_token',
@@ -759,7 +846,7 @@ async def op_update_settings(payload: dict, _: dict = Depends(get_current_operat
     now = datetime.now(timezone.utc).isoformat()
     rotation_tracked = {
         'vercel_token', 'github_token',
-        'anthropic_api_key', 'openai_api_key', 'render_api_key',
+        'anthropic_api_key', 'openai_api_key', 'gemini_api_key', 'openrouter_api_key', 'render_api_key', 'groq_api_key',
     }
     for k, v in payload.items():
         if k not in allowed:
@@ -779,10 +866,10 @@ async def op_update_settings(payload: dict, _: dict = Depends(get_current_operat
 @router.post('/operator/settings/clear')
 async def op_clear_secret(key: str = Query(...), _: dict = Depends(get_current_operator)):
     db = await get_db()
-    if key not in {'stripe_secret_key', 'nowpayments_api_key', 'nowpayments_ipn_secret', 'paypal_client_id', 'paypal_client_secret', 'emergent_llm_key', 'resend_api_key', 'vercel_token', 'ai_api_key', 'github_token', 'anthropic_api_key', 'openai_api_key', 'render_api_key'}:
+    if key not in {'stripe_secret_key', 'nowpayments_api_key', 'nowpayments_ipn_secret', 'paypal_client_id', 'paypal_client_secret', 'emergent_llm_key', 'resend_api_key', 'vercel_token', 'ai_api_key', 'github_token', 'anthropic_api_key', 'openai_api_key', 'gemini_api_key', 'openrouter_api_key', 'render_api_key', 'groq_api_key'}:
         raise HTTPException(400, 'Cannot clear this key')
     unset_extra = {}
-    if key in {'vercel_token', 'github_token', 'anthropic_api_key', 'openai_api_key', 'render_api_key'}:
+    if key in {'vercel_token', 'github_token', 'anthropic_api_key', 'openai_api_key', 'gemini_api_key', 'openrouter_api_key', 'render_api_key', 'groq_api_key'}:
         unset_extra[f'{key}_rotated_at'] = None
     await db.settings.update_one(
         {'_id': 'payment_settings'},
@@ -812,7 +899,7 @@ async def op_test_key(
 
 
 # Which key kinds the live "Test" button can validate against a provider API.
-_TESTABLE_KINDS = {'vercel', 'github', 'anthropic', 'openai', 'render', 'resend', 'stripe'}
+_TESTABLE_KINDS = {'vercel', 'github', 'anthropic', 'openai', 'openrouter', 'render', 'resend', 'stripe', 'groq'}
 
 
 async def _validate_key(kind: str, value: str) -> dict:
@@ -855,6 +942,18 @@ async def _validate_key(kind: str, value: str) -> dict:
                             'message': 'OpenAI key valid'}
                 return {'ok': False, 'message': f'OpenAI rejected the key ({r.status_code}).'}
 
+            if kind == 'gemini':
+                # Google Generative Language API — listing models with the key
+                # as a query param is the cheapest authenticated GET.
+                r = await client.get(
+                    'https://generativelanguage.googleapis.com/v1beta/models',
+                    params={'key': value, 'pageSize': 1},
+                )
+                if r.status_code == 200:
+                    return {'ok': True, 'identity': 'Google Gemini account',
+                            'message': 'Gemini API key valid'}
+                return {'ok': False, 'message': f'Google rejected the Gemini key ({r.status_code}).'}
+
             if kind == 'render':
                 r = await client.get('https://api.render.com/v1/owners?limit=1',
                                      headers={'Authorization': f'Bearer {value}',
@@ -863,6 +962,28 @@ async def _validate_key(kind: str, value: str) -> dict:
                     return {'ok': True, 'identity': 'Render account',
                             'message': 'Render API key valid'}
                 return {'ok': False, 'message': f'Render rejected the key ({r.status_code}).'}
+
+            if kind == 'groq':
+                # Groq exposes an OpenAI-compatible surface; /openai/v1/models
+                # is the cheapest authenticated GET.
+                r = await client.get('https://api.groq.com/openai/v1/models',
+                                     headers={'Authorization': f'Bearer {value}'})
+                if r.status_code == 200:
+                    return {'ok': True, 'identity': 'Groq account',
+                            'message': 'Groq API key valid'}
+                return {'ok': False, 'message': f'Groq rejected the key ({r.status_code}).'}
+
+            if kind == 'openrouter':
+                # /api/v1/key returns the key's label + usage — cheapest
+                # authenticated GET. One key unlocks 300+ models.
+                r = await client.get('https://openrouter.ai/api/v1/key',
+                                     headers={'Authorization': f'Bearer {value}'})
+                if r.status_code == 200:
+                    d = (r.json().get('data') or {})
+                    label = d.get('label') or 'OpenRouter account'
+                    return {'ok': True, 'identity': label,
+                            'message': 'OpenRouter key valid — 300+ models unlocked'}
+                return {'ok': False, 'message': f'OpenRouter rejected the key ({r.status_code}).'}
 
             if kind == 'resend':
                 r = await client.get('https://api.resend.com/domains',
@@ -891,11 +1012,14 @@ _KIND_TO_FIELD = {
     'github': 'github_token',
     'anthropic': 'anthropic_api_key',
     'openai': 'openai_api_key',
+    'gemini': 'gemini_api_key',
+    'openrouter': 'openrouter_api_key',
     'render': 'render_api_key',
     'resend': 'resend_api_key',
     'stripe': 'stripe_secret_key',
+    'groq': 'groq_api_key',
 }
-_ROTATION_STAMPED = {'vercel_token', 'github_token', 'anthropic_api_key', 'openai_api_key', 'render_api_key'}
+_ROTATION_STAMPED = {'vercel_token', 'github_token', 'anthropic_api_key', 'openai_api_key', 'gemini_api_key', 'openrouter_api_key', 'render_api_key', 'groq_api_key'}
 
 
 def _detect_key_kind(value: str) -> Optional[str]:
@@ -909,10 +1033,22 @@ def _detect_key_kind(value: str) -> Optional[str]:
     low = v.lower()
     if low.startswith('sk-ant-'):
         return 'anthropic'
+    # OpenRouter keys start with `sk-or-` — check before the generic `sk-`
+    # OpenAI branch so they can't be mis-detected as OpenAI.
+    if low.startswith('sk-or-'):
+        return 'openrouter'
+    # Groq keys start with `gsk_` — check before the GitHub `gh*`/generic
+    # `sk-` branches so it can't be mis-detected.
+    if low.startswith('gsk_'):
+        return 'groq'
     if low.startswith(('ghp_', 'github_pat_', 'gho_', 'ghs_', 'ghu_', 'ghr_')):
         return 'github'
     if low.startswith('rnd_'):
         return 'render'
+    # Google Gemini (AI Studio) keys start with `AIza` — case-sensitive, so
+    # check the original value, not the lowercased copy.
+    if v.startswith('AIza'):
+        return 'gemini'
     if low.startswith('re_'):
         return 'resend'
     if low.startswith(('sk_live_', 'sk_test_', 'rk_live_', 'rk_test_')):
@@ -951,7 +1087,7 @@ async def op_auto_detect_key(
             raise HTTPException(
                 422,
                 "Couldn't recognise this key automatically. Use the specific "
-                "field for it (Vercel/GitHub/Anthropic/OpenAI/Render).",
+                "field for it (Vercel/GitHub/Anthropic/OpenAI/Gemini/OpenRouter/Render/Groq).",
             )
 
     if do_validate and verdict is None:

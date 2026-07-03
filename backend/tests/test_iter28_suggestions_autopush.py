@@ -17,7 +17,7 @@ import requests
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL').rstrip('/')
 API = f'{BASE_URL}/api'
 OP_EMAIL = 'rac.investments.swe@gmail.com'
-OP_PASSWORD = '123Admin@98'
+OP_PASSWORD = os.environ.get('TEST_OPERATOR_PASSWORD', 'set-TEST_OPERATOR_PASSWORD-to-run')
 
 
 @pytest.fixture(scope='module')

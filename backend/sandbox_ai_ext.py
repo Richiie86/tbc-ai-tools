@@ -196,11 +196,10 @@ async def propose(body: ProposeBody, op: dict = Depends(get_current_operator)):
     if body.edit_mode == 'single' and len(body.files) > 1:
         raise HTTPException(400, 'edit_mode=single but multiple files provided — switch to multi')
 
-    settings = await db.settings.find_one({'_id': 'payment_settings'}) or {}
-    from llm_router import resolve_llm_key, NO_LLM_PROVIDER_MSG
-    api_key = resolve_llm_key(settings)
-    if not api_key:
-        raise HTTPException(503, NO_LLM_PROVIDER_MSG)
+    from llm_router import any_provider_key_available
+    api_key = ''  # legacy placeholder — llm_router uses per-provider keys
+    if not await any_provider_key_available():
+        raise HTTPException(503, 'No AI provider key is configured on the backend (Operator → Security).')
 
     # Build the prompt — the model sees the instruction first, then each
     # file body fenced with the path so it can reference them by name.
@@ -215,8 +214,7 @@ async def propose(body: ProposeBody, op: dict = Depends(get_current_operator)):
 
     session_id = body.session_id or str(uuid.uuid4())
     provider, _ = _MODEL_MAP[body.model]
-    # BYO-aware router — uses the operator's own Anthropic/OpenAI key when set,
-    # falls back to emergentintegrations otherwise.
+    # Lazy import — keeps provider SDKs out of the import path when unused.
     from llm_router import LlmChat, UserMessage
     chat = LlmChat(
         api_key=api_key,

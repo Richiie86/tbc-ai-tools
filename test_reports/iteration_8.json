@@ -27,7 +27,7 @@
     "/app/backend/tests/test_p6_2_operator_delete_audit.py (new — 2 tests: audit row creation with via=operator_ui + 404 on unknown id)"
   ],
   "success_rate": { "backend": "100% (76/76 passed + 1 skipped + 2 new = 78/78)", "frontend": "100% (all 3 UI flows passed end-to-end on real preview URL)" },
-  "test_credentials": "Operator rac.investments.swe@gmail.com / 123Admin@98. Created fresh user test_bell2_1781343345@test.com / BellTest@123 for FLOW 2 inbox verification.",
+  "test_credentials": "Operator rac.investments.swe@gmail.com / REDACTED. Created fresh user test_bell2_1781343345@test.com / BellTest@123 for FLOW 2 inbox verification.",
   "seed_data_creation": "Created 4 TEST_del_* deploy_projects then deleted them via the new endpoint (audit trail intact and shown by audit table). Created 2 test_bell_*@test.com users for notification inbox verification. Marketing banner cleaned up (enabled:false) at end of FLOW 1.",
   "retest_needed": false,
   "main_agent_can_self_test": true,

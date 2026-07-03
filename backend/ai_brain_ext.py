@@ -37,6 +37,11 @@ logger = logging.getLogger('tbc')
 
 router = APIRouter(prefix='/api/operator/ai-brain', tags=['ai-brain'])
 
+# Mirror of server.py:DEFAULT_MODEL. Kept local to avoid a circular import
+# (server.py imports this module to mount the router). If the server default
+# changes, update this too — it only drives the "active" badge in the UI.
+DEFAULT_MODEL = 'claude-opus-4-7'
+
 
 # Canonical model buckets — anything not matching falls into "other".
 # Match against the chat-session's stored model field (server.py:DEFAULT_MODEL
@@ -119,23 +124,47 @@ async def maturity(_op: dict = Depends(get_current_operator)):
         'total': 0, 'pending': 0, 'last_7d': 0,
         'approved': 0, 'auto_proposed_total': 0,
     })
+    # Per-bucket breakdown of the *exact* model identifiers behind each card,
+    # so the UI can expand a card and show which concrete models contributed
+    # (e.g. the "other" card unpacks into gemini-3-flash-preview, o3, …).
+    # Keyed bucket → raw model id → {total, pending}.
+    detail: dict[str, dict[str, dict]] = defaultdict(lambda: defaultdict(lambda: {'total': 0, 'pending': 0}))
+
     # `all` synthesises across every bucket so the UI can render a "headline"
     # card without re-summing client-side.
     for l in learnings:
         b = _bucket_for_model(l.get('source_model'))
+        raw = (l.get('source_model') or 'unknown').strip() or 'unknown'
+        enabled = bool(l.get('enabled'))
+        auto = bool(l.get('auto_proposed'))
         for key in (b, 'all'):
             row = buckets[key]
-            if l.get('enabled'):
+            if enabled:
                 row['total'] += 1
-            elif l.get('auto_proposed'):
+            elif auto:
                 row['pending'] += 1
             created = _as_aware(l.get('created_at'))
             if created and created >= week_ago:
                 row['last_7d'] += 1
-            if l.get('auto_proposed'):
+            if auto:
                 row['auto_proposed_total'] += 1
-                if l.get('enabled'):
+                if enabled:
                     row['approved'] += 1
+            # Track the concrete model under both its own bucket and `all`.
+            d = detail[key][raw]
+            if enabled:
+                d['total'] += 1
+            elif auto:
+                d['pending'] += 1
+
+    def _breakdown(key: str) -> list[dict]:
+        rows = [
+            {'model': raw, 'total': v['total'], 'pending': v['pending']}
+            for raw, v in detail.get(key, {}).items()
+        ]
+        # Most active first, then alphabetical for stability.
+        rows.sort(key=lambda r: (-r['total'], r['model']))
+        return rows
 
     out = []
     # Stable model ordering — headline first, then the three frontier ones.
@@ -151,8 +180,9 @@ async def maturity(_op: dict = Depends(get_current_operator)):
             'last_7d_added': b['last_7d'],
             'approval_rate': round(approval_rate, 3) if approval_rate is not None else None,
             'auto_proposed_total': b['auto_proposed_total'],
+            'breakdown': _breakdown(key),
         })
-    return {'models': out}
+    return {'models': out, 'default_model': DEFAULT_MODEL}
 
 
 @router.get('/timeline')

@@ -40,6 +40,7 @@ from pydantic import BaseModel, Field
 
 from auth_utils import get_current_operator
 from db import db
+from rate_limit import rate_limit_operator
 from vercel_api_ext import VERCEL_API, vercel_team_qs as vercel_team_params, vercel_token
 
 logger = logging.getLogger('tbc')
@@ -50,6 +51,15 @@ router = APIRouter(prefix='/api/operator/ai-build', tags=['ai-build'])
 GITHUB_API = 'https://api.github.com'
 _MAX_PATCH_BYTES = 80 * 1024
 _MAX_FILES_PER_REQUEST = 12
+
+# Rate limits for the LLM-backed endpoints. These cap how often a single
+# operator account can trigger paid model calls, so a compromised account
+# can't rack up unbounded spend through rapid plan/review/PR loops.
+# Override via env vars without a code change.
+_PLAN_RATE_LIMIT = int(os.environ.get('AI_BUILD_PLAN_LIMIT', '10'))
+_PLAN_RATE_WINDOW = int(os.environ.get('AI_BUILD_PLAN_WINDOW', '60'))
+_PR_RATE_LIMIT = int(os.environ.get('AI_BUILD_PR_LIMIT', '20'))
+_PR_RATE_WINDOW = int(os.environ.get('AI_BUILD_PR_WINDOW', '60'))
 
 # Model used for the cross-AI patch reviewer. The old hardcoded
 # "claude-opus-4-5" is NOT a real model id and the Emergent/litellm gateway
@@ -269,7 +279,7 @@ async def _cross_ai_review(llm_key: str, prompt: str, summary: str, files: list[
     Returns `{verdict, summary, concerns, missing_imports, security_flags,
               reviewer_model}` — always returns a dict, even on parse failure.
     """
-    from llm_router import LlmChat, UserMessage
+    from llm_router import LlmChat, UserMessage, resolve_text_model
 
     # Truncate file contents for the reviewer so we don't blow tokens on a
     # 12 × 80KB patch set — heads are what matter for import + signature checks.
@@ -283,13 +293,23 @@ async def _cross_ai_review(llm_key: str, prompt: str, summary: str, files: list[
         f'Proposed files ({len(files)}):\n{files_blob}\n\n'
         'Return the review JSON now.'
     )
-    # Reviewer stays on the operator's BYO Anthropic key when set (no Emergent
-    # spend). Uses a VALID model id (see _CROSS_AI_REVIEW_MODEL).
+    # Reviewer runs on whatever provider key the operator has (Anthropic,
+    # OpenAI, OpenRouter or Gemini) so an OpenRouter-only setup still gets a
+    # cross-AI review instead of silently skipping it.
+    resolved = await resolve_text_model()
+    if not resolved:
+        return {
+            'verdict': 'review_skipped',
+            'summary': 'No AI provider key configured for cross-AI review.',
+            'concerns': [], 'missing_imports': [], 'security_flags': [],
+            'reviewer_model': 'none',
+        }
+    rev_provider, rev_model = resolved
     chat = LlmChat(
         api_key=llm_key,
         session_id=f'ai-build-review-{datetime.now(timezone.utc).timestamp():.0f}',
         system_message=_REVIEWER_SYSTEM_PROMPT,
-    ).with_model('anthropic', _CROSS_AI_REVIEW_MODEL)
+    ).with_model(rev_provider, rev_model)
     try:
         raw = await chat.send_message(UserMessage(text=user_msg))
     except Exception as e:
@@ -298,7 +318,7 @@ async def _cross_ai_review(llm_key: str, prompt: str, summary: str, files: list[
             'verdict': 'review_skipped',
             'summary': f'Reviewer call failed: {str(e)[:200]}',
             'concerns': [], 'missing_imports': [], 'security_flags': [],
-            'reviewer_model': _CROSS_AI_REVIEW_MODEL,
+            'reviewer_model': rev_model,
         }
     text = _strip_codefences(raw or '')
     try:
@@ -311,7 +331,7 @@ async def _cross_ai_review(llm_key: str, prompt: str, summary: str, files: list[
                 'summary': 'Reviewer returned non-JSON',
                 'concerns': [text[:200]] if text else [],
                 'missing_imports': [], 'security_flags': [],
-                'reviewer_model': _CROSS_AI_REVIEW_MODEL,
+                'reviewer_model': rev_model,
             }
         try:
             parsed = json.loads(m.group(0))
@@ -323,7 +343,7 @@ async def _cross_ai_review(llm_key: str, prompt: str, summary: str, files: list[
         'concerns': [str(c)[:280] for c in (parsed.get('concerns') or [])][:12],
         'missing_imports': [str(i)[:200] for i in (parsed.get('missing_imports') or [])][:8],
         'security_flags': [str(s)[:200] for s in (parsed.get('security_flags') or [])][:8],
-        'reviewer_model': _CROSS_AI_REVIEW_MODEL,
+        'reviewer_model': rev_model,
     }
 
 
@@ -335,7 +355,10 @@ async def plan(req: PlanRequest, user: dict = Depends(get_current_operator)):
     Stored in `ai_build_plans` so the follow-up `/open-pr` call doesn't
     need to re-run the LLM. Plans expire after 24h via index TTL.
     """
-    from llm_router import LlmChat, UserMessage, resolve_llm_key, NO_LLM_PROVIDER_MSG
+    # Cap paid LLM planning calls per operator to prevent runaway spend.
+    rate_limit_operator(user, 'ai-build:plan', limit=_PLAN_RATE_LIMIT, window_seconds=_PLAN_RATE_WINDOW)
+
+    from llm_router import LlmChat, UserMessage
 
     project = await db.deploy_projects.find_one({'id': req.project_id})
     if not project:
@@ -348,10 +371,12 @@ async def plan(req: PlanRequest, user: dict = Depends(get_current_operator)):
     gh_token = settings.get('github_token') or os.environ.get('GITHUB_TOKEN')
     if not gh_token:
         raise HTTPException(503, 'github_token not set in Operator → Security.')
-    # Honour BYO Anthropic/OpenAI keys — only 503 when no provider at all is set.
-    llm_key = resolve_llm_key(settings)
-    if not llm_key:
-        raise HTTPException(503, NO_LLM_PROVIDER_MSG)
+    from llm_router import resolve_text_model
+    llm_key = ''  # legacy placeholder — llm_router uses the provider key
+    resolved = await resolve_text_model()
+    if not resolved:
+        raise HTTPException(503, 'No AI provider key configured (add one in Operator → My Keys — Anthropic, OpenAI, OpenRouter or Gemini).')
+    plan_provider, plan_model = resolved
 
     ref = project.get('gitRef') or 'main'
     async with httpx.AsyncClient(timeout=20.0) as client:
@@ -371,7 +396,7 @@ async def plan(req: PlanRequest, user: dict = Depends(get_current_operator)):
         api_key=llm_key,
         session_id=f'ai-build-{req.project_id}-{datetime.now(timezone.utc).timestamp():.0f}',
         system_message=_SYSTEM_PROMPT,
-    ).with_model('anthropic', 'claude-sonnet-4-5-20250929')
+    ).with_model(plan_provider, plan_model)
     try:
         raw = await chat.send_message(UserMessage(text=user_prompt))
     except Exception as e:
@@ -469,6 +494,9 @@ async def open_pr(req: OpenPRRequest, user: dict = Depends(get_current_operator)
     failure mid-commit leaves the branch with partial changes — operator
     can still inspect the PR or delete the branch.
     """
+    # Cap PR-open calls per operator (these also run a cross-AI review LLM pass).
+    rate_limit_operator(user, 'ai-build:open-pr', limit=_PR_RATE_LIMIT, window_seconds=_PR_RATE_WINDOW)
+
     doc = await db.ai_build_plans.find_one({'plan_id': req.plan_id})
     if not doc:
         raise HTTPException(404, 'Plan not found (expired?)')

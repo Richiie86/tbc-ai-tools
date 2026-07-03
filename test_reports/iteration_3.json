@@ -43,7 +43,7 @@
     "backend": "100% (44/44 passed, 1 prior skip preserved)",
     "frontend": "95% — all required testids present, all download/copy/clone/domain flows verified; only gap is silent code-review error UX"
   },
-  "test_credentials": "Operator rac.investments.swe@gmail.com / 123Admin@98. RESET_OPERATOR_PASSWORD=true clears 2FA on boot; first login lands on /setup-2fa, navigate directly to /operator.",
+  "test_credentials": "Operator rac.investments.swe@gmail.com / REDACTED. RESET_OPERATOR_PASSWORD=true clears 2FA on boot; first login lands on /setup-2fa, navigate directly to /operator.",
   "seed_data_creation": "Test created one project (octocat/Hello-World), three clones, and one E2E clone via the UI. They persist in deploy_projects collection; safe to leave or prune (all share octocat/Hello-World repo).",
   "retest_needed": false,
   "main_agent_can_self_test": true,

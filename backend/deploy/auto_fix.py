@@ -143,7 +143,7 @@ async def request_patches(project: dict, review: dict, settings: dict) -> dict:
     """Ask the LLM for a JSON patch set that resolves the findings.
     Returns {patches: [...], commit_message: str}. Raises HTTPException on
     fetch or LLM failure."""
-    from emergentintegrations.llm.chat import LlmChat, UserMessage
+    from llm_router import LlmChat, UserMessage
 
     gh_token = (settings or {}).get('github_token') or os.environ.get('GITHUB_TOKEN')
     if not gh_token:
@@ -152,10 +152,10 @@ async def request_patches(project: dict, review: dict, settings: dict) -> dict:
             'github_token not configured — auto-fix needs `Contents: Write` to commit patches. '
             'Set it in Operator → Security.',
         )
-    from llm_router import resolve_llm_key, NO_LLM_PROVIDER_MSG
-    llm_key = resolve_llm_key(settings or {})
-    if not llm_key:
-        raise HTTPException(503, NO_LLM_PROVIDER_MSG)
+    from llm_router import _openai_key
+    llm_key = ''  # legacy placeholder — llm_router uses the provider key
+    if not await _openai_key():
+        raise HTTPException(503, 'No OpenAI API key configured for auto-fix (Operator → Security).')
 
     paths = _findings_to_paths(review)
     if not paths:

@@ -417,16 +417,24 @@ async def run_code_review(project: dict, settings: dict) -> dict:
         + '\n\nReturn the strict JSON review object now.'
     )
 
-    from llm_router import resolve_llm_key, NO_LLM_PROVIDER_MSG
-    llm_key = resolve_llm_key(settings or {})
-    if not llm_key:
-        raise HTTPException(503, NO_LLM_PROVIDER_MSG)
+    # Pick whichever provider the operator actually has a key for (Anthropic,
+    # OpenAI, Gemini, OpenRouter or Groq) so Code Review works with ANY key.
+    from llm_router import resolve_text_model
+    resolved = await resolve_text_model()
+    if not resolved:
+        raise HTTPException(
+            503,
+            'No AI provider key configured. Add an OpenAI, Anthropic, Gemini, '
+            'OpenRouter or Groq key in Operator → My Keys.',
+        )
+    provider, model = resolved
+    llm_key = ''  # legacy placeholder — llm_router resolves the provider key itself
 
     chat = LlmChat(
         api_key=llm_key,
         session_id=f'code-review-{project["id"]}',
         system_message=_SYSTEM_PROMPT,
-    ).with_model('anthropic', 'claude-sonnet-4-5-20250929')  # primary reviewer — uses BYO ANTHROPIC_API_KEY when set
+    ).with_model(provider, model)  # uses whichever provider key the operator has
 
     try:
         raw = await chat.send_message(UserMessage(text=prompt))

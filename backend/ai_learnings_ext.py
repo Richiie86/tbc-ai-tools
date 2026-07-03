@@ -181,10 +181,11 @@ async def digest(
         }
 
     bullets = '\n'.join(f'- {d.get("text", "").strip()}' for d in docs)
-    api_key = os.environ.get('EMERGENT_LLM_KEY') or ''
-    if not api_key:
+    from llm_router import _gemini_key
+    api_key = ''  # legacy placeholder — llm_router uses the provider key
+    if not await _gemini_key():
         # Deterministic fallback — keep the endpoint useful even without
-        # the LLM key configured (e.g. CI).
+        # a Gemini key configured (e.g. CI).
         return {
             'weeks': weeks,
             'count': len(docs),
@@ -192,7 +193,7 @@ async def digest(
             'fallback': True,
         }
     try:
-        from emergentintegrations.llm.chat import (
+        from llm_router import (
             LlmChat, UserMessage, TextDelta, StreamDone,
         )
         chat = LlmChat(

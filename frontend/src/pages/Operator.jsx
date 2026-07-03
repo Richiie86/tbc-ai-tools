@@ -8,7 +8,8 @@ import {
   Users, CreditCard, MessageSquare, DollarSign, Loader2, ShieldCheck, Mail,
   Code2, Sparkles, Wallet, KeyRound, Settings as SettingsIcon, Coins,
   FolderKanban, Activity, ScrollText, Megaphone, MessageCircle, FlaskConical,
-  TrendingUp, Lock, Brain, Network, TestTube, AlertOctagon, Wand2,
+  TrendingUp, Lock, Brain, Network, TestTube, AlertOctagon, Wand2, Link2,
+  Calculator, Gauge, Archive, BrainCircuit, Wrench, Server,
 } from 'lucide-react';
 
 import PlansTab     from './operator/PlansTab';
@@ -30,6 +31,14 @@ import AIBrainTab from './operator/AIBrainTab';
 import AITestBenchTab from './operator/AITestBenchTab';
 import ErrorsTab from './operator/ErrorsTab';
 import AIBuildTab from './operator/AIBuildTab';
+import MyKeysTab from './operator/MyKeysTab';
+import ServerTab from './operator/ServerTab';
+import AmAiTab from './operator/AmAiTab';
+import ToolsTab from './operator/ToolsTab';
+import LinksTab from './operator/LinksTab';
+import TaxCalculatorTab from './operator/TaxCalculatorTab';
+import TaxameterTab from './operator/TaxameterTab';
+import UserProjectsTab from './operator/UserProjectsTab';
 import PreviewWidget from './PreviewWidget';
 import EmergencyLockdownPill from '../components/EmergencyLockdownPill';
 import AnalyticsTab from './operator/AnalyticsTab';
@@ -44,8 +53,11 @@ import { ContactsList } from './operator/ContactsList';
 
 function TabTrigger({ value, icon: Icon, children }) {
   return (
-    <TabsTrigger value={value} className="data-[state=active]:bg-tbc-500 data-[state=active]:text-ink-950">
-      <Icon className="mr-1.5 h-3.5 w-3.5" /> {children}
+    <TabsTrigger
+      value={value}
+      className="shrink-0 whitespace-nowrap min-h-9 data-[state=active]:bg-tbc-500 data-[state=active]:text-ink-950"
+    >
+      <Icon className="mr-1.5 h-3.5 w-3.5 shrink-0" /> {children}
     </TabsTrigger>
   );
 }
@@ -124,14 +136,14 @@ export default function Operator() {
   return (
     <div className="min-h-screen bg-ink-950">
       <Navbar />
-      <section className="mx-auto max-w-7xl px-5 py-10">
-        <div className="flex items-start justify-between gap-3">
+      <section className="mx-auto max-w-7xl px-4 py-6 sm:px-5 sm:py-10">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex items-center gap-3">
-            <div className="grid h-11 w-11 place-items-center rounded-xl bg-tbc-500/15 text-tbc-300">
+            <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-tbc-500/15 text-tbc-300">
               <ShieldCheck className="h-6 w-6" />
             </div>
             <div>
-              <h1 className="text-3xl font-bold text-tbc-100">Operator Console</h1>
+              <h1 className="text-2xl font-bold text-tbc-100 sm:text-3xl">Operator Console</h1>
               <div className="mt-1 flex flex-wrap items-center gap-2">
                 <p className="text-sm text-tbc-200/60">Manage members, payments, plans, treasury, licenses, and source code.</p>
                 <span
@@ -146,7 +158,7 @@ export default function Operator() {
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 sm:shrink-0">
             <EmergencyLockdownPill />
             <OperatorGuideButton onOpen={() => setGuideKey((k) => k + 1)} />
           </div>
@@ -172,7 +184,7 @@ export default function Operator() {
               </span>
               Live · refreshed every 8s
             </div>
-            <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid grid-cols-2 gap-3 sm:gap-5 lg:grid-cols-4">
               <StatCard icon={Users}        label="Total Users"     value={stats?.total_users ?? '–'}
                 onClick={() => onTabChange('users')} hint="View user list" />
               <StatCard icon={CreditCard}   label="Paid Customers"  value={stats?.paid_users ?? '–'}
@@ -196,19 +208,30 @@ export default function Operator() {
 
             <PreviewWidget />
 
-            <Tabs value={activeTab} onValueChange={onTabChange} className="mt-10">
-              <TabsList className="bg-ink-900 border border-tbc-900/60 flex flex-wrap h-auto">
+            <Tabs value={activeTab} onValueChange={onTabChange} className="mt-8 sm:mt-10">
+              {/* Mobile: a single swipeable row (flex-nowrap + horizontal
+                  scroll) so 20+ tabs stay usable on a phone instead of
+                  wrapping into a giant block. Desktop: wraps as before. */}
+              <TabsList className="bg-ink-900 border border-tbc-900/60 flex h-auto w-full flex-nowrap justify-start gap-1 overflow-x-auto scrollbar-none md:flex-wrap md:overflow-visible">
                 <TabTrigger value="users"     icon={Users}>Users ({users.length})</TabTrigger>
                 <TabTrigger value="analytics" icon={TrendingUp}>Analytics</TabTrigger>
                 <TabTrigger value="projects"  icon={FolderKanban}>Projects</TabTrigger>
+                <TabTrigger value="user-projects" icon={Archive}>User Projects</TabTrigger>
                 <TabTrigger value="plans"     icon={Sparkles}>Plans</TabTrigger>
                 <TabTrigger value="payments"  icon={CreditCard}>Payments</TabTrigger>
                 <TabTrigger value="treasury"  icon={Wallet}>Treasury</TabTrigger>
                 <TabTrigger value="money"     icon={DollarSign}>Money</TabTrigger>
+                <TabTrigger value="keys"      icon={KeyRound}>My Keys</TabTrigger>
+                <TabTrigger value="amai"      icon={BrainCircuit}>amAI</TabTrigger>
+                <TabTrigger value="tools"     icon={Wrench}>AI Tools</TabTrigger>
                 <TabTrigger value="licenses"  icon={KeyRound}>Licenses</TabTrigger>
                 <TabTrigger value="royalties" icon={Coins}>Royalties</TabTrigger>
                 <TabTrigger value="settings"  icon={SettingsIcon}>Security</TabTrigger>
+                <TabTrigger value="server"    icon={Server}>Server</TabTrigger>
                 <TabTrigger value="ops"       icon={Activity}>Ops</TabTrigger>
+                <TabTrigger value="links"     icon={Link2}>Links</TabTrigger>
+                <TabTrigger value="taxcalc"   icon={Calculator}>Tax Calc</TabTrigger>
+                <TabTrigger value="taxameter" icon={Gauge}>Taxameter</TabTrigger>
                 <TabTrigger value="audit"     icon={ScrollText}>Audit</TabTrigger>
                 <TabTrigger value="contacts"  icon={Mail}>Contacts</TabTrigger>
                 <TabTrigger value="codes"     icon={Code2}>Codes</TabTrigger>
@@ -230,13 +253,21 @@ export default function Operator() {
 
               <TabsContent value="plans"     className="mt-5"><PlansTab /></TabsContent>
               <TabsContent value="projects"  className="mt-5"><ProjectsTab /></TabsContent>
+              <TabsContent value="user-projects" className="mt-5"><UserProjectsTab /></TabsContent>
               <TabsContent value="payments"  className="mt-5"><PaymentsTab /></TabsContent>
               <TabsContent value="treasury"  className="mt-5"><TreasuryTab /></TabsContent>
               <TabsContent value="money"     className="mt-5"><MoneyTab /></TabsContent>
+              <TabsContent value="keys"      className="mt-5"><MyKeysTab /></TabsContent>
+              <TabsContent value="amai"      className="mt-5"><AmAiTab /></TabsContent>
+              <TabsContent value="tools"     className="mt-5"><ToolsTab /></TabsContent>
               <TabsContent value="licenses"  className="mt-5"><LicensesTab /></TabsContent>
               <TabsContent value="royalties" className="mt-5"><RoyaltiesTab /></TabsContent>
               <TabsContent value="settings"  className="mt-5"><SettingsTab /></TabsContent>
+              <TabsContent value="server"    className="mt-5"><ServerTab /></TabsContent>
               <TabsContent value="ops"       className="mt-5"><OpsTab /></TabsContent>
+              <TabsContent value="links"     className="mt-5"><LinksTab /></TabsContent>
+              <TabsContent value="taxcalc"   className="mt-5"><TaxCalculatorTab /></TabsContent>
+              <TabsContent value="taxameter" className="mt-5"><TaxameterTab /></TabsContent>
               <TabsContent value="audit"     className="mt-5"><AuditTab /></TabsContent>
               <TabsContent value="contacts"  className="mt-5"><ContactsList contacts={contacts} onChanged={loadAll} /></TabsContent>
               <TabsContent value="codes"     className="mt-5"><CodesBrowser /></TabsContent>
