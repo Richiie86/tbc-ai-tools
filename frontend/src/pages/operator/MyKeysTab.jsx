@@ -28,6 +28,7 @@ import { SecretRow } from './SecretsCard';
 const ALL_KINDS = [
   { kind: 'anthropic', setKey: 'anthropic_api_key' },
   { kind: 'openai', setKey: 'openai_api_key' },
+  { kind: 'gemini', setKey: 'gemini_api_key' },
   { kind: 'openrouter', setKey: 'openrouter_api_key' },
   { kind: 'groq', setKey: 'groq_api_key' },
   { kind: 'vercel', setKey: 'vercel_token' },
@@ -37,7 +38,8 @@ const ALL_KINDS = [
 
 const PRETTY = {
   vercel: 'Vercel', github: 'GitHub', anthropic: 'Anthropic (Claude)',
-  openai: 'OpenAI', openrouter: 'OpenRouter (300+ models)', groq: 'Groq',
+  openai: 'OpenAI', gemini: 'Google Gemini',
+  openrouter: 'OpenRouter (300+ models)', groq: 'Groq',
   render: 'Render', resend: 'Resend', stripe: 'Stripe',
 };
 
@@ -255,8 +257,8 @@ function SmartPaste({ onSaved }) {
         <div>
           <h3 className="text-base font-bold text-tbc-100">Add new key</h3>
           <p className="text-xs text-tbc-200/60">
-            Paste any key — Anthropic, OpenAI, OpenRouter, Groq, Vercel, GitHub
-            or Render. We figure out what it is and file it in your list
+            Paste any key — Anthropic, OpenAI, Gemini, OpenRouter, Groq, Vercel,
+            GitHub or Render. We figure out what it is and file it in your list
             automatically.
           </p>
         </div>
