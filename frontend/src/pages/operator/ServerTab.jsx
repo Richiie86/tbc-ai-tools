@@ -38,7 +38,7 @@ export default function ServerTab() {
     try {
       const [storageRes, deployRes] = await Promise.allSettled([
         api.get('/operator/storage/config'),
-        api.get('/operator/deploy/config'),
+        api.get('/operator/render-deploy/config'),
       ]);
       if (storageRes.status === 'fulfilled') {
         setCfg(storageRes.value.data);
@@ -117,7 +117,7 @@ export default function ServerTab() {
   const loadServices = async () => {
     setLoadingServices(true);
     try {
-      const { data } = await api.get('/operator/deploy/services');
+      const { data } = await api.get('/operator/render-deploy/services');
       setServices(data.services || []);
       if (!data.services?.length) toast.info('No Render services found on this account');
     } catch (e) {
@@ -129,7 +129,7 @@ export default function ServerTab() {
 
   const pickService = async (svc) => {
     try {
-      const { data } = await api.put('/operator/deploy/config', {
+      const { data } = await api.put('/operator/render-deploy/config', {
         service_id: svc.id, service_name: svc.name || '',
       });
       setDep(data);
@@ -142,14 +142,14 @@ export default function ServerTab() {
   const triggerDeploy = async () => {
     setDeploying(true);
     try {
-      const { data } = await api.post('/operator/deploy/trigger');
+      const { data } = await api.post('/operator/render-deploy/trigger');
       toast.success('Deploy triggered on Render', {
         description: data?.status ? `Status: ${data.status}` : undefined,
       });
       // Refresh status shortly after.
       setTimeout(async () => {
         try {
-          const { data: s } = await api.get('/operator/deploy/status');
+          const { data: s } = await api.get('/operator/render-deploy/status');
           setDep((d) => ({ ...(d || {}), last_deploy_status: s.status, last_deploy_id: s.deploy_id }));
         } catch { /* best-effort */ }
       }, 3000);
