@@ -32,7 +32,6 @@ import asyncio
 import base64
 import logging
 import os
-import shutil
 import subprocess  # nosec B404 — fixed CLI args, no shell, no user input.
 import tempfile
 from datetime import datetime, timezone
@@ -229,10 +228,25 @@ async def run_visual_verify(plan_id: str, *, fallback_url: Optional[str] = None)
         return {'ok': False, 'reason': 'screenshot_failed', 'preview_url': url}
 
     verdict = await _vision_verify(llm_key, out_path, plan_doc.get('prompt') or '', plan_doc.get('summary') or '')
+
+    # Persist the screenshot so the UI can show it everywhere a build/preview
+    # appears. Storage backend (Mongo by default, or the operator's own
+    # server) is chosen by storage_config_ext.
+    screenshot_meta = {'stored': None}
+    try:
+        from storage_config_ext import persist_screenshot
+        img_bytes = out_path.read_bytes()
+        screenshot_meta = await persist_screenshot(f'plan-{plan_id}', img_bytes, 'image/jpeg')
+    except Exception as e:
+        logger.warning('Screenshot persist failed for %s: %s', plan_id, e)
+
     record = {
         **verdict,
         'preview_url': url,
         'screenshot_size': out_path.stat().st_size,
+        'screenshot_available': screenshot_meta.get('stored') is not None,
+        'screenshot_stored': screenshot_meta.get('stored'),
+        'screenshot_url': screenshot_meta.get('url'),  # set only in custom mode
         'attempted_at': _now_iso(),
     }
     await db.ai_build_plans.update_one(
@@ -240,14 +254,9 @@ async def run_visual_verify(plan_id: str, *, fallback_url: Optional[str] = None)
         {'$set': {'visual_verify': record}},
     )
 
-    # Best-effort cleanup — the screenshot has done its job once the
-    # verdict is stored. We keep it for 10 minutes to allow manual UI
-    # inspection if the operator opens the verify panel quickly.
+    # Local /tmp copy is no longer needed — the durable copy lives in storage.
     try:
-        # Move to a "recent" bucket; janitor below sweeps it.
-        recent_dir = _SCREENSHOT_DIR / 'recent'
-        recent_dir.mkdir(exist_ok=True)
-        shutil.move(str(out_path), str(recent_dir / out_path.name))
+        out_path.unlink(missing_ok=True)
     except Exception:
         pass
 
@@ -283,3 +292,78 @@ async def get_visual_verify(plan_id: str, op: dict = Depends(get_current_operato
     if not doc:
         raise HTTPException(404, 'Plan not found')
     return doc.get('visual_verify') or {'verdict': 'not_run', 'summary': 'No visual verification run yet.'}
+
+
+@router.get('/visual-verify/{plan_id}/screenshot')
+async def get_visual_verify_screenshot(plan_id: str, op: dict = Depends(get_current_operator)):
+    """Serve the persisted build screenshot.
+
+    - Mongo mode: streams the JPEG bytes back.
+    - Custom mode: redirects to the operator's server URL.
+    """
+    from fastapi.responses import Response, RedirectResponse
+    from storage_config_ext import load_screenshot
+
+    doc = await db.ai_build_plans.find_one(
+        {'plan_id': plan_id}, {'visual_verify': 1},
+    )
+    vv = (doc or {}).get('visual_verify') or {}
+    if vv.get('screenshot_stored') == 'custom' and vv.get('screenshot_url'):
+        return RedirectResponse(vv['screenshot_url'])
+
+    loaded = await load_screenshot(f'plan-{plan_id}')
+    if not loaded:
+        raise HTTPException(404, 'No screenshot stored for this plan yet.')
+    data, content_type = loaded
+    return Response(content=data, media_type=content_type,
+                    headers={'Cache-Control': 'private, max-age=60'})
+
+
+@router.post('/preview-screenshot/{deployment_id}')
+async def capture_preview_screenshot(deployment_id: str, body: dict, op: dict = Depends(get_current_operator)):
+    """Capture (or re-capture) a screenshot for an arbitrary preview URL so
+    the Preview widget can show a live thumbnail. Keyed by deployment id."""
+    url = (body or {}).get('url')
+    if not url:
+        raise HTTPException(400, 'url is required')
+
+    from storage_config_ext import persist_screenshot
+    out_path = _SCREENSHOT_DIR / f'preview-{deployment_id}.jpeg'
+    ok = await _take_screenshot(url, out_path)
+    if not ok:
+        raise HTTPException(502, 'Could not capture preview screenshot.')
+    try:
+        meta = await persist_screenshot(f'preview-{deployment_id}', out_path.read_bytes(), 'image/jpeg')
+    finally:
+        try:
+            out_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+    await db.ai_preview_screenshots.update_one(
+        {'_id': deployment_id},
+        {'$set': {
+            'preview_url': url,
+            'stored': meta.get('stored'),
+            'url': meta.get('url'),
+            'captured_at': _now_iso(),
+        }},
+        upsert=True,
+    )
+    return {'ok': True, 'deployment_id': deployment_id, **meta}
+
+
+@router.get('/preview-screenshot/{deployment_id}')
+async def get_preview_screenshot(deployment_id: str, op: dict = Depends(get_current_operator)):
+    """Serve a previously captured preview screenshot."""
+    from fastapi.responses import Response, RedirectResponse
+    from storage_config_ext import load_screenshot
+
+    meta = await db.ai_preview_screenshots.find_one({'_id': deployment_id})
+    if meta and meta.get('stored') == 'custom' and meta.get('url'):
+        return RedirectResponse(meta['url'])
+    loaded = await load_screenshot(f'preview-{deployment_id}')
+    if not loaded:
+        raise HTTPException(404, 'No screenshot captured for this preview yet.')
+    data, content_type = loaded
+    return Response(content=data, media_type=content_type,
+                    headers={'Cache-Control': 'private, max-age=60'})

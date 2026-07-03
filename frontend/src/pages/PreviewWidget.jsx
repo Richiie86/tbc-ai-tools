@@ -2,9 +2,10 @@ import React, { useCallback, useEffect, useState } from 'react';
 import api from '../lib/api';
 import { Button } from '../components/ui/button';
 import { toast } from 'sonner';
+import ScreenshotThumb from '../components/ScreenshotThumb';
 import {
   GitBranch, ExternalLink, Loader2, Rocket, RefreshCw, CheckCircle2,
-  XCircle, Hammer,
+  XCircle, Hammer, Camera,
 } from 'lucide-react';
 
 /**
@@ -178,6 +179,11 @@ export default function PreviewWidget() {
 }
 
 function PreviewRow({ p, busy, onPromote }) {
+  const [capturing, setCapturing] = useState(false);
+  // Bump this to force ScreenshotThumb to re-fetch after a fresh capture.
+  const [shotVersion, setShotVersion] = useState(0);
+  const [hasShot, setHasShot] = useState(true); // optimistic; thumb hides itself if none
+
   const Icon =
     p.state === 'ready'    ? CheckCircle2 :
     p.state === 'failed'   ? XCircle :
@@ -186,12 +192,37 @@ function PreviewRow({ p, busy, onPromote }) {
     p.state === 'ready'    ? 'text-emerald-300' :
     p.state === 'failed'   ? 'text-red-300' :
     'text-amber-300';
+
+  const capture = async () => {
+    if (!p.preview_url) return;
+    setCapturing(true);
+    try {
+      await api.post(`/operator/ai-build/preview-screenshot/${p.deployment_id}`, {
+        url: p.preview_url,
+      });
+      setHasShot(true);
+      setShotVersion((v) => v + 1);
+      toast.success('Screenshot captured');
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Could not capture screenshot');
+    } finally {
+      setCapturing(false);
+    }
+  };
+
   return (
     <li
       data-testid={`preview-row-${p.deployment_id}`}
       className="flex items-center gap-3 rounded border border-tbc-900/60 bg-ink-900/50 px-2.5 py-1.5"
     >
       <Icon className={`h-3.5 w-3.5 shrink-0 ${tone}`} />
+      {hasShot && (
+        <ScreenshotThumb
+          key={shotVersion}
+          src={`/operator/ai-build/preview-screenshot/${p.deployment_id}/screenshot`}
+          alt={`Preview screenshot for ${p.branch}`}
+        />
+      )}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5 truncate">
           <GitBranch className="h-3 w-3 shrink-0 text-tbc-300" />
@@ -205,6 +236,19 @@ function PreviewRow({ p, busy, onPromote }) {
         )}
       </div>
       <div className="flex items-center gap-1.5 shrink-0">
+        {p.preview_url && (
+          <button
+            type="button"
+            onClick={capture}
+            disabled={capturing}
+            title="Capture a screenshot of this preview"
+            data-testid={`preview-capture-${p.deployment_id}`}
+            className="inline-flex items-center gap-1 rounded border border-tbc-900/60 bg-ink-900 px-2 py-1 text-[10px] text-tbc-100 hover:bg-ink-950 disabled:opacity-50"
+          >
+            {capturing ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <Camera className="h-2.5 w-2.5" />}
+            Shot
+          </button>
+        )}
         {p.preview_url && (
           <a
             href={p.preview_url}
