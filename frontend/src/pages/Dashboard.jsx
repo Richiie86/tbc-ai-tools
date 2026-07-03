@@ -81,12 +81,20 @@ export default function Dashboard({ variant = 'tbc1' }) {
 
   // Load models list on mount/variant change
   useEffect(() => {
-    api.get('/chat/models').then((r) => setModels(r.data)).catch((err) => {
+    api.get('/chat/models').then((r) => {
+      setModels(r.data);
+      // If the operator made "Automatic" the default and we're on a fresh
+      // chat (no session loaded yet), pre-select it. Never override a model
+      // the user is already viewing in an existing session.
+      if (r.data?.auto_default && r.data?.auto?.id && !currentId) {
+        setModel(r.data.auto.id);
+      }
+    }).catch((err) => {
       // models endpoint is best-effort — log so we can spot upstream outages
       // in the browser console without breaking the chat UI.
       console.warn('Failed to load chat models', err);
     });
-  }, [variant]);
+  }, [variant, currentId]);
 
   // Sync sessionId from URL — functional setState so we don't depend on
   // `currentId` (would re-fire every time it changed and create a loop).
@@ -138,6 +146,13 @@ export default function Dashboard({ variant = 'tbc1' }) {
         if (ev.type === 'delta') {
           if (ev.session_id && !acquiredSessionId) acquiredSessionId = ev.session_id;
           setStreamText((t) => t + (ev.content || ''));
+        } else if (ev.type === 'auto_selected') {
+          // Automatic mode picked a model based on the task. Show a subtle
+          // hint so the user understands why (best for work, cheap for Q&A).
+          const kindLabel = ev.kind === 'question'
+            ? 'quick question → cheapest model'
+            : `${ev.kind} task → best model`;
+          toast.info(`Automatic: ${kindLabel}`, { duration: 4000 });
         } else if (ev.type === 'fallback_used') {
           // The primary model failed but a fallback caught the stream.
           const failed = (ev.attempted || []).slice(-1)[0] || 'primary model';

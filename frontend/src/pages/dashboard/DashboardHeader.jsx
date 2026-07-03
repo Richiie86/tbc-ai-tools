@@ -58,6 +58,14 @@ export function DashboardHeader({
             </div>
           </SelectTrigger>
           <SelectContent className="border-slate-800 bg-slate-900 text-slate-100">
+            {models.auto && (
+              <SelectGroup>
+                <SelectLabel className="text-[10px] uppercase tracking-wider text-slate-500">Smart</SelectLabel>
+                <SelectItem value={models.auto.id} className="focus:bg-slate-800">
+                  {models.auto.label}
+                </SelectItem>
+              </SelectGroup>
+            )}
             {Object.entries(models.providers || {}).map(([provider, items]) => (
               <SelectGroup key={provider}>
                 <SelectLabel className="text-[10px] uppercase tracking-wider text-slate-500">{provider}</SelectLabel>

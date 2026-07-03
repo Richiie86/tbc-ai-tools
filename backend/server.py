@@ -1192,8 +1192,10 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
         effective_prompt = SYSTEM_PROMPT
     # The chat instance is built per-attempt inside `event_generator` so the
     # fallback chain can switch providers cleanly. We resolve the *primary*
-    # model up front purely as a validation step.
-    resolve_model(req.model)
+    # model up front purely as a validation step. The special "auto" id is not
+    # a real model, so skip validation for it — it's resolved below.
+    if req.model != AUTO_MODEL_ID:
+        resolve_model(req.model)
 
     # Replay history into the chat object so context is preserved across stateless requests
     # The library tracks history per-instance; we use stream with the new user message.
@@ -1236,15 +1238,33 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
                 # Append textual attachments inline so the AI still sees them.
                 prompt += f'\n\n--- attachment: {att.name} ---\n{att.content[:8000]}'
 
+    # Automatic model routing: when the request uses the special "auto" model
+    # (user picked "Automatic"), classify the message and route coding/review/
+    # planning to the best model and plain questions to the cheapest. Recorded
+    # as `auto_kind` so we can log it and show the user why a model was chosen.
+    auto_kind: Optional[str] = None
+    if req.model == AUTO_MODEL_ID:
+        routed_model, auto_kind = pick_auto_model(req.message)
+    else:
+        routed_model = req.model or DEFAULT_MODEL
+
     async def event_generator():
         full_response = ''
         # Build the model attempt list: primary first, then any fallbacks
         # not already equal to the primary (de-duped, order preserved).
-        primary = req.model or DEFAULT_MODEL
+        primary = routed_model
         attempts = [primary] + [m for m in CHAT_FALLBACK_CHAIN if m != primary]
         last_error: Optional[str] = None
         used_model = primary
         ok = False
+        # Tell the UI which model Automatic picked and why, so users see the
+        # "chose the best/cheapest model for this task" hint.
+        if auto_kind is not None:
+            yield 'data: ' + json.dumps({
+                'type': 'auto_selected',
+                'kind': auto_kind,
+                'model': primary,
+            }) + '\n\n'
         for idx, model_id in enumerate(attempts):
             # Re-build the LlmChat for this attempt — emergentintegrations
             # binds the model at chat-construction time, so we need a new
@@ -1314,6 +1334,9 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
         # Decrement credits (non-operator)
         if db_user.get('role') != 'operator':
             await db.users.update_one({'id': user['sub']}, {'$inc': {'credits': -1}})
+        # Log estimated spend for the amAI monthly summary (fire-and-forget).
+        if full_response.strip():
+            await record_usage(user['sub'], used_model, kind=auto_kind, source='chat')
         # Final done event
         done = json.dumps({'type': 'done', 'session_id': session_id})
         yield f'data: {done}\n\n'
@@ -1351,6 +1374,12 @@ async def list_models():
     """List available LLM models grouped by provider."""
     return {
         'default': DEFAULT_MODEL,
+        # When True, the chat UI should default the picker to "Automatic".
+        'auto_default': await is_auto_default(),
+        'auto': {
+            'id': AUTO_MODEL_ID,
+            'label': 'Automatic (best + cheapest per task)',
+        },
         'providers': {
             'OpenAI': [
                 {'id': 'gpt-5', 'label': 'GPT-5'},
@@ -2128,7 +2157,10 @@ from ai_build_tests_ext import router as ai_build_tests_router
 app.include_router(ai_build_tests_router)
 from operator_search_ext import router as operator_search_router
 from user_projects_ext import router as user_projects_router, archive_session
-from amai_ext import router as amai_router, get_default_model
+from amai_ext import (
+    router as amai_router, get_default_model, pick_auto_model,
+    record_usage, is_auto_default, AUTO_MODEL_ID,
+)
 app.include_router(operator_search_router)
 app.include_router(user_projects_router)
 app.include_router(amai_router)

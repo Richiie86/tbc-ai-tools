@@ -2,9 +2,10 @@ import React, { useCallback, useEffect, useState } from 'react';
 import api from '../../lib/api';
 import { Button } from '../../components/ui/button';
 import { toast } from 'sonner';
+import { Switch } from '../../components/ui/switch';
 import {
   BrainCircuit, Loader2, Gauge, Sparkles, Zap, Leaf,
-  CheckCircle2, AlertTriangle, CreditCard, Info,
+  CheckCircle2, AlertTriangle, CreditCard, Info, Wand2, TrendingUp,
 } from 'lucide-react';
 
 /**
@@ -30,6 +31,7 @@ export default function AmAiTab() {
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(null); // tier id being saved
+  const [autoSaving, setAutoSaving] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -58,6 +60,23 @@ export default function AmAiTab() {
     }
   };
 
+  const toggleAuto = async (next) => {
+    setAutoSaving(true);
+    try {
+      const { data } = await api.put('/operator/amai/auto', { enabled: next });
+      setStatus((s) => ({ ...s, auto_mode: data.auto_mode }));
+      toast.success(
+        next
+          ? 'Automatic mode ON · new chats default to smart routing'
+          : 'Automatic mode OFF · new chats use the quality dial below'
+      );
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Could not toggle Automatic mode');
+    } finally {
+      setAutoSaving(false);
+    }
+  };
+
   if (loading || !status) {
     return (
       <div className="grid place-items-center py-16">
@@ -66,7 +85,7 @@ export default function AmAiTab() {
     );
   }
 
-  const { tiers, current_tier, billing, estimate_basis } = status;
+  const { tiers, current_tier, billing, estimate_basis, auto_routing, spend } = status;
   const billingOk = billing.path !== 'emergent_fallback';
 
   return (
@@ -114,6 +133,105 @@ export default function AmAiTab() {
           </div>
         </div>
       </div>
+
+      {/* Automatic mode */}
+      <div
+        className="rounded-xl border border-tbc-500/30 bg-gradient-to-br from-tbc-500/[0.06] via-ink-900/60 to-ink-900/60 p-5"
+        data-testid="amai-auto"
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-tbc-500/15 text-tbc-300">
+              <Wand2 className="h-5 w-5" />
+            </div>
+            <div>
+              <h3 className="flex items-center gap-2 text-base font-bold text-tbc-100">
+                Automatic mode
+                <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                  status.auto_mode ? 'bg-emerald-500/20 text-emerald-300' : 'bg-tbc-900/70 text-tbc-300'
+                }`}>
+                  {status.auto_mode ? 'ON' : 'OFF'}
+                </span>
+              </h3>
+              <p className="mt-1 max-w-xl text-sm text-tbc-200/60">
+                Picks the best model for the job automatically: coding, debugging,
+                review &amp; planning go to the <b className="text-tbc-100">best</b> model,
+                while plain questions use the <b className="text-tbc-100">cheapest</b> —
+                so everyone gets top quality and low cost at once. When ON, new chats
+                default to “Automatic”; anyone can still pick a specific model themselves.
+              </p>
+            </div>
+          </div>
+          <Switch
+            data-testid="amai-auto-toggle"
+            checked={!!status.auto_mode}
+            onCheckedChange={toggleAuto}
+            disabled={autoSaving}
+          />
+        </div>
+
+        {auto_routing && (
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <div className="rounded-lg border border-tbc-400/30 bg-tbc-500/[0.06] p-3">
+              <div className="flex items-center gap-1.5 text-sm font-semibold text-tbc-100">
+                <Sparkles className="h-4 w-4 text-tbc-300" /> Best — for real work
+              </div>
+              <p className="mt-0.5 text-xs text-tbc-200/50">{auto_routing.best_for.join(', ')}</p>
+              <div className="mt-2 flex items-center justify-between text-xs">
+                <span className="font-mono text-tbc-200/40">{auto_routing.best_model}</span>
+                <span className="font-mono font-semibold text-tbc-100">
+                  ~{money(auto_routing.best_cost.per_request)}/req
+                </span>
+              </div>
+            </div>
+            <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/[0.06] p-3">
+              <div className="flex items-center gap-1.5 text-sm font-semibold text-tbc-100">
+                <Leaf className="h-4 w-4 text-emerald-300" /> Cheapest — for questions
+              </div>
+              <p className="mt-0.5 text-xs text-tbc-200/50">{auto_routing.cheap_for.join(', ')}</p>
+              <div className="mt-2 flex items-center justify-between text-xs">
+                <span className="font-mono text-tbc-200/40">{auto_routing.cheap_model}</span>
+                <span className="font-mono font-semibold text-tbc-100">
+                  ~{money(auto_routing.cheap_cost.per_request)}/req
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Monthly spend */}
+      {spend && (
+        <div
+          className="rounded-xl border border-tbc-900/60 bg-ink-900/50 p-5"
+          data-testid="amai-spend"
+        >
+          <div className="mb-3 flex items-center gap-2">
+            <TrendingUp className="h-4 w-4 text-tbc-300" />
+            <h3 className="text-base font-bold text-tbc-100">Spend this month</h3>
+            <span className="ml-auto text-2xl font-bold text-tbc-100">
+              ~{money(spend.total_est_cost)}
+            </span>
+          </div>
+          <p className="mb-3 text-xs text-tbc-200/50">
+            {spend.total_requests.toLocaleString()} request{spend.total_requests === 1 ? '' : 's'} so far · {spend.note}
+          </p>
+          {spend.by_model.length === 0 ? (
+            <p className="text-sm text-tbc-200/40">No AI requests recorded yet this month.</p>
+          ) : (
+            <div className="space-y-1.5">
+              {spend.by_model.map((row) => (
+                <div key={row.model} className="flex items-center justify-between rounded-lg bg-ink-950/50 px-3 py-2 text-xs">
+                  <span className="truncate font-mono text-tbc-200/70" title={row.model}>{row.model}</span>
+                  <span className="ml-3 shrink-0 text-tbc-200/50">
+                    {row.requests.toLocaleString()} req · <span className="font-semibold text-tbc-100">~{money(row.est_cost)}</span>
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Quality dial — tier cards */}
       <div className="rounded-xl border border-tbc-500/30 bg-gradient-to-br from-tbc-500/[0.04] via-ink-900/60 to-ink-900/60 p-5">

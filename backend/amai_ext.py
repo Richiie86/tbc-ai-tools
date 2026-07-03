@@ -28,7 +28,8 @@ operator setting is kept.
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from datetime import datetime, timezone
+from typing import Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -143,6 +144,139 @@ def _percent_to_tier(percent: int) -> dict:
     return _TIER_BY_ID[_DEFAULT_TIER_ID]
 
 
+# ─── Automatic model selection ────────────────────────────────────────────
+# When a request uses the special model id ``auto`` (see AUTO_MODEL_ID), we
+# look at what the user actually asked for and route it:
+#   • coding / debugging / review / planning  → the BEST model (Opus)
+#   • plain questions / chit-chat             → the CHEAPEST model (Haiku)
+# So every request gets the best quality for the job at the lowest cost, with
+# no one having to think about model choice.
+AUTO_MODEL_ID = 'auto'
+
+_BEST_MODEL = 'claude-opus-4-7'
+_CHEAP_MODEL = 'claude-haiku-4-5-20251001'
+
+# Keyword signals grouped by task kind. Checked against the lower-cased msg.
+_REVIEW_SIGNALS = (
+    'review', 'audit', 'critique', 'assess', 'evaluate', 'security',
+    'vulnerab', 'code smell', 'best practice',
+)
+_PLAN_SIGNALS = (
+    'plan', 'architect', 'design', 'strategy', 'roadmap', 'approach',
+    'trade-off', 'tradeoff', 'compare', 'pros and cons', 'should i',
+)
+_CODE_SIGNALS = (
+    'code', 'coding', 'function', 'bug', 'error', 'stack trace', 'traceback',
+    'refactor', 'implement', 'build', 'deploy', 'endpoint', 'component',
+    'database', 'query', ' sql', 'schema', 'typescript', 'python', 'react',
+    'compile', 'exception', 'debug', 'unit test', 'install', 'npm ', 'pip ',
+    'api ', 'regex', 'algorithm', 'optimize',
+)
+# Punctuation / structural signals that all but guarantee it's real code work.
+_CODE_SYMBOLS = ('```', 'def ', 'function ', '=>', '{', '};', '</', 'import ', 'class ')
+
+
+def classify_message(message: str) -> str:
+    """Classify a user message as 'code' | 'review' | 'plan' | 'question'.
+
+    Deterministic and dependency-free (no extra LLM call) so it adds zero
+    cost/latency. Order matters: strong code signals win, then review, then
+    planning, then a length heuristic, else it's a cheap 'question'.
+    """
+    if not message or not message.strip():
+        return 'question'
+    if any(sym in message for sym in _CODE_SYMBOLS):
+        return 'code'
+    text = message.lower()
+    if any(k in text for k in _REVIEW_SIGNALS):
+        return 'review'
+    if any(k in text for k in _PLAN_SIGNALS):
+        return 'plan'
+    if any(k in text for k in _CODE_SIGNALS):
+        return 'code'
+    # Long, detailed messages are usually tasks, not quick questions.
+    if len(message) > 600:
+        return 'plan'
+    return 'question'
+
+
+def model_for_kind(kind: str) -> str:
+    """Best model for real work; cheapest model for plain questions."""
+    return _BEST_MODEL if kind in ('code', 'review', 'plan') else _CHEAP_MODEL
+
+
+def pick_auto_model(message: str) -> Tuple[str, str]:
+    """Return ``(model_id, kind)`` for an automatic request."""
+    kind = classify_message(message)
+    return model_for_kind(kind), kind
+
+
+async def is_auto_default() -> bool:
+    """Whether the operator has made Automatic the default for everyone."""
+    try:
+        s = await _settings()
+        return bool(s.get('ai_auto_mode'))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+# ─── Usage / spend tracking ───────────────────────────────────────────────
+async def record_usage(
+    user_id: str,
+    model: str,
+    *,
+    kind: Optional[str] = None,
+    source: str = 'chat',
+) -> None:
+    """Log one AI request with its ESTIMATED cost so the amAI tab can show
+    running monthly spend. Fire-and-forget; never breaks the chat flow."""
+    try:
+        await db.ai_usage.insert_one({
+            'user_id': user_id,
+            'model': model,
+            'kind': kind,
+            'source': source,
+            'est_cost': _est_cost(model)['per_request'],
+            'created_at': datetime.now(timezone.utc),
+        })
+    except Exception as e:  # noqa: BLE001
+        logger.warning('record_usage failed (non-fatal): %s', e)
+
+
+async def _spend_summary() -> dict:
+    """Aggregate this calendar month's estimated spend, grouped by model."""
+    now = datetime.now(timezone.utc)
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    total, total_requests, by_model = 0.0, 0, []
+    try:
+        pipeline = [
+            {'$match': {'created_at': {'$gte': month_start}}},
+            {'$group': {
+                '_id': '$model',
+                'requests': {'$sum': 1},
+                'est_cost': {'$sum': '$est_cost'},
+            }},
+        ]
+        async for row in db.ai_usage.aggregate(pipeline):
+            cost = float(row.get('est_cost') or 0)
+            by_model.append({
+                'model': row['_id'],
+                'requests': int(row.get('requests') or 0),
+                'est_cost': round(cost, 2),
+            })
+            total += cost
+            total_requests += int(row.get('requests') or 0)
+    except Exception as e:  # noqa: BLE001
+        logger.warning('spend_summary failed: %s', e)
+    return {
+        'month_start': month_start.isoformat(),
+        'total_est_cost': round(total, 2),
+        'total_requests': total_requests,
+        'by_model': sorted(by_model, key=lambda r: -r['est_cost']),
+        'note': 'Estimated spend this month. Actual charges come from your provider.',
+    }
+
+
 # ─── Billing path (whose bill each request lands on) ──────────────────────
 async def _billing_status() -> dict:
     import os
@@ -195,6 +329,16 @@ async def amai_status(_op: dict = Depends(get_current_operator)):
         'current_model': current_model,
         'default_tier': _DEFAULT_TIER_ID,
         'tiers': [_tier_payload(t) for t in _TIERS],
+        'auto_mode': bool(s.get('ai_auto_mode')),
+        'auto_routing': {
+            'best_model': _BEST_MODEL,
+            'cheap_model': _CHEAP_MODEL,
+            'best_cost': _est_cost(_BEST_MODEL),
+            'cheap_cost': _est_cost(_CHEAP_MODEL),
+            'best_for': ['coding', 'debugging', 'review', 'planning'],
+            'cheap_for': ['questions', 'quick chat', 'simple lookups'],
+        },
+        'spend': await _spend_summary(),
         'billing': await _billing_status(),
         'estimate_basis': {
             'input_tokens': _EST_INPUT_TOKENS,
@@ -233,3 +377,24 @@ async def amai_set_tier(body: TierUpdate, _op: dict = Depends(get_current_operat
         'current_model': tier['model'],
         'estimated_cost': _est_cost(tier['model']),
     }
+
+
+class AutoUpdate(BaseModel):
+    enabled: bool
+
+
+@router.put('/auto')
+async def amai_set_auto(body: AutoUpdate, _op: dict = Depends(get_current_operator)):
+    """Turn Automatic mode ON/OFF as the default for everyone.
+
+    When ON, new chats default to the 'Automatic' option, which routes coding /
+    review / planning to the best model and plain questions to the cheapest.
+    Users can always override by picking a specific model in the chat header.
+    """
+    await db.settings.update_one(
+        {'_id': 'payment_settings'},
+        {'$set': {'ai_auto_mode': bool(body.enabled)}},
+        upsert=True,
+    )
+    logger.info('amAI auto mode set to %s', bool(body.enabled))
+    return {'ok': True, 'auto_mode': bool(body.enabled)}
