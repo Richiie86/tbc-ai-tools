@@ -1779,7 +1779,6 @@ _SELF_EXCLUDE_DIRS = {
     '__pycache__', '.pytest_cache', '.mypy_cache', '.ruff_cache',
     '.venv', 'venv', 'env',
     'dist', 'build', '.parcel-cache', 'coverage',
-    '.emergent',  # platform-internal
 }
 _SELF_EXCLUDE_FILES = {
     '.DS_Store',

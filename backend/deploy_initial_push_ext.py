@@ -64,7 +64,7 @@ _TOP_LEVEL_INCLUDE = [
 _EXCLUDE_DIR_NAMES = {
     '.git', 'node_modules', '__pycache__', '.pytest_cache', '.venv', 'venv',
     '.next', 'build', 'dist', '.turbo', '.cache', 'coverage', '.idea',
-    '.vscode', '.emergent', '.yarn',
+    '.vscode', '.yarn',
 }
 _EXCLUDE_FILE_PATTERNS = (
     '.env', '.env.local', '.env.development', '.env.production',
