@@ -156,6 +156,11 @@ export default function Dashboard({ variant = 'tbc1' }) {
         } else if (ev.type === 'context7_used') {
           // Fresh, version-specific library docs were injected via Context7.
           toast.info('Added up-to-date library docs (Context7)', { duration: 3500 });
+        } else if (ev.type === 'tools_used') {
+          // AI tools augmented this answer (web search / sequential thinking).
+          const labels = { web_search: 'Web Search', sequential_thinking: 'Sequential Thinking' };
+          const names = (ev.tools || []).map((t) => labels[t] || t).join(' + ');
+          if (names) toast.info(`Used ${names}`, { duration: 3500 });
         } else if (ev.type === 'fallback_used') {
           // The primary model failed but a fallback caught the stream.
           const failed = (ev.attempted || []).slice(-1)[0] || 'primary model';

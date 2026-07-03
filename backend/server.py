@@ -1196,6 +1196,16 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
     context7_block = await build_context_block(req.message)
     if context7_block:
         effective_prompt += context7_block
+    # Classify the task once (code/review/plan/question). Reused for both the
+    # AI Tools injection below and Automatic model routing further down, so
+    # tools like sequential-thinking work for every user regardless of which
+    # model they picked.
+    task_kind = classify_message(req.message)
+    # AI Tools auto-injection (web search, sequential thinking). Safe no-op
+    # when tools are disabled or on any error.
+    tools_block, tools_used = await build_tools_block(req.message, task_kind)
+    if tools_block:
+        effective_prompt += tools_block
     # The chat instance is built per-attempt inside `event_generator` so the
     # fallback chain can switch providers cleanly. We resolve the *primary*
     # model up front purely as a validation step. The special "auto" id is not
@@ -1250,7 +1260,8 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
     # as `auto_kind` so we can log it and show the user why a model was chosen.
     auto_kind: Optional[str] = None
     if req.model == AUTO_MODEL_ID:
-        routed_model, auto_kind = pick_auto_model(req.message)
+        auto_kind = task_kind
+        routed_model = model_for_kind(task_kind)
     else:
         routed_model = req.model or DEFAULT_MODEL
 
@@ -1274,6 +1285,9 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
         # Let the UI show that fresh, version-specific docs were pulled in.
         if context7_block:
             yield 'data: ' + json.dumps({'type': 'context7_used'}) + '\n\n'
+        # Let the UI show which AI tools augmented this answer.
+        if tools_used:
+            yield 'data: ' + json.dumps({'type': 'tools_used', 'tools': tools_used}) + '\n\n'
         for idx, model_id in enumerate(attempts):
             # Re-build the LlmChat for this attempt — emergentintegrations
             # binds the model at chat-construction time, so we need a new
@@ -2169,12 +2183,15 @@ from user_projects_ext import router as user_projects_router, archive_session
 from amai_ext import (
     router as amai_router, get_default_model, pick_auto_model,
     record_usage, is_auto_default, AUTO_MODEL_ID,
+    classify_message, model_for_kind,
 )
 from context7_ext import router as context7_router, build_context_block
+from tools_ext import router as tools_router, build_tools_block
 app.include_router(operator_search_router)
 app.include_router(user_projects_router)
 app.include_router(amai_router)
 app.include_router(context7_router)
+app.include_router(tools_router)
 from operator_backup_ext import router as operator_backup_router
 app.include_router(operator_backup_router)
 from changelog_ext import router as changelog_router

@@ -9,7 +9,7 @@ import {
   Code2, Sparkles, Wallet, KeyRound, Settings as SettingsIcon, Coins,
   FolderKanban, Activity, ScrollText, Megaphone, MessageCircle, FlaskConical,
   TrendingUp, Lock, Brain, Network, TestTube, AlertOctagon, Wand2, Link2,
-  Calculator, Gauge, Archive, BrainCircuit,
+  Calculator, Gauge, Archive, BrainCircuit, Wrench,
 } from 'lucide-react';
 
 import PlansTab     from './operator/PlansTab';
@@ -33,6 +33,7 @@ import ErrorsTab from './operator/ErrorsTab';
 import AIBuildTab from './operator/AIBuildTab';
 import MyKeysTab from './operator/MyKeysTab';
 import AmAiTab from './operator/AmAiTab';
+import ToolsTab from './operator/ToolsTab';
 import LinksTab from './operator/LinksTab';
 import TaxCalculatorTab from './operator/TaxCalculatorTab';
 import TaxameterTab from './operator/TaxameterTab';
@@ -221,6 +222,7 @@ export default function Operator() {
                 <TabTrigger value="money"     icon={DollarSign}>Money</TabTrigger>
                 <TabTrigger value="keys"      icon={KeyRound}>My Keys</TabTrigger>
                 <TabTrigger value="amai"      icon={BrainCircuit}>amAI</TabTrigger>
+                <TabTrigger value="tools"     icon={Wrench}>AI Tools</TabTrigger>
                 <TabTrigger value="licenses"  icon={KeyRound}>Licenses</TabTrigger>
                 <TabTrigger value="royalties" icon={Coins}>Royalties</TabTrigger>
                 <TabTrigger value="settings"  icon={SettingsIcon}>Security</TabTrigger>
@@ -255,6 +257,7 @@ export default function Operator() {
               <TabsContent value="money"     className="mt-5"><MoneyTab /></TabsContent>
               <TabsContent value="keys"      className="mt-5"><MyKeysTab /></TabsContent>
               <TabsContent value="amai"      className="mt-5"><AmAiTab /></TabsContent>
+              <TabsContent value="tools"     className="mt-5"><ToolsTab /></TabsContent>
               <TabsContent value="licenses"  className="mt-5"><LicensesTab /></TabsContent>
               <TabsContent value="royalties" className="mt-5"><RoyaltiesTab /></TabsContent>
               <TabsContent value="settings"  className="mt-5"><SettingsTab /></TabsContent>
