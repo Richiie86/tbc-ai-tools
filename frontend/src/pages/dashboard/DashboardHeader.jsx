@@ -10,6 +10,7 @@ import SessionStatusDot from '../../components/SessionStatusDot';
 import { InChatDeployControls } from './InChatDeployControls';
 import { NotificationsBell } from './NotificationsBell';
 import { DashboardGuideButton } from './DashboardGuideTour';
+import ViewModeToggle from '../../components/ViewModeToggle';
 
 /**
  * The top bar of the Dashboard chat view: brand title, operator-only
@@ -45,6 +46,9 @@ export function DashboardHeader({
         <div className="flex min-w-0 items-center gap-2 overflow-x-auto scrollbar-none sm:gap-3 [&>*]:shrink-0">
           {/* Operator-only deploy controls so we can ship code from inside chat. */}
           <InChatDeployControls user={user} />
+          {/* Auto / Mobile / Computer layout switch — inline here (instead of a
+              floating pill) so it never overlaps content on phones. */}
+          <ViewModeToggle />
           <NotificationsBell />
           <DashboardGuideButton onOpen={onOpenGuide} />
           <ModelPicker models={models} model={model} setModel={setModel} />

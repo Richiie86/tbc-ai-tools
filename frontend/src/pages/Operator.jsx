@@ -48,6 +48,7 @@ import { UsersTab }      from './operator/UsersTab';
 import TestUserBanner    from './operator/TestUserBanner';
 
 import { OperatorGuideTour, OperatorGuideButton } from './OperatorGuideTour';
+import ViewModeToggle from '../components/ViewModeToggle';
 import CodesBrowser from './operator/CodesBrowser';
 import { ContactsList } from './operator/ContactsList';
 
@@ -158,7 +159,8 @@ export default function Operator() {
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-2 sm:shrink-0">
+          <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
+            <ViewModeToggle />
             <EmergencyLockdownPill />
             <OperatorGuideButton onOpen={() => setGuideKey((k) => k + 1)} />
           </div>
