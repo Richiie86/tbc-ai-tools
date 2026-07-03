@@ -112,6 +112,14 @@ async def _gemini_key() -> Optional[str]:
     )
 
 
+async def _openrouter_key() -> Optional[str]:
+    """OpenRouter: one key unlocks 300+ models across every major vendor."""
+    return (
+        os.environ.get('OPENROUTER_API_KEY')
+        or await _settings_ai_key('openrouter_api_key')
+    )
+
+
 async def any_provider_key_available() -> bool:
     """True if a key for any supported provider is configured (env or app
     settings). Used by endpoints that just need *some* model to be usable."""
@@ -119,6 +127,7 @@ async def any_provider_key_available() -> bool:
         (await _anthropic_key())
         or (await _openai_key())
         or (await _gemini_key())
+        or (await _openrouter_key())
     )
 
 
@@ -193,6 +202,8 @@ class LlmChat:
             return await self._openai(text, images, stream=False)  # type: ignore[return-value]
         if provider in ('gemini', 'google'):
             return await self._gemini(text, images, stream=False)  # type: ignore[return-value]
+        if provider == 'openrouter':
+            return await self._openrouter(text, images, stream=False)  # type: ignore[return-value]
         raise ProviderKeyMissing(f'Unknown provider: {provider}')
 
     # ------------------------------------------------------------------
@@ -211,6 +222,9 @@ class LlmChat:
                 yield ev
         elif provider in ('gemini', 'google'):
             async for ev in await self._gemini(text, images, stream=True):  # type: ignore[misc]
+                yield ev
+        elif provider == 'openrouter':
+            async for ev in await self._openrouter(text, images, stream=True):  # type: ignore[misc]
                 yield ev
         else:
             raise ProviderKeyMissing(f'Unknown provider: {provider}')
@@ -290,7 +304,36 @@ class LlmChat:
             )
         from openai import AsyncOpenAI
         client = AsyncOpenAI(api_key=key)
+        return await self._openai_compatible(client, text, images, stream=stream)
 
+    # ==================================================================
+    # OpenRouter — one key, 300+ models. OpenAI-compatible surface, so we
+    # reuse the exact same chat-completions path with a custom base_url.
+    # The model id is the full OpenRouter slug (e.g. "meta-llama/llama-3.1-70b-instruct").
+    # ==================================================================
+    async def _openrouter(self, text: str, images: list, *, stream: bool):
+        key = await _openrouter_key()
+        if not key:
+            raise ProviderKeyMissing(
+                'No OpenRouter API key configured. Add one in Operator → Security '
+                '(openrouter_api_key) or set OPENROUTER_API_KEY.'
+            )
+        from openai import AsyncOpenAI
+        client = AsyncOpenAI(
+            api_key=key,
+            base_url='https://openrouter.ai/api/v1',
+            default_headers={
+                # Optional attribution headers OpenRouter recommends.
+                'HTTP-Referer': os.environ.get('OPENROUTER_SITE_URL', 'https://tbctools.org'),
+                'X-Title': os.environ.get('OPENROUTER_SITE_NAME', 'TBC AI Tools'),
+            },
+        )
+        return await self._openai_compatible(client, text, images, stream=stream)
+
+    # ------------------------------------------------------------------
+    # Shared OpenAI-compatible chat-completions path (OpenAI + OpenRouter).
+    # ------------------------------------------------------------------
+    async def _openai_compatible(self, client, text: str, images: list, *, stream: bool):
         user_content: list = [{'type': 'text', 'text': text}]
         for img in images:
             raw, mime = _decode_image(img.image_base64)
@@ -397,4 +440,49 @@ def backend_status() -> dict:
         'anthropic_byo': bool(os.environ.get('ANTHROPIC_API_KEY') or os.environ.get('CLAUDE_API_KEY')),
         'openai_byo': bool(os.environ.get('OPENAI_API_KEY')),
         'gemini_byo': bool(os.environ.get('GEMINI_API_KEY') or os.environ.get('GOOGLE_API_KEY')),
+        'openrouter_byo': bool(os.environ.get('OPENROUTER_API_KEY')),
     }
+
+
+# ---------------------------------------------------------------------------
+# OpenRouter model catalog (for the model picker). Cached for a few minutes
+# so we don't hit the network on every /chat/models request.
+# ---------------------------------------------------------------------------
+_OR_CACHE: dict = {'at': 0.0, 'models': []}
+_OR_CACHE_TTL = 600  # seconds
+
+
+async def fetch_openrouter_models() -> List[dict]:
+    """Return the live OpenRouter model list as [{id, label}], or [] if no
+    key / on error. Cached in-process for _OR_CACHE_TTL seconds."""
+    import time
+    key = await _openrouter_key()
+    if not key:
+        return []
+    now = time.time()
+    if _OR_CACHE['models'] and (now - _OR_CACHE['at']) < _OR_CACHE_TTL:
+        return _OR_CACHE['models']
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=12.0) as client:
+            r = await client.get(
+                'https://openrouter.ai/api/v1/models',
+                headers={'Authorization': f'Bearer {key}'},
+            )
+        if r.status_code != 200:
+            logger.warning('OpenRouter models fetch failed: %s', r.status_code)
+            return _OR_CACHE['models']
+        data = r.json().get('data') or []
+        models = []
+        for m in data:
+            mid = m.get('id')
+            if not mid:
+                continue
+            models.append({'id': mid, 'label': m.get('name') or mid})
+        models.sort(key=lambda x: x['label'].lower())
+        _OR_CACHE['models'] = models
+        _OR_CACHE['at'] = now
+        return models
+    except Exception as e:  # noqa: BLE001
+        logger.warning('OpenRouter models fetch error: %s', e)
+        return _OR_CACHE['models']

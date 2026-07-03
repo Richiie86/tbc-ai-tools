@@ -37,6 +37,13 @@ export const KIND_META = {
     placeholder: 'Paste your OpenAI key (sk-…) — powers the AI build tools',
     helperUrl: 'https://platform.openai.com/api-keys',
   },
+  openrouter: {
+    label: 'OpenRouter API Key',
+    icon: Sparkles,
+    fieldKey: 'openrouter_api_key',
+    placeholder: 'Paste your OpenRouter key (sk-or-…) — one key unlocks 300+ models',
+    helperUrl: 'https://openrouter.ai/keys',
+  },
   render: {
     label: 'Render API Key',
     icon: Server,

@@ -264,6 +264,13 @@ def resolve_model(name: Optional[str]):
     key = (name or DEFAULT_MODEL).strip()
     if key in MODEL_PROVIDERS:
         return MODEL_PROVIDERS[key]
+    # OpenRouter model ids are "vendor/model" slugs (they contain a slash),
+    # e.g. "meta-llama/llama-3.1-70b-instruct". Route the full slug through
+    # OpenRouter. An explicit "openrouter/" prefix is also accepted.
+    if key.startswith('openrouter/'):
+        return ('openrouter', key.split('/', 1)[1])
+    if '/' in key:
+        return ('openrouter', key)
     # Heuristic fallback
     if key.startswith('claude'):
         return ('anthropic', key)
@@ -1395,7 +1402,42 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
 
 @api.get('/chat/models')
 async def list_models():
-    """List available LLM models grouped by provider."""
+    """List available LLM models grouped by provider.
+
+    The OpenAI / Anthropic / Gemini groups are the curated first-party set.
+    When an OpenRouter key is configured we also append the live OpenRouter
+    catalog (300+ models) under its own group so the picker can offer them.
+    """
+    providers = {
+        'OpenAI': [
+            {'id': 'gpt-5', 'label': 'GPT-5'},
+            {'id': 'gpt-5-mini', 'label': 'GPT-5 Mini'},
+            {'id': 'gpt-4.1', 'label': 'GPT-4.1'},
+            {'id': 'o3', 'label': 'o3 (reasoning)'},
+        ],
+        'Anthropic': [
+            {'id': 'claude-opus-4-7', 'label': 'Claude Opus 4.7 (recommended)'},
+            {'id': 'claude-sonnet-4-6', 'label': 'Claude Sonnet 4.6'},
+            {'id': 'claude-sonnet-4-5-20250929', 'label': 'Claude Sonnet 4.5'},
+            {'id': 'claude-haiku-4-5-20251001', 'label': 'Claude Haiku 4.5'},
+        ],
+        'Gemini': [
+            {'id': 'gemini-3.1-pro-preview', 'label': 'Gemini 3.1 Pro (recommended)'},
+            {'id': 'gemini-3-flash-preview', 'label': 'Gemini 3 Flash'},
+            {'id': 'gemini-2.5-pro', 'label': 'Gemini 2.5 Pro'},
+            {'id': 'gemini-2.5-flash', 'label': 'Gemini 2.5 Flash'},
+        ],
+    }
+
+    # OpenRouter: one key → hundreds of models. Fetched live + cached.
+    try:
+        from llm_router import fetch_openrouter_models
+        or_models = await fetch_openrouter_models()
+        if or_models:
+            providers['OpenRouter'] = or_models
+    except Exception as e:  # noqa: BLE001 — never let the picker fail on this
+        logger.warning('OpenRouter catalog unavailable: %s', e)
+
     return {
         'default': DEFAULT_MODEL,
         # When True, the chat UI should default the picker to "Automatic".
@@ -1404,26 +1446,7 @@ async def list_models():
             'id': AUTO_MODEL_ID,
             'label': 'Automatic (best + cheapest per task)',
         },
-        'providers': {
-            'OpenAI': [
-                {'id': 'gpt-5', 'label': 'GPT-5'},
-                {'id': 'gpt-5-mini', 'label': 'GPT-5 Mini'},
-                {'id': 'gpt-4.1', 'label': 'GPT-4.1'},
-                {'id': 'o3', 'label': 'o3 (reasoning)'},
-            ],
-            'Anthropic': [
-                {'id': 'claude-opus-4-7', 'label': 'Claude Opus 4.7 (recommended)'},
-                {'id': 'claude-sonnet-4-6', 'label': 'Claude Sonnet 4.6'},
-                {'id': 'claude-sonnet-4-5-20250929', 'label': 'Claude Sonnet 4.5'},
-                {'id': 'claude-haiku-4-5-20251001', 'label': 'Claude Haiku 4.5'},
-            ],
-            'Gemini': [
-                {'id': 'gemini-3.1-pro-preview', 'label': 'Gemini 3.1 Pro (recommended)'},
-                {'id': 'gemini-3-flash-preview', 'label': 'Gemini 3 Flash'},
-                {'id': 'gemini-2.5-pro', 'label': 'Gemini 2.5 Pro'},
-                {'id': 'gemini-2.5-flash', 'label': 'Gemini 2.5 Flash'},
-            ],
-        },
+        'providers': providers,
     }
 
 
