@@ -31,9 +31,10 @@ export default function Pricing() {
       <section className="mx-auto max-w-7xl px-5 py-20">
         <div className="text-center">
           <div className="text-xs font-semibold uppercase tracking-[0.2em] text-tbc-400">Pricing</div>
-          <h1 className="mt-3 text-5xl font-bold tracking-tight text-white md:text-6xl">Plans for every operator.</h1>
+          <h1 className="mt-3 text-5xl font-bold tracking-tight text-white md:text-6xl">300+ AI models. One plan.</h1>
           <p className="mx-auto mt-4 max-w-2xl text-lg text-slate-400">
-            Start free with 50 messages. Upgrade anytime — your conversations come with you.
+            Every plan unlocks <span className="font-semibold text-white">300+ AI models</span> — GPT-5, Claude, Gemini,
+            Llama, Mistral, DeepSeek, Grok and more. Start free with 50 messages and upgrade anytime; your conversations come with you.
           </p>
         </div>
 
@@ -87,8 +88,8 @@ export default function Pricing() {
         </div>
 
         <div className="mt-12 rounded-xl border border-slate-800 bg-slate-900/40 p-5 text-center text-sm text-slate-400">
-          All plans include unlimited chat sessions, exportable history, and access to all supported AI models.
-          Cancel anytime in your dashboard.
+          All plans include unlimited chat sessions, exportable history, and access to all 300+ supported AI models —
+          one membership instead of a stack of separate AI subscriptions. Cancel anytime in your dashboard.
         </div>
       </section>
       <Footer />

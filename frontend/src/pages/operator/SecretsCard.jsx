@@ -37,6 +37,13 @@ export const KIND_META = {
     placeholder: 'Paste your OpenAI key (sk-…) — powers the AI build tools',
     helperUrl: 'https://platform.openai.com/api-keys',
   },
+  gemini: {
+    label: 'Google Gemini API Key',
+    icon: Sparkles,
+    fieldKey: 'gemini_api_key',
+    placeholder: 'Paste your Gemini key (AIza…) — powers the AI build tools',
+    helperUrl: 'https://aistudio.google.com/app/apikey',
+  },
   openrouter: {
     label: 'OpenRouter API Key',
     icon: Sparkles,

@@ -19,20 +19,25 @@ if (config.enableHealthCheck) {
 }
 
 let webpackConfig = {
+  // react-scripts 5 bundles eslint-webpack-plugin, which is incompatible with
+  // the ESLint 9 flat config this project uses (it passes removed options like
+  // `extensions` / `resolvePluginsRelativeTo` and crashes the build). Disable
+  // the in-webpack linter here; linting still runs via the standalone
+  // `eslint` script / `eslint.config.mjs`.
   eslint: {
-    configure: {
-      extends: ["plugin:react-hooks/recommended"],
-      rules: {
-        "react-hooks/rules-of-hooks": "error",
-        "react-hooks/exhaustive-deps": "warn",
-      },
-    },
+    enable: false,
   },
   webpack: {
     alias: {
       '@': path.resolve(__dirname, 'src'),
     },
     configure: (webpackConfig) => {
+
+      // Defensively remove the ESLint webpack plugin in case react-scripts
+      // still injected it. It breaks under ESLint 9 (see eslint.enable above).
+      webpackConfig.plugins = (webpackConfig.plugins || []).filter(
+        (plugin) => plugin && plugin.constructor && plugin.constructor.name !== 'ESLintWebpackPlugin',
+      );
 
       // Add ignored patterns to reduce watched directories
         webpackConfig.watchOptions = {

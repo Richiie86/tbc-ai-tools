@@ -4,6 +4,7 @@ import api from '../../lib/api';
 import { Button } from '../../components/ui/button';
 import { Textarea } from '../../components/ui/textarea';
 import { toast } from 'sonner';
+import ScreenshotThumb from '../../components/ScreenshotThumb';
 import {
   Wand2, Loader2, GitBranch, AlertTriangle, FileText, ExternalLink, X, History, ShieldAlert,
   ShieldCheck, ShieldX, Eye, ScanEye,
@@ -520,18 +521,26 @@ function VisualVerifyChip({ planId }) {
     : v === 'pending' ? 'Visual…'
     : 'Visual';
   return (
-    <button
-      type="button"
-      onClick={rerun}
-      disabled={running}
-      data-testid={`ai-build-visual-verify-${planId}`}
-      title={vv?.summary || 'Run the cross-AI visual verification on the live preview'}
-      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider transition ${tone}`}
-    >
-      {running
-        ? <Loader2 className="h-3 w-3 animate-spin" />
-        : <ScanEye className="h-3 w-3" />}
-      {label}
-    </button>
+    <span className="inline-flex items-center gap-1.5">
+      <button
+        type="button"
+        onClick={rerun}
+        disabled={running}
+        data-testid={`ai-build-visual-verify-${planId}`}
+        title={vv?.summary || 'Run the cross-AI visual verification on the live preview'}
+        className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider transition ${tone}`}
+      >
+        {running
+          ? <Loader2 className="h-3 w-3 animate-spin" />
+          : <ScanEye className="h-3 w-3" />}
+        {label}
+      </button>
+      {vv?.screenshot_available && (
+        <ScreenshotThumb
+          src={`/operator/ai-build/visual-verify/${planId}/screenshot`}
+          alt={`Build preview screenshot for plan ${planId}`}
+        />
+      )}
+    </span>
   );
 }

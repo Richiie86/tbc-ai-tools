@@ -942,6 +942,18 @@ async def _validate_key(kind: str, value: str) -> dict:
                             'message': 'OpenAI key valid'}
                 return {'ok': False, 'message': f'OpenAI rejected the key ({r.status_code}).'}
 
+            if kind == 'gemini':
+                # Google Generative Language API — listing models with the key
+                # as a query param is the cheapest authenticated GET.
+                r = await client.get(
+                    'https://generativelanguage.googleapis.com/v1beta/models',
+                    params={'key': value, 'pageSize': 1},
+                )
+                if r.status_code == 200:
+                    return {'ok': True, 'identity': 'Google Gemini account',
+                            'message': 'Gemini API key valid'}
+                return {'ok': False, 'message': f'Google rejected the Gemini key ({r.status_code}).'}
+
             if kind == 'render':
                 r = await client.get('https://api.render.com/v1/owners?limit=1',
                                      headers={'Authorization': f'Bearer {value}',
@@ -1033,6 +1045,10 @@ def _detect_key_kind(value: str) -> Optional[str]:
         return 'github'
     if low.startswith('rnd_'):
         return 'render'
+    # Google Gemini (AI Studio) keys start with `AIza` — case-sensitive, so
+    # check the original value, not the lowercased copy.
+    if v.startswith('AIza'):
+        return 'gemini'
     if low.startswith('re_'):
         return 'resend'
     if low.startswith(('sk_live_', 'sk_test_', 'rk_live_', 'rk_test_')):
@@ -1071,7 +1087,7 @@ async def op_auto_detect_key(
             raise HTTPException(
                 422,
                 "Couldn't recognise this key automatically. Use the specific "
-                "field for it (Vercel/GitHub/Anthropic/OpenAI/OpenRouter/Render/Groq).",
+                "field for it (Vercel/GitHub/Anthropic/OpenAI/Gemini/OpenRouter/Render/Groq).",
             )
 
     if do_validate and verdict is None:

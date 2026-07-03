@@ -80,13 +80,13 @@ const FEATURES = [
   },
   {
     icon: Cpu,
-    title: 'Pick your model',
-    desc: 'Switch between GPT-5, Claude Sonnet/Opus, and Gemini Pro/Flash in a single click.',
-    long: 'Route each task to the model that suits it. Reach for Claude Opus on hard architecture, GPT-5 for breadth, or Gemini Flash when you want speed — switch mid-conversation without losing context.',
+    title: '300+ AI models in one place',
+    desc: 'GPT-5, Claude Opus, Gemini, Llama, Mistral, DeepSeek, Grok and 300+ more — all under one login.',
+    long: 'Every major AI lab, in a single searchable picker. Reach for Claude Opus on hard architecture, GPT-5 for breadth, Gemini Flash for speed, or explore open models like Llama, Mistral and DeepSeek — all included in your membership. Switch mid-conversation without losing context, or let amAI pick for you.',
     points: [
-      'Claude Opus 4.7 & Sonnet 4.6, GPT-5, Gemini 3.1 Pro / 3 Flash',
-      'Change models mid-session — memory carries over',
-      'One shared learning pool improves every model',
+      '300+ models from OpenAI, Anthropic, Google, Meta, Mistral, DeepSeek, xAI & more',
+      'Search and switch models mid-session — memory carries over',
+      'One membership, one bill — no separate provider accounts to manage',
     ],
     cta: { label: 'See the models', to: '/dashboard' },
   },
@@ -173,18 +173,19 @@ export default function Landing() {
         <div className="absolute inset-0 bg-radial-fade" />
         <div className="relative mx-auto max-w-7xl px-5 pt-20 pb-24 md:pt-28 md:pb-32">
           <div className="inline-flex items-center gap-2 rounded-full border border-tbc-500/30 bg-tbc-500/10 px-3 py-1 text-xs font-medium text-tbc-300">
-            <Sparkles className="h-3.5 w-3.5" /> Now with amAI smart routing, live web search & always-current docs
+            <Sparkles className="h-3.5 w-3.5" /> 300+ AI models · amAI smart routing · live web search & always-current docs
           </div>
           <h1 className="mt-6 max-w-4xl text-5xl font-bold leading-[1.05] tracking-tight text-white md:text-7xl">
-            Your AI engineer. <br />
+            300+ AI models. <br />
             <span className="bg-gradient-to-r from-tbc-300 to-tbc-300 bg-clip-text text-transparent">
-              Build full apps by talking.
+              One membership. Build anything.
             </span>
           </h1>
           <p className="mt-6 max-w-2xl text-lg leading-relaxed text-slate-300 md:text-xl">
-            Design, code, debug, and ship production-grade apps through a single conversation.
-            TBC AI Tools now picks the best model for you automatically, searches the live web,
-            and pulls in up-to-the-minute documentation — so the code it writes actually works.
+            Design, code, debug, and ship production-grade apps through a single conversation —
+            powered by <span className="font-semibold text-white">300+ AI models</span> from OpenAI, Anthropic,
+            Google, Meta, Mistral, DeepSeek, xAI and more. amAI picks the best one for every task automatically,
+            so you get the smartest answer at the lowest cost — no juggling accounts, no separate bills.
           </p>
           <div className="mt-9 flex flex-wrap items-center gap-3">
             <Link to="/register">
@@ -200,10 +201,10 @@ export default function Landing() {
           </div>
 
           <div className="mt-14 grid grid-cols-2 gap-8 border-t border-slate-800/80 pt-8 sm:grid-cols-4 max-w-3xl">
+            <Stat value="300+" label="AI Models Included" />
             <Stat value="Auto" label="Smart Model Routing" />
             <Stat value="Live" label="Web Search & Docs" />
             <Stat value="100%" label="Code Ownership" />
-            <Stat value="2FA" label="Secure by Default" />
           </div>
         </div>
       </section>
@@ -211,16 +212,17 @@ export default function Landing() {
       {/* MODEL STRIP */}
       <section className="border-y border-slate-800/80 bg-slate-900/40 py-8">
         <div className="mx-auto max-w-7xl px-5">
-          <div className="text-center text-xs uppercase tracking-[0.25em] text-slate-500">Let amAI choose — or pick any model yourself.</div>
+          <div className="text-center text-xs uppercase tracking-[0.25em] text-slate-500">300+ models on tap — let amAI choose, or pick any one yourself.</div>
           <div className="mt-5 flex flex-wrap items-center justify-center gap-6 text-slate-300">
             {[
               { name: 'Automatic (amAI)', sub: 'Smart routing', featured: true },
               { name: 'Claude Opus 4.7', sub: 'Anthropic' },
-              { name: 'Claude Sonnet 4.6', sub: 'Anthropic' },
               { name: 'GPT-5', sub: 'OpenAI' },
               { name: 'Gemini 3.1 Pro', sub: 'Google' },
-              { name: 'Gemini 3 Flash', sub: 'Google' },
-              { name: 'GPT-4.1', sub: 'OpenAI' },
+              { name: 'Llama 3.1 405B', sub: 'Meta' },
+              { name: 'Mistral Large', sub: 'Mistral' },
+              { name: 'DeepSeek V3', sub: 'DeepSeek' },
+              { name: 'Grok', sub: 'xAI' },
             ].map((m) => (
               <div
                 key={m.name}
@@ -239,6 +241,13 @@ export default function Landing() {
                 </div>
               </div>
             ))}
+            <div className="flex items-center gap-2 rounded-lg border border-tbc-500/40 bg-tbc-500/10 px-3.5 py-2">
+              <Layers className="h-4 w-4 text-tbc-300" />
+              <div className="leading-tight">
+                <div className="text-sm font-semibold text-tbc-100">+300 more</div>
+                <div className="text-[10px] uppercase tracking-wider text-tbc-300/70">Every major lab</div>
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -390,9 +399,10 @@ export default function Landing() {
       {/* CTA */}
       <section className="border-t border-slate-800/80 py-20">
         <div className="mx-auto max-w-5xl px-5 text-center">
-          <h2 className="text-4xl font-bold tracking-tight text-white md:text-5xl">Ready to ship faster?</h2>
+          <h2 className="text-4xl font-bold tracking-tight text-white md:text-5xl">300+ AI models. One price.</h2>
           <p className="mx-auto mt-4 max-w-2xl text-lg text-slate-400">
-            Join the TradeBridge Club and put a full engineering team in your browser. No credit card required to start.
+            Join the TradeBridge Club and unlock every major AI model — GPT-5, Claude, Gemini, Llama and 300+ more —
+            plus a full engineering team in your browser. One membership replaces a stack of separate AI subscriptions.
           </p>
           <div className="mt-8 flex flex-wrap justify-center gap-3">
             <Link to="/register">
