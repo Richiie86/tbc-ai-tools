@@ -39,7 +39,11 @@ from db import db
 
 logger = logging.getLogger('tbc')
 
-router = APIRouter(prefix='/api/operator/deploy', tags=['deploy'])
+# NOTE: the existing deploy system (deploy_projects_ext.py) owns
+# `/api/operator/deploy/{project_id}` with a catch-all GET, which would swallow
+# our `/config`, `/services`, `/status` as if "config" were a project id. Use a
+# distinct prefix so this Render-redeploy feature never collides with it.
+router = APIRouter(prefix='/api/operator/render-deploy', tags=['deploy'])
 
 _CONFIG_ID = 'render_deploy'
 _SETTINGS_ID = 'payment_settings'
