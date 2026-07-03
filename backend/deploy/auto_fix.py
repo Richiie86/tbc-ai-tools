@@ -152,9 +152,10 @@ async def request_patches(project: dict, review: dict, settings: dict) -> dict:
             'github_token not configured — auto-fix needs `Contents: Write` to commit patches. '
             'Set it in Operator → Security.',
         )
-    llm_key = (settings or {}).get('emergent_llm_key') or os.environ.get('EMERGENT_LLM_KEY')
-    if not llm_key:
-        raise HTTPException(503, 'Emergent LLM key not configured for auto-fix.')
+    from llm_router import _openai_key
+    llm_key = ''  # legacy placeholder — llm_router uses the provider key
+    if not await _openai_key():
+        raise HTTPException(503, 'No OpenAI API key configured for auto-fix (Operator → Security).')
 
     paths = _findings_to_paths(review)
     if not paths:

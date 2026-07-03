@@ -771,8 +771,6 @@ async def op_get_settings(_: dict = Depends(get_current_operator)):
         'enable_crypto_auto': doc.get('enable_crypto_auto', False),
         'enable_crypto_manual': doc.get('enable_crypto_manual', True),
         'enable_bank': doc.get('enable_bank', True),
-        'emergent_llm_key_set': bool(doc.get('emergent_llm_key')),
-        'emergent_llm_key_masked': _mask_key(doc.get('emergent_llm_key')),
         'resend_api_key_set': bool(doc.get('resend_api_key')),
         'resend_api_key_masked': _mask_key(doc.get('resend_api_key')),
         'sender_email': doc.get('sender_email') or os.environ.get('SENDER_EMAIL', ''),
@@ -791,6 +789,9 @@ async def op_get_settings(_: dict = Depends(get_current_operator)):
         'openai_api_key_set': bool(doc.get('openai_api_key')),
         'openai_api_key_masked': _mask_key(doc.get('openai_api_key')),
         'openai_api_key_rotated_at': doc.get('openai_api_key_rotated_at'),
+        'gemini_api_key_set': bool(doc.get('gemini_api_key')),
+        'gemini_api_key_masked': _mask_key(doc.get('gemini_api_key')),
+        'gemini_api_key_rotated_at': doc.get('gemini_api_key_rotated_at'),
         # Render API key — lets the operator manage the backend host from here.
         'render_api_key_set': bool(doc.get('render_api_key')),
         'render_api_key_masked': _mask_key(doc.get('render_api_key')),
@@ -833,7 +834,7 @@ async def op_update_settings(payload: dict, _: dict = Depends(get_current_operat
         'default_plan_id',
         # Deploy & AI surface — same gate as the rest of the settings doc.
         'vercel_token', 'vercel_team_id', 'ai_api_key',
-        'anthropic_api_key', 'openai_api_key', 'render_api_key', 'groq_api_key',
+        'anthropic_api_key', 'openai_api_key', 'gemini_api_key', 'render_api_key', 'groq_api_key',
         'deploy_webhook_url', 'deploy_webhook_secret',
         'self_repo', 'self_git_ref', 'self_vercel_project_id',
         'github_token',
@@ -842,7 +843,7 @@ async def op_update_settings(payload: dict, _: dict = Depends(get_current_operat
     now = datetime.now(timezone.utc).isoformat()
     rotation_tracked = {
         'vercel_token', 'github_token',
-        'anthropic_api_key', 'openai_api_key', 'render_api_key', 'groq_api_key',
+        'anthropic_api_key', 'openai_api_key', 'gemini_api_key', 'render_api_key', 'groq_api_key',
     }
     for k, v in payload.items():
         if k not in allowed:
@@ -862,10 +863,10 @@ async def op_update_settings(payload: dict, _: dict = Depends(get_current_operat
 @router.post('/operator/settings/clear')
 async def op_clear_secret(key: str = Query(...), _: dict = Depends(get_current_operator)):
     db = await get_db()
-    if key not in {'stripe_secret_key', 'nowpayments_api_key', 'nowpayments_ipn_secret', 'paypal_client_id', 'paypal_client_secret', 'emergent_llm_key', 'resend_api_key', 'vercel_token', 'ai_api_key', 'github_token', 'anthropic_api_key', 'openai_api_key', 'render_api_key', 'groq_api_key'}:
+    if key not in {'stripe_secret_key', 'nowpayments_api_key', 'nowpayments_ipn_secret', 'paypal_client_id', 'paypal_client_secret', 'emergent_llm_key', 'resend_api_key', 'vercel_token', 'ai_api_key', 'github_token', 'anthropic_api_key', 'openai_api_key', 'gemini_api_key', 'render_api_key', 'groq_api_key'}:
         raise HTTPException(400, 'Cannot clear this key')
     unset_extra = {}
-    if key in {'vercel_token', 'github_token', 'anthropic_api_key', 'openai_api_key', 'render_api_key', 'groq_api_key'}:
+    if key in {'vercel_token', 'github_token', 'anthropic_api_key', 'openai_api_key', 'gemini_api_key', 'render_api_key', 'groq_api_key'}:
         unset_extra[f'{key}_rotated_at'] = None
     await db.settings.update_one(
         {'_id': 'payment_settings'},
@@ -984,12 +985,13 @@ _KIND_TO_FIELD = {
     'github': 'github_token',
     'anthropic': 'anthropic_api_key',
     'openai': 'openai_api_key',
+    'gemini': 'gemini_api_key',
     'render': 'render_api_key',
     'resend': 'resend_api_key',
     'stripe': 'stripe_secret_key',
     'groq': 'groq_api_key',
 }
-_ROTATION_STAMPED = {'vercel_token', 'github_token', 'anthropic_api_key', 'openai_api_key', 'render_api_key', 'groq_api_key'}
+_ROTATION_STAMPED = {'vercel_token', 'github_token', 'anthropic_api_key', 'openai_api_key', 'gemini_api_key', 'render_api_key', 'groq_api_key'}
 
 
 def _detect_key_kind(value: str) -> Optional[str]:

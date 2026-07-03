@@ -121,7 +121,7 @@ export default function AmAiTab() {
   }
 
   const { tiers, current_tier, billing, estimate_basis, auto_routing, spend } = status;
-  const billingOk = billing.path !== 'emergent_fallback';
+  const billingOk = billing.path !== 'no_key';
 
   return (
     <div className="space-y-6" data-testid="amai-tab">

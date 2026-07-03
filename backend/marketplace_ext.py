@@ -84,13 +84,13 @@ async def marketplace_checkout(req: CheckoutRequest, request: Request):
     except Exception:
         buyer_user_id = None
 
-    # Stripe Checkout via emergentintegrations
+    # Stripe Checkout via the native stripe SDK
     settings = await db.settings.find_one({'_id': 'payment_settings'}) or {}
     stripe_key = settings.get('stripe_secret_key') or os.environ.get('STRIPE_API_KEY', '')
     if not stripe_key:
         raise HTTPException(400, 'Stripe is not configured. Ask the operator to add the Stripe secret key.')
 
-    from emergentintegrations.payments.stripe.checkout import StripeCheckout, CheckoutSessionRequest
+    from stripe_checkout import StripeCheckout, CheckoutSessionRequest
     sc = StripeCheckout(api_key=stripe_key, webhook_url=f'{req.origin_url.rstrip("/")}/api/webhook/stripe/marketplace')
     success_url = f'{req.origin_url.rstrip("/")}/marketplace/success?session_id={{CHECKOUT_SESSION_ID}}'
     cancel_url = f'{req.origin_url.rstrip("/")}/marketplace/{req.project_id}'
@@ -133,7 +133,7 @@ async def marketplace_stripe_webhook(request: Request):
     stripe_key = settings.get('stripe_secret_key') or os.environ.get('STRIPE_API_KEY', '')
     if not stripe_key:
         raise HTTPException(400, 'Stripe not configured')
-    from emergentintegrations.payments.stripe.checkout import StripeCheckout
+    from stripe_checkout import StripeCheckout
     sc = StripeCheckout(api_key=stripe_key, webhook_url='')  # webhook_url unused on verify
     body = await request.body()
     sig = request.headers.get('Stripe-Signature', '')

@@ -334,9 +334,9 @@ async def _billing_status() -> dict:
     elif openai:
         path, detail = 'own_openai', 'Billed to your own OpenAI account.'
     else:
-        path, detail = 'emergent_fallback', (
-            'Falling back to the shared Emergent budget — add your own key in '
-            'the "My Keys" tab to control spend.'
+        path, detail = 'no_key', (
+            'No AI provider key configured — add an Anthropic or OpenAI key in '
+            'the "My Keys" tab to enable the AI.'
         )
     return {
         'path': path,
@@ -344,7 +344,7 @@ async def _billing_status() -> dict:
         'anthropic_key_present': anthropic,
         'openai_key_present': openai,
         # The dial's models are all Anthropic, so this is the key that matters.
-        'active_tiers_billed_to': 'anthropic' if anthropic else 'emergent',
+        'active_tiers_billed_to': 'anthropic' if anthropic else 'none',
     }
 
 
