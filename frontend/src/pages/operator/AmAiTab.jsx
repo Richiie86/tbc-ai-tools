@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { Switch } from '../../components/ui/switch';
 import {
   BrainCircuit, Loader2, Gauge, Sparkles, Zap, Leaf,
-  CheckCircle2, AlertTriangle, CreditCard, Info, Wand2, TrendingUp,
+  CheckCircle2, AlertTriangle, CreditCard, Info, Wand2, TrendingUp, Users,
 } from 'lucide-react';
 
 /**
@@ -219,15 +219,49 @@ export default function AmAiTab() {
           {spend.by_model.length === 0 ? (
             <p className="text-sm text-tbc-200/40">No AI requests recorded yet this month.</p>
           ) : (
-            <div className="space-y-1.5">
-              {spend.by_model.map((row) => (
-                <div key={row.model} className="flex items-center justify-between rounded-lg bg-ink-950/50 px-3 py-2 text-xs">
-                  <span className="truncate font-mono text-tbc-200/70" title={row.model}>{row.model}</span>
-                  <span className="ml-3 shrink-0 text-tbc-200/50">
-                    {row.requests.toLocaleString()} req · <span className="font-semibold text-tbc-100">~{money(row.est_cost)}</span>
-                  </span>
+            <div className="grid gap-4 md:grid-cols-2">
+              {/* By model */}
+              <div>
+                <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-tbc-200/40">
+                  <Gauge className="h-3.5 w-3.5" /> By model
                 </div>
-              ))}
+                <div className="space-y-1.5">
+                  {spend.by_model.map((row) => (
+                    <div key={row.model} className="flex items-center justify-between rounded-lg bg-ink-950/50 px-3 py-2 text-xs">
+                      <span className="truncate font-mono text-tbc-200/70" title={row.model}>{row.model}</span>
+                      <span className="ml-3 shrink-0 text-tbc-200/50">
+                        {row.requests.toLocaleString()} req · <span className="font-semibold text-tbc-100">~{money(row.est_cost)}</span>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* By user */}
+              <div>
+                <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-tbc-200/40">
+                  <Users className="h-3.5 w-3.5" /> By user {spend.by_user?.length > 0 && `(top ${spend.by_user.length})`}
+                </div>
+                {(!spend.by_user || spend.by_user.length === 0) ? (
+                  <p className="rounded-lg bg-ink-950/50 px-3 py-2 text-xs text-tbc-200/40">No per-user data yet.</p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {spend.by_user.map((u) => (
+                      <div key={u.user_id || u.label} className="flex items-center justify-between rounded-lg bg-ink-950/50 px-3 py-2 text-xs">
+                        <span className="flex min-w-0 items-center gap-1.5">
+                          <span className="truncate text-tbc-200/70" title={u.email || u.label}>{u.label}</span>
+                          {u.role === 'operator' && (
+                            <span className="shrink-0 rounded bg-tbc-500/20 px-1.5 py-0.5 text-[9px] font-semibold uppercase text-tbc-300">op</span>
+                          )}
+                        </span>
+                        <span className="ml-3 shrink-0 text-tbc-200/50">
+                          {u.requests.toLocaleString()} req · <span className="font-semibold text-tbc-100">~{money(u.est_cost)}</span>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>

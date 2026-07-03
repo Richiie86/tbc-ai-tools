@@ -244,12 +244,14 @@ async def record_usage(
 
 
 async def _spend_summary() -> dict:
-    """Aggregate this calendar month's estimated spend, grouped by model."""
+    """Aggregate this calendar month's estimated spend, grouped by model and
+    by user (so the operator can see who is costing what)."""
     now = datetime.now(timezone.utc)
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    total, total_requests, by_model = 0.0, 0, []
+    total, total_requests, by_model, by_user = 0.0, 0, [], []
     try:
-        pipeline = [
+        # By model (also drives the month total).
+        model_pipeline = [
             {'$match': {'created_at': {'$gte': month_start}}},
             {'$group': {
                 '_id': '$model',
@@ -257,7 +259,7 @@ async def _spend_summary() -> dict:
                 'est_cost': {'$sum': '$est_cost'},
             }},
         ]
-        async for row in db.ai_usage.aggregate(pipeline):
+        async for row in db.ai_usage.aggregate(model_pipeline):
             cost = float(row.get('est_cost') or 0)
             by_model.append({
                 'model': row['_id'],
@@ -266,6 +268,42 @@ async def _spend_summary() -> dict:
             })
             total += cost
             total_requests += int(row.get('requests') or 0)
+
+        # By user — top spenders this month (capped so the payload stays small).
+        user_pipeline = [
+            {'$match': {'created_at': {'$gte': month_start}}},
+            {'$group': {
+                '_id': '$user_id',
+                'requests': {'$sum': 1},
+                'est_cost': {'$sum': '$est_cost'},
+            }},
+            {'$sort': {'est_cost': -1}},
+            {'$limit': 50},
+        ]
+        raw_users = [r async for r in db.ai_usage.aggregate(user_pipeline)]
+        # Resolve friendly labels (name/email) in one query.
+        ids = [r['_id'] for r in raw_users if r.get('_id')]
+        labels: dict = {}
+        if ids:
+            async for u in db.users.find(
+                {'id': {'$in': ids}}, {'id': 1, 'name': 1, 'email': 1, 'role': 1}
+            ):
+                labels[u['id']] = {
+                    'label': u.get('name') or u.get('email') or 'Unknown',
+                    'email': u.get('email'),
+                    'role': u.get('role'),
+                }
+        for r in raw_users:
+            uid = r.get('_id')
+            info = labels.get(uid, {})
+            by_user.append({
+                'user_id': uid,
+                'label': info.get('label') or 'Unknown user',
+                'email': info.get('email'),
+                'role': info.get('role'),
+                'requests': int(r.get('requests') or 0),
+                'est_cost': round(float(r.get('est_cost') or 0), 2),
+            })
     except Exception as e:  # noqa: BLE001
         logger.warning('spend_summary failed: %s', e)
     return {
@@ -273,6 +311,7 @@ async def _spend_summary() -> dict:
         'total_est_cost': round(total, 2),
         'total_requests': total_requests,
         'by_model': sorted(by_model, key=lambda r: -r['est_cost']),
+        'by_user': by_user,
         'note': 'Estimated spend this month. Actual charges come from your provider.',
     }
 
