@@ -27,7 +27,7 @@ import {
 // Bumped to v2 when the guide expanded from 13 tabs to full coverage of all
 // 29 tabs (incl. amAI + AI Tools) — so anyone who saw the old tour gets the
 // richer one once.
-const STORAGE_KEY = 'tbc_operator_tour_seen_v2';
+const STORAGE_KEY = 'tbc_operator_tour_seen_v3';
 
 // Order MUST match the order tabs are rendered in Operator.jsx so the tour
 // reads top-to-bottom for the user.
@@ -70,8 +70,8 @@ const STEPS = [
   },
   {
     tab: 'keys', icon: KeyRound, title: 'My Keys',
-    body: 'Your personal AI provider keys (for example your own Anthropic or OpenAI key). Adding a key here lets your usage run on your own account instead of the shared platform key. Optional, but useful for heavy personal use.',
-    tip: 'No key here? No problem — the platform falls back to the shared key set under Security.',
+    body: 'Your own provider keys, so the platform runs entirely on your accounts — no shared or third-party dependency. Add Anthropic, OpenAI, Google Gemini, or OpenRouter (a single key that unlocks 300+ models). Use "Add a specific key", pick the provider, paste, Test, and Save. Each key also has Rotate and Clear.',
+    tip: 'OpenRouter is the easiest way to offer lots of models at once — one key covers 300+ of them. Members can also bring their own keys via the Bring Your Own Keys add-on in their account.',
   },
   {
     tab: 'amai', icon: BrainCircuit, title: 'amAI (smart model routing)',
@@ -98,7 +98,7 @@ const STEPS = [
   },
   {
     tab: 'ops', icon: Activity, title: 'Ops',
-    body: 'The health and deployment hub. See if your servers are running, manage auto-deploy projects with one-click Deploy, Clone, Code Review, and the full Autopilot loop, and download your own source code. This is also where the "health check" and "code review" buttons you asked about live.',
+    body: 'The health and deployment hub. See if your servers are running, manage auto-deploy projects with one-click Deploy, Clone, Code Review, and the full Autopilot loop, and download your own source code. The quick actions row also has a "Clear cache & reload" button — tap it if you just deployed but still see an old version; it wipes this browser\'s cached files and reloads the freshest build (you stay signed in).',
     tip: 'Try Autopilot on a project: it reviews the code with AI, refuses to ship if it finds a blocker, and can auto-fix and retry until it passes.',
   },
   {

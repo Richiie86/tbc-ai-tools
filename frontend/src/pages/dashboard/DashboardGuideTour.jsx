@@ -6,7 +6,7 @@ import { Button } from '../../components/ui/button';
 import {
   MessageSquare, Cpu, ListOrdered, CreditCard,
   ChevronLeft, ChevronRight, BookOpen, X,
-  BrainCircuit, Globe, BookOpenCheck, Settings as SettingsIcon, Gift,
+  BrainCircuit, Globe, BookOpenCheck, Settings as SettingsIcon, Gift, KeyRound,
 } from 'lucide-react';
 
 /**
@@ -20,7 +20,7 @@ import {
 // Bumped to v2 when the guide grew from 4 steps to full beginner coverage
 // (Automatic mode, web search, live docs, referrals, security) — so returning
 // users get the richer walkthrough once.
-const STORAGE_KEY = 'tbc_dashboard_tour_seen_v2';
+const STORAGE_KEY = 'tbc_dashboard_tour_seen_v3';
 
 const STEPS = [
   {
@@ -56,6 +56,11 @@ const STEPS = [
   {
     icon: CreditCard, title: 'Credits & billing',
     body: 'The chip in the top-right shows how many credits you have left — credits are what each message spends. When they run low, buy a top-up pack or upgrade to a monthly plan from the Pricing page. Click the chip any time to see your usage history.',
+  },
+  {
+    icon: KeyRound, title: 'Bring your own keys (optional)',
+    body: 'Power user with your own AI provider accounts? Turn on "Bring your own keys" in Settings for 50 credits/month. After that, your messages run on your own Anthropic, OpenAI, Gemini, or OpenRouter key (one key = 300+ models) and cost you 0 credits each — you just pay your provider directly. Switch it off any time; your saved keys are kept.',
+    tip: 'This pays off if you send a lot of messages. Occasional user? The normal per-message credits are simpler and cheaper.',
   },
   {
     icon: Gift, title: 'Refer a friend',

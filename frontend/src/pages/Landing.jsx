@@ -10,7 +10,7 @@ import {
 import {
   Sparkles, Cpu, ShieldCheck, Zap, Code2, MessagesSquare,
   Bot, GitBranch, Layers, ArrowRight, Check, TrendingUp,
-  LineChart, Lock, Globe, Share2, BrainCircuit, BookOpenCheck, Search,
+  LineChart, Lock, Globe, Share2, BrainCircuit, BookOpenCheck, Search, KeyRound,
 } from 'lucide-react';
 import ShareButtons from '../components/ShareButtons';
 
@@ -82,13 +82,25 @@ const FEATURES = [
     icon: Cpu,
     title: '300+ AI models in one place',
     desc: 'GPT-5, Claude Opus, Gemini, Llama, Mistral, DeepSeek, Grok and 300+ more — all under one login.',
-    long: 'Every major AI lab, in a single searchable picker. Reach for Claude Opus on hard architecture, GPT-5 for breadth, Gemini Flash for speed, or explore open models like Llama, Mistral and DeepSeek — all included in your membership. Switch mid-conversation without losing context, or let amAI pick for you.',
+    long: 'Every major AI lab, in a single searchable picker. Reach for Claude Opus on hard architecture, GPT-5 for breadth, Gemini Flash for speed, or explore open models like Llama, Mistral and DeepSeek — all included in your membership. Powered by OpenRouter, so 300+ models sit behind one login. Switch mid-conversation without losing context, or let amAI pick for you.',
     points: [
       '300+ models from OpenAI, Anthropic, Google, Meta, Mistral, DeepSeek, xAI & more',
+      'One OpenRouter connection unlocks every model — nothing extra to wire up',
       'Search and switch models mid-session — memory carries over',
-      'One membership, one bill — no separate provider accounts to manage',
     ],
     cta: { label: 'See the models', to: '/dashboard' },
+  },
+  {
+    icon: KeyRound,
+    title: 'Bring your own keys',
+    desc: 'Optional add-on: run on your own provider accounts and stop spending credits per message.',
+    long: 'Already have your own Anthropic, OpenAI, Gemini, or OpenRouter account? Switch on Bring Your Own Keys for a flat 50 credits/month and every message runs on your own key at zero credits each — you pay your provider directly. One OpenRouter key alone covers 300+ models. Turn it off any time; your saved keys are kept for next time.',
+    points: [
+      'Flat 50 credits/month — then messages cost 0 credits',
+      'Use Anthropic, OpenAI, Gemini, or OpenRouter (300+ models on one key)',
+      'Fully optional — occasional users can stick with per-message credits',
+    ],
+    cta: { label: 'Set up your keys', to: '/register' },
   },
   {
     icon: ShieldCheck,
@@ -186,6 +198,11 @@ export default function Landing() {
             powered by <span className="font-semibold text-white">300+ AI models</span> from OpenAI, Anthropic,
             Google, Meta, Mistral, DeepSeek, xAI and more. amAI picks the best one for every task automatically,
             so you get the smartest answer at the lowest cost — no juggling accounts, no separate bills.
+          </p>
+          <p className="mt-4 max-w-2xl text-sm leading-relaxed text-slate-400">
+            An independent product from <span className="font-semibold text-slate-200">TradeBridge Club</span>, running on our own
+            infrastructure and accounts. Prefer to run on your own API keys? Switch on
+            <span className="font-medium text-tbc-300"> Bring Your Own Keys</span> and pay your provider directly.
           </p>
           <div className="mt-9 flex flex-wrap items-center gap-3">
             <Link to="/register">

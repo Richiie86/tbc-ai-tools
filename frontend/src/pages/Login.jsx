@@ -55,7 +55,7 @@ export default function Login() {
             </div>
             <div>
               <h1 className="text-2xl font-bold text-white">Welcome back</h1>
-              <p className="text-xs text-slate-400">Sign in to TBC AI Tools</p>
+              <p className="text-xs text-slate-400">Sign in to TBC AI Tools · 300+ AI models, one login</p>
             </div>
           </div>
 

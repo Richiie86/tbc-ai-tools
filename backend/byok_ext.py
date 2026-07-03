@@ -216,7 +216,14 @@ async def byok_test_key(payload: dict = Body(...), user: dict = Depends(get_curr
                 'error': None if ok else 'That does not look like a Google/Gemini API key.'}
     try:
         from payments_ext import _validate_key
-        return await _validate_key(provider, value)
+        res = await _validate_key(provider, value)
+        # _validate_key returns {'ok', 'identity'|'message'} — normalise to the
+        # {ok, identity, error} shape the BYOK UI expects.
+        return {
+            'ok': bool(res.get('ok')),
+            'identity': res.get('identity') or '',
+            'error': None if res.get('ok') else (res.get('message') or 'Key failed validation'),
+        }
     except HTTPException:
         raise
     except Exception as e:  # noqa: BLE001
