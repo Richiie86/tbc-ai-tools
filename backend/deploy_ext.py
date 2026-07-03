@@ -4,20 +4,25 @@ Why this exists
 ---------------
 The backend runs on Render and deploys separately from the frontend. When new
 code lands on `main`, someone has to open the Render dashboard and click
-"Manual Deploy". This module lets the operator paste a Render API key once and
-then trigger a redeploy straight from the app (Server tab → Deploy).
+"Manual Deploy". This module lets the operator trigger a redeploy straight from
+the app (Server tab → Deploy).
+
+The Render API key is NOT stored here — it reuses the `render_api_key` the
+operator already saves in My Keys (settings doc `_id='payment_settings'`), so
+there is a single source of truth for that credential. This module only stores
+which service to deploy (+ an optional deploy hook) and the last deploy status.
 
 Two ways to trigger a deploy are supported:
-  1. API key + service id  -> uses the Render REST API. Also lets us list
-     services so the operator can pick one, and read deploy status.
-  2. Deploy hook URL        -> a simple POST-to-URL that Render provides; no
-     key needed. Used as a fallback if only a hook is configured.
+  1. API key (from My Keys) + service id -> uses the Render REST API. Also lets
+     us list services so the operator can pick one, and read deploy status.
+  2. Deploy hook URL -> a simple POST-to-URL that Render provides; no key
+     needed. Used as a fallback if only a hook is configured.
 
 Trust model
 -----------
 - All endpoints are operator-only.
-- The API key / hook are stored server-side and never returned to the client
-  (only `api_key_set` / `hook_set` booleans are exposed).
+- The API key lives in the shared settings doc; the deploy hook is stored here
+  and never returned to the client (only `hook_set` is exposed).
 """
 from __future__ import annotations
 
@@ -37,10 +42,10 @@ logger = logging.getLogger('tbc')
 router = APIRouter(prefix='/api/operator/deploy', tags=['deploy'])
 
 _CONFIG_ID = 'render_deploy'
+_SETTINGS_ID = 'payment_settings'
 _RENDER_API = 'https://api.render.com/v1'
 _DEFAULT_CONFIG = {
     '_id': _CONFIG_ID,
-    'api_key': '',
     'service_id': '',
     'service_name': '',
     'hook_url': '',
@@ -55,6 +60,17 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+async def _get_render_api_key() -> str:
+    """Read the Render API key the operator saved in My Keys. Single source of
+    truth — this module never stores its own copy."""
+    try:
+        doc = await db.settings.find_one({'_id': _SETTINGS_ID}) or {}
+        return (doc.get('render_api_key') or '').strip()
+    except Exception as e:
+        logger.warning('Could not read render_api_key from settings: %s', e)
+        return ''
+
+
 async def _get_config() -> dict:
     doc = await db.app_deploy_config.find_one({'_id': _CONFIG_ID})
     if not doc:
@@ -62,10 +78,10 @@ async def _get_config() -> dict:
     return {**_DEFAULT_CONFIG, **doc}
 
 
-def _public(doc: dict) -> dict:
+def _public(doc: dict, api_key_set: bool) -> dict:
     """Strip secrets before returning to the client."""
     return {
-        'api_key_set': bool(doc.get('api_key')),
+        'api_key_set': api_key_set,
         'service_id': doc.get('service_id', ''),
         'service_name': doc.get('service_name', ''),
         'hook_set': bool(doc.get('hook_url')),
@@ -77,7 +93,6 @@ def _public(doc: dict) -> dict:
 
 
 class DeployConfigUpdate(BaseModel):
-    api_key: Optional[str] = None       # write-only; '' leaves unchanged
     service_id: Optional[str] = None
     service_name: Optional[str] = None
     hook_url: Optional[str] = None
@@ -85,17 +100,16 @@ class DeployConfigUpdate(BaseModel):
 
 @router.get('/config')
 async def read_deploy_config(op: dict = Depends(get_current_operator)):
-    """Current deploy configuration (secrets masked)."""
-    return _public(await _get_config())
+    """Current deploy configuration. `api_key_set` reflects the Render key
+    saved in My Keys (shared settings doc)."""
+    return _public(await _get_config(), bool(await _get_render_api_key()))
 
 
 @router.put('/config')
 async def update_deploy_config(body: DeployConfigUpdate, op: dict = Depends(get_current_operator)):
-    """Save the Render API key / service / hook. Only overwrites the API key
-    when a non-empty value is supplied so the UI can leave it blank to keep."""
+    """Save which Render service to deploy (+ optional hook). The API key
+    itself is managed in My Keys, not here."""
     updates: dict = {}
-    if body.api_key:
-        updates['api_key'] = body.api_key.strip()
     if body.service_id is not None:
         updates['service_id'] = body.service_id.strip()
     if body.service_name is not None:
@@ -113,26 +127,26 @@ async def update_deploy_config(body: DeployConfigUpdate, op: dict = Depends(get_
     await db.app_deploy_config.update_one(
         {'_id': _CONFIG_ID}, {'$set': updates}, upsert=True,
     )
-    return _public(await _get_config())
+    return _public(await _get_config(), bool(await _get_render_api_key()))
 
 
 @router.get('/services')
 async def list_render_services(op: dict = Depends(get_current_operator)):
     """List the operator's Render services so they can pick which one to
     deploy. Requires a saved API key."""
-    cfg = await _get_config()
-    if not cfg.get('api_key'):
-        raise HTTPException(409, 'Save your Render API key first.')
+    api_key = await _get_render_api_key()
+    if not api_key:
+        raise HTTPException(409, 'Add your Render API key in My Keys first.')
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
             resp = await client.get(
                 f'{_RENDER_API}/services',
                 params={'limit': 100},
-                headers={'Authorization': f"Bearer {cfg['api_key']}",
+                headers={'Authorization': f'Bearer {api_key}',
                          'Accept': 'application/json'},
             )
         if resp.status_code == 401:
-            raise HTTPException(401, 'Render rejected the API key. Double-check it.')
+            raise HTTPException(401, 'Render rejected the API key. Update it in My Keys.')
         resp.raise_for_status()
     except HTTPException:
         raise
@@ -160,20 +174,21 @@ async def trigger_deploy(op: dict = Depends(get_current_operator)):
     falls back to the deploy hook URL if that's all that's configured.
     """
     cfg = await _get_config()
+    api_key = await _get_render_api_key()
 
     # Preferred: REST API with key + service id.
-    if cfg.get('api_key') and cfg.get('service_id'):
+    if api_key and cfg.get('service_id'):
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 resp = await client.post(
                     f"{_RENDER_API}/services/{cfg['service_id']}/deploys",
-                    headers={'Authorization': f"Bearer {cfg['api_key']}",
+                    headers={'Authorization': f'Bearer {api_key}',
                              'Accept': 'application/json',
                              'Content-Type': 'application/json'},
                     json={'clearCache': 'do_not_clear'},
                 )
             if resp.status_code == 401:
-                raise HTTPException(401, 'Render rejected the API key.')
+                raise HTTPException(401, 'Render rejected the API key. Update it in My Keys.')
             if resp.status_code == 404:
                 raise HTTPException(404, 'Render service not found. Re-select your service.')
             resp.raise_for_status()
@@ -211,20 +226,21 @@ async def trigger_deploy(op: dict = Depends(get_current_operator)):
             logger.warning('Render hook deploy failed: %s', e)
             raise HTTPException(502, 'Deploy hook call failed. Check the URL.')
 
-    raise HTTPException(409, 'Add a Render API key + service, or a deploy hook URL first.')
+    raise HTTPException(409, 'Add a Render API key in My Keys and pick a service, or set a deploy hook URL first.')
 
 
 @router.get('/status')
 async def deploy_status(op: dict = Depends(get_current_operator)):
     """Poll the status of the most recent API-triggered deploy."""
     cfg = await _get_config()
-    if not (cfg.get('api_key') and cfg.get('service_id') and cfg.get('last_deploy_id')):
+    api_key = await _get_render_api_key()
+    if not (api_key and cfg.get('service_id') and cfg.get('last_deploy_id')):
         return {'status': cfg.get('last_deploy_status'), 'deploy_id': cfg.get('last_deploy_id')}
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
             resp = await client.get(
                 f"{_RENDER_API}/services/{cfg['service_id']}/deploys/{cfg['last_deploy_id']}",
-                headers={'Authorization': f"Bearer {cfg['api_key']}",
+                headers={'Authorization': f'Bearer {api_key}',
                          'Accept': 'application/json'},
             )
         resp.raise_for_status()

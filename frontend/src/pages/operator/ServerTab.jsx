@@ -29,8 +29,6 @@ export default function ServerTab() {
 
   // ── Deploy (Render) state ──
   const [dep, setDep] = useState(null);
-  const [apiKey, setApiKey] = useState('');
-  const [savingKey, setSavingKey] = useState(false);
   const [services, setServices] = useState([]);
   const [loadingServices, setLoadingServices] = useState(false);
   const [deploying, setDeploying] = useState(false);
@@ -51,7 +49,6 @@ export default function ServerTab() {
       }
       if (deployRes.status === 'fulfilled') {
         setDep(deployRes.value.data);
-        setApiKey('');
       }
     } finally {
       setLoading(false);
@@ -117,22 +114,6 @@ export default function ServerTab() {
   };
 
   // ── Deploy (Render) handlers ──
-  const saveApiKey = async () => {
-    if (!apiKey.trim()) { toast.error('Paste your Render API key first'); return; }
-    setSavingKey(true);
-    try {
-      const { data } = await api.put('/operator/deploy/config', { api_key: apiKey.trim() });
-      setDep(data);
-      setApiKey('');
-      toast.success('Render API key saved');
-      loadServices();
-    } catch (e) {
-      toast.error(e?.response?.data?.detail || 'Could not save API key');
-    } finally {
-      setSavingKey(false);
-    }
-  };
-
   const loadServices = async () => {
     setLoadingServices(true);
     try {
@@ -341,33 +322,26 @@ export default function ServerTab() {
         <div>
           <h2 className="text-lg font-bold text-tbc-100">Backend deploy</h2>
           <p className="text-sm text-tbc-200/60">
-            Paste your Render API key to redeploy the backend from inside the app.
+            Redeploy the backend on Render from inside the app.
           </p>
         </div>
       </header>
 
       <section className="rounded-lg border border-tbc-900/60 bg-ink-900/40 p-4 space-y-4">
-        {/* API key */}
-        <div>
-          <label className="mb-1 block text-xs font-medium text-tbc-200/70">
-            <KeyRound className="mr-1 inline h-3.5 w-3.5" />
-            Render API key{' '}
-            <span className="text-tbc-200/40">
-              {dep?.api_key_set ? '(set — leave blank to keep)' : '(get it from Render → Account Settings → API Keys)'}
+        {/* Render API key status — the key itself is managed in My Keys */}
+        <div className="flex items-center gap-2 rounded-md border border-tbc-900/60 bg-ink-950 px-3 py-2 text-xs">
+          <KeyRound className="h-3.5 w-3.5 shrink-0 text-tbc-300" />
+          {dep?.api_key_set ? (
+            <span className="inline-flex items-center gap-1.5 text-emerald-300">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              Using the Render API key from <span className="font-bold">My Keys</span>.
             </span>
-          </label>
-          <div className="flex flex-wrap gap-2">
-            <Input
-              type="password"
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              placeholder={dep?.api_key_set ? '•••••••••••••••• (saved)' : 'rnd_xxxxxxxxxxxxxxxxxxxx'}
-              className="flex-1 min-w-[220px] bg-ink-950 font-mono text-sm"
-            />
-            <Button onClick={saveApiKey} disabled={savingKey} className="bg-tbc-500 font-bold text-ink-950 hover:bg-tbc-400">
-              {savingKey ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Save className="mr-1.5 h-4 w-4" />Save key</>}
-            </Button>
-          </div>
+          ) : (
+            <span className="text-amber-300">
+              No Render API key found. Add one in the <span className="font-bold">My Keys</span> tab
+              (paste your <code className="text-[11px]">rnd_…</code> key) to enable deploys.
+            </span>
+          )}
         </div>
 
         {/* Service picker */}
@@ -428,7 +402,11 @@ export default function ServerTab() {
             </span>
           )}
           {!dep?.service_id && !dep?.hook_set && (
-            <span className="text-xs text-tbc-200/40">Save your API key and pick a service to enable deploys.</span>
+            <span className="text-xs text-tbc-200/40">
+              {dep?.api_key_set
+                ? 'Load your services and pick one to enable deploys.'
+                : 'Add a Render API key in My Keys, then pick a service.'}
+            </span>
           )}
         </div>
       </section>
