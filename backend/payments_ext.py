@@ -833,7 +833,7 @@ async def op_update_settings(payload: dict, _: dict = Depends(get_current_operat
         'nowpayments_api_key', 'nowpayments_ipn_secret',
         'paypal_client_id', 'paypal_client_secret', 'paypal_mode',
         'enable_card', 'enable_paypal', 'enable_crypto_auto', 'enable_crypto_manual', 'enable_bank',
-        'emergent_llm_key', 'resend_api_key', 'sender_email',
+        'resend_api_key', 'sender_email',
         'default_plan_id',
         # Deploy & AI surface — same gate as the rest of the settings doc.
         'vercel_token', 'vercel_team_id', 'ai_api_key',
@@ -866,7 +866,7 @@ async def op_update_settings(payload: dict, _: dict = Depends(get_current_operat
 @router.post('/operator/settings/clear')
 async def op_clear_secret(key: str = Query(...), _: dict = Depends(get_current_operator)):
     db = await get_db()
-    if key not in {'stripe_secret_key', 'nowpayments_api_key', 'nowpayments_ipn_secret', 'paypal_client_id', 'paypal_client_secret', 'emergent_llm_key', 'resend_api_key', 'vercel_token', 'ai_api_key', 'github_token', 'anthropic_api_key', 'openai_api_key', 'gemini_api_key', 'openrouter_api_key', 'render_api_key', 'groq_api_key'}:
+    if key not in {'stripe_secret_key', 'nowpayments_api_key', 'nowpayments_ipn_secret', 'paypal_client_id', 'paypal_client_secret', 'resend_api_key', 'vercel_token', 'ai_api_key', 'github_token', 'anthropic_api_key', 'openai_api_key', 'gemini_api_key', 'openrouter_api_key', 'render_api_key', 'groq_api_key'}:
         raise HTTPException(400, 'Cannot clear this key')
     unset_extra = {}
     if key in {'vercel_token', 'github_token', 'anthropic_api_key', 'openai_api_key', 'gemini_api_key', 'openrouter_api_key', 'render_api_key', 'groq_api_key'}:

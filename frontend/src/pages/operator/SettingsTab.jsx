@@ -27,7 +27,6 @@ export default function SettingsTab() {
     nowpayments_ipn_secret: '',
     paypal_client_id: '',
     paypal_client_secret: '',
-    emergent_llm_key: '',
     resend_api_key: '',
     sender_email: '',
     vercel_token: '',
@@ -294,24 +293,6 @@ export default function SettingsTab() {
             Verify a domain →
           </a>
         </div>
-      </Section>
-
-      <Section icon={Sparkles} title="AI / LLM key (AI chat)" anchor="llm-key">
-        <div className="rounded-md border border-tbc-900/40 bg-ink-950/60 p-3 text-xs text-tbc-200/70">
-          Powers GPT, Claude and Gemini in the Builder. Paste a universal LLM key here to enable AI chat and build features.
-        </div>
-        <KeyRow
-          label="Universal LLM key"
-          fieldKey="emergent_llm_key"
-          isSet={settings.emergent_llm_key_set}
-          masked={settings.emergent_llm_key_masked}
-          value={form.emergent_llm_key}
-          reveal={reveal.emergent_llm_key}
-          onReveal={() => toggleReveal('emergent_llm_key')}
-          onChange={(v) => setForm({ ...form, emergent_llm_key: v })}
-          onSave={() => save({ emergent_llm_key: form.emergent_llm_key })}
-          onClear={() => clearKey('emergent_llm_key')}
-        />
       </Section>
 
       <Section icon={Lock} title="Enabled payment methods" anchor="payment-methods">

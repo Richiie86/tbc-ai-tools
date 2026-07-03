@@ -60,9 +60,10 @@ _SECRET_FIELDS = {
     'paypal_secret', 'paypal_client_id',
     'nowpayments_api_key', 'nowpayments_ipn_secret',
     'resend_api_key', 'resend_from',
-    'emergent_llm_key',
     'vercel_token', 'github_token',
     'webhook_secret', 'ai_api_key',
+    'anthropic_api_key', 'openai_api_key', 'gemini_api_key',
+    'openrouter_api_key', 'groq_api_key', 'render_api_key',
     'slack_webhook', 'discord_webhook',
 }
 

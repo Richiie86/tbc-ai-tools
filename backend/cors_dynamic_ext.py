@@ -15,9 +15,8 @@ The middleware:
          attaches these via the Ops tab and we honour them automatically.
        - `cors_settings.extra_origins` Mongo doc (operator-managed via the
          `/api/operator/cors-origins` endpoints below).
-       - Always-allowed defaults: preview.emergentagent.com,
-         emergent.host, tbctools.org (so existing flows keep working
-         until the operator curates the list).
+       - Always-allowed default: tbctools.org (so existing flows keep
+         working until the operator curates the list).
   3. Mirrors the Origin header back when matched + the standard
      `Access-Control-Allow-Credentials: true` / methods / headers.
   4. Short-circuits OPTIONS preflight with `200 + CORS headers`.
@@ -52,11 +51,11 @@ _state = {
     'fetched_at': 0.0,
 }
 
-# Always-on fallbacks so the current deployment never breaks if the
+# Always-on fallback so the current deployment never breaks if the
 # operator has never touched the settings. tbctools.org is the
-# production custom domain; the others cover preview/Emergent hosts.
+# production custom domain.
 _ALWAYS_ALLOWED_REGEX = re.compile(
-    r'^https://([a-z0-9-]+\.)?(preview\.emergentagent\.com|emergent\.host|tbctools\.org|www\.tbctools\.org)(:\d+)?$',
+    r'^https://([a-z0-9-]+\.)?(tbctools\.org|www\.tbctools\.org)(:\d+)?$',
     re.IGNORECASE,
 )
 
