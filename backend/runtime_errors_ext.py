@@ -486,16 +486,17 @@ async def run_rca(error_id: str, _op: dict = Depends(get_current_operator)):
     if not doc:
         raise HTTPException(404, 'Error not found')
 
-    api_key = os.environ.get('EMERGENT_LLM_KEY') or ''
-    if not api_key:
-        raise HTTPException(503, 'EMERGENT_LLM_KEY not configured')
+    from llm_router import any_provider_key_available
+    api_key = ''  # legacy placeholder — llm_router uses per-provider keys
+    if not await any_provider_key_available():
+        raise HTTPException(503, 'No AI provider key configured (Operator → Security).')
 
     # Operator-configurable RCA model — falls back to claude-sonnet (the
     # iter17-validated default) when no setting is present. Set via
     # `settings.rca_model` in MongoDB or via the Operator → Security tab.
     settings = await db.settings.find_one({'_id': 'payment_settings'}) or {}
     rca_model_id = (settings.get('rca_model') or '').strip()
-    # Map provider for emergentintegrations.
+    # Map model id to its provider.
     _rca_provider_map = {
         'claude-opus-4-7': 'anthropic',
         'claude-sonnet-4-6': 'anthropic',
@@ -521,7 +522,7 @@ async def run_rca(error_id: str, _op: dict = Depends(get_current_operator)):
         "suggested_change (string), confidence (low|medium|high)."
     )
     try:
-        from emergentintegrations.llm.chat import LlmChat, UserMessage, TextDelta, StreamDone
+        from llm_router import LlmChat, UserMessage, TextDelta, StreamDone
         chat = LlmChat(
             api_key=api_key,
             session_id=f'rca-{uuid.uuid4()}',

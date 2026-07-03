@@ -361,9 +361,10 @@ async def plan(req: PlanRequest, user: dict = Depends(get_current_operator)):
     gh_token = settings.get('github_token') or os.environ.get('GITHUB_TOKEN')
     if not gh_token:
         raise HTTPException(503, 'github_token not set in Operator → Security.')
-    llm_key = settings.get('emergent_llm_key') or os.environ.get('EMERGENT_LLM_KEY')
-    if not llm_key:
-        raise HTTPException(503, 'EMERGENT_LLM_KEY not configured.')
+    from llm_router import _anthropic_key
+    llm_key = ''  # legacy placeholder — llm_router uses the provider key
+    if not await _anthropic_key():
+        raise HTTPException(503, 'No Anthropic API key configured (Operator → Security).')
 
     ref = project.get('gitRef') or 'main'
     async with httpx.AsyncClient(timeout=20.0) as client:

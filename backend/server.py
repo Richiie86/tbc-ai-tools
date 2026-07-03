@@ -1125,7 +1125,7 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
     — we don't gate the upload button on model choice so the operator
     can freely switch providers mid-thread.
     """
-    from emergentintegrations.llm.chat import LlmChat, UserMessage, TextDelta, StreamDone, ImageContent
+    from llm_router import LlmChat, UserMessage, TextDelta, StreamDone, ImageContent
 
     db_user = await db.users.find_one({'id': user['sub']})
     if not db_user:

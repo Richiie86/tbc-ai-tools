@@ -143,7 +143,7 @@ async def request_patches(project: dict, review: dict, settings: dict) -> dict:
     """Ask the LLM for a JSON patch set that resolves the findings.
     Returns {patches: [...], commit_message: str}. Raises HTTPException on
     fetch or LLM failure."""
-    from emergentintegrations.llm.chat import LlmChat, UserMessage
+    from llm_router import LlmChat, UserMessage
 
     gh_token = (settings or {}).get('github_token') or os.environ.get('GITHUB_TOKEN')
     if not gh_token:

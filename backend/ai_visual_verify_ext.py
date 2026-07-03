@@ -114,7 +114,7 @@ async def _take_screenshot(url: str, out_path: Path, timeout_s: float = 25.0) ->
 async def _vision_verify(llm_key: str, screenshot_path: Path, prompt: str, summary: str) -> dict:
     """Send the screenshot + operator's prompt to a vision model and parse
     the JSON verdict. Always returns a dict — never raises."""
-    from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
+    from llm_router import LlmChat, UserMessage, ImageContent
     import json
     import re
 
@@ -195,9 +195,9 @@ async def run_visual_verify(plan_id: str, *, fallback_url: Optional[str] = None)
     if not plan_doc:
         return {'ok': False, 'reason': 'plan_not_found'}
 
-    settings = await db.settings.find_one({'_id': 'payment_settings'}) or {}
-    llm_key = settings.get('emergent_llm_key') or os.environ.get('EMERGENT_LLM_KEY')
-    if not llm_key:
+    from llm_router import _openai_key
+    llm_key = ''  # legacy placeholder — llm_router uses the provider key
+    if not await _openai_key():
         return {'ok': False, 'reason': 'no_llm_key'}
 
     url = await _resolve_preview_url(plan_doc) if plan_doc.get('branch') else None
@@ -265,7 +265,7 @@ async def trigger_visual_verify(plan_id: str, op: dict = Depends(get_current_ope
         if reason == 'plan_not_found':
             raise HTTPException(404, 'Plan not found')
         if reason == 'no_llm_key':
-            raise HTTPException(503, 'EMERGENT_LLM_KEY not configured')
+            raise HTTPException(503, 'No OpenAI API key configured (Operator → Security).')
         if reason == 'no_preview_url':
             raise HTTPException(409, 'No preview deployment URL yet — wait for Vercel to build.')
         if reason == 'screenshot_failed':
