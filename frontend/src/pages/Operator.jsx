@@ -9,7 +9,7 @@ import {
   Code2, Sparkles, Wallet, KeyRound, Settings as SettingsIcon, Coins,
   FolderKanban, Activity, ScrollText, Megaphone, MessageCircle, FlaskConical,
   TrendingUp, Lock, Brain, Network, TestTube, AlertOctagon, Wand2, Link2,
-  Calculator, Gauge, Archive, BrainCircuit, Wrench, Server, Globe,
+  Calculator, Gauge, Archive, BrainCircuit, Wrench, Server, Globe, Share2,
 } from 'lucide-react';
 
 import PlansTab     from './operator/PlansTab';
