@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { toast } from 'sonner';
 import api from '../../lib/api';
 import {
   Brain, Loader2, Sparkles, TrendingUp, Network, Bot, GitBranch, LayoutGrid,
-  ChevronDown, Circle,
+  ChevronDown, Circle, RefreshCw, Check, X, CheckCircle2, AlertTriangle,
 } from 'lucide-react';
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -25,7 +26,13 @@ export default function AIBrainTab() {
   const [maturity, setMaturity] = useState(null);
   const [timeline, setTimeline] = useState(null);
   const [skills, setSkills] = useState(null);
+  const [syncStatus, setSyncStatus] = useState(null);
+  const [proposals, setProposals] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
+  // Per-proposal + per-AI in-flight ids so buttons can show a spinner and
+  // stay disabled without blocking the rest of the queue.
+  const [busyIds, setBusyIds] = useState(() => new Set());
   // Toggle between the simple bucket grid (original) and the react-flow
   // "skill tree" graph. Persist in localStorage so the operator's
   // preference survives a refresh.
@@ -37,14 +44,18 @@ export default function AIBrainTab() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [m, t, s] = await Promise.all([
+      const [m, t, s, ss, p] = await Promise.all([
         api.get('/operator/ai-brain/maturity'),
         api.get('/operator/ai-brain/timeline', { params: { weeks: 12 } }),
         api.get('/operator/ai-brain/skills'),
+        api.get('/operator/ai-brain/sync-status'),
+        api.get('/operator/ai-brain/proposals'),
       ]);
       setMaturity(m.data);
       setTimeline(t.data);
       setSkills(s.data);
+      setSyncStatus(ss.data);
+      setProposals(p.data?.proposals || []);
     } catch (e) {
       console.error('AI Brain load failed', e);
     } finally {
@@ -58,6 +69,72 @@ export default function AIBrainTab() {
     setSkillView(v);
     try { localStorage.setItem('ai-brain-skill-view', v); } catch { /* private mode */ }
   }, []);
+
+  // Quiet refresh of just the cross-AI data (no full-page spinner) after an
+  // approve / skip / sync action.
+  const refreshBrain = useCallback(async () => {
+    try {
+      const [m, ss, p] = await Promise.all([
+        api.get('/operator/ai-brain/maturity'),
+        api.get('/operator/ai-brain/sync-status'),
+        api.get('/operator/ai-brain/proposals'),
+      ]);
+      setMaturity(m.data);
+      setSyncStatus(ss.data);
+      setProposals(p.data?.proposals || []);
+    } catch (e) {
+      console.error('AI Brain refresh failed', e);
+    }
+  }, []);
+
+  const withBusy = useCallback(async (id, fn) => {
+    setBusyIds((prev) => new Set(prev).add(id));
+    try { await fn(); }
+    finally {
+      setBusyIds((prev) => { const n = new Set(prev); n.delete(id); return n; });
+    }
+  }, []);
+
+  const approveProposal = useCallback((id) => withBusy(id, async () => {
+    try {
+      await api.post(`/operator/ai-brain/proposals/${id}/approve`);
+      toast.success('Added — every AI will use it on the next reply.');
+      await refreshBrain();
+    } catch { toast.error('Could not add that proposal.'); }
+  }), [withBusy, refreshBrain]);
+
+  const skipProposal = useCallback((id) => withBusy(id, async () => {
+    try {
+      await api.post(`/operator/ai-brain/proposals/${id}/skip`);
+      toast.message('Skipped — removed from the queue.');
+      await refreshBrain();
+    } catch { toast.error('Could not skip that proposal.'); }
+  }), [withBusy, refreshBrain]);
+
+  const syncAi = useCallback((ai) => withBusy(`ai:${ai}`, async () => {
+    try {
+      const { data } = await api.post('/operator/ai-brain/sync', { ai });
+      toast.success(`${data.approved} update${data.approved === 1 ? '' : 's'} applied.`);
+      await refreshBrain();
+    } catch { toast.error('Update failed.'); }
+  }), [withBusy, refreshBrain]);
+
+  const syncAll = useCallback(async () => {
+    setSyncing(true);
+    try {
+      const { data } = await api.post('/operator/ai-brain/sync', {});
+      toast.success(
+        data.approved > 0
+          ? `All AIs up to date — ${data.approved} update${data.approved === 1 ? '' : 's'} applied.`
+          : 'All AIs were already up to date.',
+      );
+      await refreshBrain();
+    } catch {
+      toast.error('Sync failed. Try again.');
+    } finally {
+      setSyncing(false);
+    }
+  }, [refreshBrain]);
 
   if (loading) {
     return (
@@ -96,6 +173,18 @@ export default function AIBrainTab() {
         </div>
       </section>
 
+      {/* 1b. Cross-AI learning — sync + proposals review queue */}
+      <CrossAiSync
+        syncStatus={syncStatus}
+        proposals={proposals}
+        busyIds={busyIds}
+        syncing={syncing}
+        onSyncAll={syncAll}
+        onSyncAi={syncAi}
+        onApprove={approveProposal}
+        onSkip={skipProposal}
+      />
+
       {/* 2. Timeline */}
       <section data-testid="ai-brain-timeline">
         <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-tbc-300">
@@ -114,6 +203,7 @@ export default function AIBrainTab() {
                   claude: w.counts.claude,
                   gpt: w.counts.gpt,
                   gemini: w.counts.gemini,
+                  openrouter: w.counts.openrouter,
                   all: w.counts.all,
                 }))}
               >
@@ -131,6 +221,7 @@ export default function AIBrainTab() {
                 <Line type="monotone" dataKey="claude" stroke="#b48cff" strokeWidth={1.5} dot={false} name="Claude" />
                 <Line type="monotone" dataKey="gpt"    stroke="#34d399" strokeWidth={1.5} dot={false} name="GPT" />
                 <Line type="monotone" dataKey="gemini" stroke="#60a5fa" strokeWidth={1.5} dot={false} name="Gemini" />
+                <Line type="monotone" dataKey="openrouter" stroke="#fb923c" strokeWidth={1.5} dot={false} name="OpenRouter" />
               </LineChart>
             </ResponsiveContainer>
           )}
@@ -191,16 +282,177 @@ export default function AIBrainTab() {
 
 /* -------------- pieces -------------- */
 
+function _timeAgo(iso) {
+  if (!iso) return 'never';
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return 'never';
+  const secs = Math.max(0, Math.round((Date.now() - then) / 1000));
+  if (secs < 60) return 'just now';
+  const mins = Math.round(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.round(hrs / 24);
+  return `${days}d ago`;
+}
+
+// Small badge that colours a proposal by its source AI, reusing MODEL_LABEL.
+function AiBadge({ ai, label }) {
+  const cfg = MODEL_LABEL[ai] || MODEL_LABEL.other;
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${cfg.border} ${cfg.bg} ${cfg.color}`}>
+      <Circle className="h-2 w-2 fill-current" />
+      {label || cfg.name}
+    </span>
+  );
+}
+
+function CrossAiSync({ syncStatus, proposals, busyIds, syncing, onSyncAll, onSyncAi, onApprove, onSkip }) {
+  const allUpToDate = syncStatus?.all_up_to_date ?? true;
+  const pendingTotal = syncStatus?.pending_total ?? 0;
+  const behind = (syncStatus?.ais || []).filter((a) => !a.up_to_date);
+
+  return (
+    <section data-testid="ai-brain-sync" className="rounded-xl border border-tbc-900/60 bg-ink-900/40 p-4">
+      {/* Header: status + one-press sync */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-tbc-300">
+            <Network className="h-3 w-3" /> Cross-AI learning
+          </div>
+          <p className="mt-1 text-xs text-tbc-200/60">
+            Every approved learning is shared with all AIs (Claude, GPT, Gemini, OpenRouter).
+            Press sync to bring them up to date, or review each proposal below.
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="text-right">
+            <div
+              data-testid="ai-brain-sync-pill"
+              className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                allUpToDate
+                  ? 'border border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
+                  : 'border border-amber-500/30 bg-amber-500/10 text-amber-200'
+              }`}
+            >
+              {allUpToDate
+                ? <><CheckCircle2 className="h-3.5 w-3.5" /> All AIs up to date</>
+                : <><AlertTriangle className="h-3.5 w-3.5" /> {pendingTotal} to review</>}
+            </div>
+            <div className="mt-1 text-[10px] text-tbc-200/40">
+              Last synced {_timeAgo(syncStatus?.last_synced_at)}
+            </div>
+          </div>
+          <button
+            data-testid="ai-brain-sync-all"
+            onClick={onSyncAll}
+            disabled={syncing || pendingTotal === 0}
+            className="inline-flex items-center gap-2 rounded-lg bg-tbc-500 px-3 py-2 text-sm font-semibold text-ink-950 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {syncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            Sync all now
+          </button>
+        </div>
+      </div>
+
+      {/* Needs-your-attention field: AIs that are behind + manual update */}
+      {behind.length > 0 && (
+        <div data-testid="ai-brain-behind" className="mt-4 rounded-lg border border-amber-500/20 bg-amber-500/[0.04] p-3">
+          <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-amber-200/80">
+            <AlertTriangle className="h-3 w-3" /> Not up to date — update manually
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {behind.map((a) => (
+              <div
+                key={a.ai}
+                className="flex items-center gap-2 rounded-lg border border-tbc-900/60 bg-ink-900/60 px-2.5 py-1.5"
+              >
+                <AiBadge ai={a.ai} label={a.label} />
+                <span className="text-[11px] text-tbc-200/60">{a.pending} pending</span>
+                <button
+                  data-testid={`ai-brain-update-${a.ai}`}
+                  onClick={() => onSyncAi(a.ai)}
+                  disabled={busyIds.has(`ai:${a.ai}`)}
+                  className="inline-flex items-center gap-1 rounded-md bg-amber-500/20 px-2 py-1 text-[11px] font-semibold text-amber-100 transition hover:bg-amber-500/30 disabled:opacity-50"
+                >
+                  {busyIds.has(`ai:${a.ai}`) ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+                  Update
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Proposals review queue — read each one, Add or Skip */}
+      <div className="mt-4">
+        <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-tbc-300">
+          <Sparkles className="h-3 w-3" /> Proposals to review
+          {proposals.length > 0 && (
+            <span className="rounded-full bg-tbc-500/20 px-1.5 py-0.5 text-[10px] text-tbc-100">{proposals.length}</span>
+          )}
+        </div>
+        {proposals.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-tbc-900/60 bg-ink-900/30 p-6 text-center text-xs text-tbc-200/50">
+            Nothing to review — every AI is up to date. New proposals from any AI will appear here.
+          </div>
+        ) : (
+          <ul className="space-y-2">
+            {proposals.map((p) => {
+              const busy = busyIds.has(p.id);
+              return (
+                <li
+                  key={p.id}
+                  data-testid={`ai-brain-proposal-${p.id}`}
+                  className="rounded-lg border border-tbc-900/60 bg-ink-900/60 p-3"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <AiBadge ai={p.source_ai} label={p.source_ai_label} />
+                    <span className="text-[10px] text-tbc-200/40">{_timeAgo(p.created_at)}</span>
+                  </div>
+                  <p className="mt-2 text-sm leading-relaxed text-tbc-100">{p.text}</p>
+                  <div className="mt-3 flex items-center gap-2">
+                    <button
+                      data-testid={`ai-brain-approve-${p.id}`}
+                      onClick={() => onApprove(p.id)}
+                      disabled={busy}
+                      className="inline-flex items-center gap-1.5 rounded-md bg-emerald-500/20 px-3 py-1.5 text-xs font-semibold text-emerald-100 transition hover:bg-emerald-500/30 disabled:opacity-50"
+                    >
+                      {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                      Add
+                    </button>
+                    <button
+                      data-testid={`ai-brain-skip-${p.id}`}
+                      onClick={() => onSkip(p.id)}
+                      disabled={busy}
+                      className="inline-flex items-center gap-1.5 rounded-md border border-tbc-900/60 px-3 py-1.5 text-xs font-semibold text-tbc-200/70 transition hover:bg-ink-900 disabled:opacity-50"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                      Skip
+                    </button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+    </section>
+  );
+}
+
 const MODEL_LABEL = {
-  all:    { name: 'All models',  color: 'text-tbc-100',     border: 'border-tbc-500/40', bg: 'bg-tbc-500/[0.08]' },
-  claude: { name: 'Claude',      color: 'text-violet-300',  border: 'border-violet-500/30', bg: 'bg-violet-500/[0.06]' },
-  gpt:    { name: 'GPT',         color: 'text-emerald-300', border: 'border-emerald-500/30', bg: 'bg-emerald-500/[0.06]' },
-  gemini: { name: 'Gemini',      color: 'text-sky-300',     border: 'border-sky-500/30', bg: 'bg-sky-500/[0.06]' },
-  other:  { name: 'Other',       color: 'text-tbc-200',     border: 'border-tbc-900/60', bg: 'bg-ink-900/50' },
+  all:        { name: 'All models',        color: 'text-tbc-100',     border: 'border-tbc-500/40',    bg: 'bg-tbc-500/[0.08]' },
+  claude:     { name: 'Claude',            color: 'text-violet-300',  border: 'border-violet-500/30', bg: 'bg-violet-500/[0.06]' },
+  gpt:        { name: 'GPT',               color: 'text-emerald-300', border: 'border-emerald-500/30', bg: 'bg-emerald-500/[0.06]' },
+  gemini:     { name: 'Gemini',            color: 'text-sky-300',     border: 'border-sky-500/30',    bg: 'bg-sky-500/[0.06]' },
+  openrouter: { name: 'OpenRouter',        color: 'text-orange-300',  border: 'border-orange-500/30', bg: 'bg-orange-500/[0.06]' },
+  shared:     { name: 'Shared (all AIs)',  color: 'text-amber-200',   border: 'border-amber-500/30',  bg: 'bg-amber-500/[0.06]' },
+  other:      { name: 'Other',             color: 'text-tbc-200',     border: 'border-tbc-900/60',    bg: 'bg-ink-900/50' },
 };
 
 function ModelCard({ m, defaultModel }) {
-  const cfg = MODEL_LABEL[m.model] || MODEL_LABEL.other;
+  const cfg = MODEL_LABEL[m.model] || { ...MODEL_LABEL.other, name: m.label || m.model };
   // Maturity bar = how much of the auto-proposed pool was approved.
   // Visual ceiling capped at 100% by hand to avoid > 100 from edge data.
   const ratio = m.approval_rate != null ? Math.min(1, Math.max(0, m.approval_rate)) : null;
@@ -361,7 +613,7 @@ function SkillTreeGraph({ buckets }) {
     const n = [];
     const e = [];
 
-    // Root "Brain" node — centred above the bucket row.
+    // Root "Brain" node �� centred above the bucket row.
     const rootX = xStart + (buckets.length - 1) * colW / 2;
     n.push({
       id: 'brain',

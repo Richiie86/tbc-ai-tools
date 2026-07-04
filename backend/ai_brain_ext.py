@@ -28,7 +28,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 
 from auth_utils import get_current_operator
 from db import db
@@ -43,18 +43,41 @@ router = APIRouter(prefix='/api/operator/ai-brain', tags=['ai-brain'])
 DEFAULT_MODEL = 'claude-opus-4-7'
 
 
-# Canonical model buckets — anything not matching falls into "other".
+# Canonical AI buckets. The app runs four providers plus a "shared" pool:
+#   claude / gpt / gemini / openrouter  → attributed to a specific provider
+#   shared                              → learnings with NO single source model
+#                                          (taught to every AI at once — this is
+#                                          the cross-AI knowledge pool, and was
+#                                          previously mislabelled "unknown/other")
 # Match against the chat-session's stored model field (server.py:DEFAULT_MODEL
 # and resolve_model() use a small set of identifiers).
+AI_BUCKETS = ('claude', 'gpt', 'gemini', 'openrouter', 'shared')
+
+# Human labels used anywhere the API needs to name a bucket.
+BUCKET_LABEL = {
+    'all': 'All models',
+    'claude': 'Claude',
+    'gpt': 'GPT',
+    'gemini': 'Gemini',
+    'openrouter': 'OpenRouter',
+    'shared': 'Shared (all models)',
+}
+
+
 def _bucket_for_model(model: Optional[str]) -> str:
-    m = (model or '').lower()
+    m = (model or '').strip().lower()
+    if not m or m == 'unknown':
+        # No source model recorded → this learning applies to every AI.
+        return 'shared'
     if 'claude' in m or 'anthropic' in m or 'sonnet' in m or 'opus' in m or 'haiku' in m:
         return 'claude'
-    if 'gpt' in m or 'openai' in m:
+    if 'gpt' in m or 'openai' in m or m.startswith('o1') or m.startswith('o3') or m.startswith('o4'):
         return 'gpt'
     if 'gemini' in m or 'google' in m:
         return 'gemini'
-    return 'other'
+    # Everything else the app can reach goes through OpenRouter
+    # (grok, llama, deepseek, mistral, qwen, …).
+    return 'openrouter'
 
 
 # Skill taxonomy — keyword → bucket. First match wins. Lower-case the
@@ -134,7 +157,11 @@ async def maturity(_op: dict = Depends(get_current_operator)):
     # card without re-summing client-side.
     for l in learnings:
         b = _bucket_for_model(l.get('source_model'))
-        raw = (l.get('source_model') or 'unknown').strip() or 'unknown'
+        raw = (l.get('source_model') or '').strip()
+        # A learning with no source model is part of the shared pool — show it
+        # as "shared / all models" rather than the confusing "unknown".
+        if not raw or raw.lower() == 'unknown':
+            raw = 'shared / all models'
         enabled = bool(l.get('enabled'))
         auto = bool(l.get('auto_proposed'))
         for key in (b, 'all'):
@@ -167,14 +194,15 @@ async def maturity(_op: dict = Depends(get_current_operator)):
         return rows
 
     out = []
-    # Stable model ordering — headline first, then the three frontier ones.
-    for key in ('all', 'claude', 'gpt', 'gemini', 'other'):
-        if key not in buckets:
-            continue
-        b = buckets[key]
+    # Stable ordering — headline first, then every provider we support plus the
+    # shared pool. We ALWAYS emit each bucket (even at zero) so the view is
+    # complete and an AI with no learnings still shows up.
+    for key in ('all', *AI_BUCKETS):
+        b = buckets[key]  # defaultdict → zero-filled if the bucket was empty
         approval_rate = (b['approved'] / b['auto_proposed_total']) if b['auto_proposed_total'] else None
         out.append({
             'model': key,
+            'label': BUCKET_LABEL.get(key, key.title()),
             'total': b['total'],
             'pending': b['pending'],
             'last_7d_added': b['last_7d'],
@@ -208,7 +236,10 @@ async def timeline(
         iso = d.isocalendar()
         return f'{iso.year}-W{iso.week:02d}'
 
-    rows: dict[str, dict[str, int]] = defaultdict(lambda: {'claude': 0, 'gpt': 0, 'gemini': 0, 'other': 0, 'all': 0})
+    def _zero_counts() -> dict[str, int]:
+        return {**{b: 0 for b in AI_BUCKETS}, 'all': 0}
+
+    rows: dict[str, dict[str, int]] = defaultdict(_zero_counts)
     for l in learnings:
         created = _as_aware(l.get('created_at'))
         if not isinstance(created, datetime):
@@ -225,13 +256,13 @@ async def timeline(
     while cursor <= now:
         wk = _week_key(cursor)
         if wk not in seen:
-            out.append({'week': wk, 'counts': rows.get(wk, {'claude': 0, 'gpt': 0, 'gemini': 0, 'other': 0, 'all': 0})})
+            out.append({'week': wk, 'counts': rows.get(wk, _zero_counts())})
             seen.add(wk)
         cursor += timedelta(days=7)
     # Always include the *current* week even if cursor stepped past it.
     cur_wk = _week_key(now)
     if cur_wk not in seen:
-        out.append({'week': cur_wk, 'counts': rows.get(cur_wk, {'claude': 0, 'gpt': 0, 'gemini': 0, 'other': 0, 'all': 0})})
+        out.append({'week': cur_wk, 'counts': rows.get(cur_wk, _zero_counts())})
     return {'weeks': out}
 
 
@@ -267,3 +298,134 @@ async def skills(_op: dict = Depends(get_current_operator)):
         if b not in order:
             out.append({'bucket': b, 'count': len(by_bucket[b]), 'items': by_bucket[b]})
     return {'buckets': out, 'total': sum(len(v) for v in by_bucket.values())}
+
+
+# ===================================================================
+# Cross-AI learning — proposals queue + one-press sync
+# -------------------------------------------------------------------
+# Every ENABLED learning is already injected into the shared system prompt,
+# so all AIs read the same knowledge. What makes an AI "behind" is having
+# auto-proposed learnings that the operator hasn't reviewed yet. This section
+# lets the operator:
+#   • see each pending proposal, which AI raised it, and Add or Skip it
+#   • see which AIs are "not up to date" (have unreviewed proposals)
+#   • press one button to bring everything up to date
+# ===================================================================
+def _proposal_public(l: dict) -> dict:
+    bucket = _bucket_for_model(l.get('source_model'))
+    created = _as_aware(l.get('created_at'))
+    return {
+        'id': l.get('id'),
+        'text': l.get('text'),
+        'source_ai': bucket,
+        'source_ai_label': BUCKET_LABEL.get(bucket, bucket.title()),
+        'source_model': l.get('source_model'),
+        'source': l.get('source'),
+        'created_at': created.isoformat() if created else None,
+    }
+
+
+async def _pending_proposals() -> list[dict]:
+    """Auto-proposed learnings the operator hasn't approved or skipped yet."""
+    docs = await db.ai_learnings.find({
+        'auto_proposed': True,
+        'enabled': {'$ne': True},
+        'archived': {'$ne': True},
+    }).sort('created_at', -1).to_list(500)
+    return await _annotate_with_model(docs)
+
+
+async def _sync_meta() -> dict:
+    doc = await db.ai_brain_meta.find_one({'_id': 'sync'}) or {}
+    ls = _as_aware(doc.get('last_synced_at'))
+    return {
+        'last_synced_at': ls.isoformat() if ls else None,
+        'last_synced_by': doc.get('last_synced_by'),
+    }
+
+
+@router.get('/proposals')
+async def list_proposals(_op: dict = Depends(get_current_operator)):
+    """Full review queue — newest first — with the source AI attached."""
+    pending = await _pending_proposals()
+    return {
+        'proposals': [_proposal_public(l) for l in pending],
+        'count': len(pending),
+    }
+
+
+@router.get('/sync-status')
+async def sync_status(_op: dict = Depends(get_current_operator)):
+    """Per-AI up-to-date status. An AI is 'behind' if it has unreviewed
+    proposals. Always returns every bucket so the field is complete."""
+    pending = await _pending_proposals()
+    by_bucket: dict[str, int] = defaultdict(int)
+    for l in pending:
+        by_bucket[_bucket_for_model(l.get('source_model'))] += 1
+
+    ais = [{
+        'ai': b,
+        'label': BUCKET_LABEL.get(b, b.title()),
+        'pending': by_bucket.get(b, 0),
+        'up_to_date': by_bucket.get(b, 0) == 0,
+    } for b in AI_BUCKETS]
+
+    meta = await _sync_meta()
+    return {
+        'ais': ais,
+        'pending_total': len(pending),
+        'all_up_to_date': len(pending) == 0,
+        **meta,
+    }
+
+
+@router.post('/proposals/{learning_id}/approve')
+async def approve_proposal(learning_id: str, _op: dict = Depends(get_current_operator)):
+    """Add a proposal to the shared brain — every AI picks it up next reply."""
+    res = await db.ai_learnings.update_one(
+        {'id': learning_id},
+        {'$set': {'enabled': True, 'updated_at': datetime.now(timezone.utc)}},
+    )
+    if res.matched_count == 0:
+        raise HTTPException(404, 'Proposal not found')
+    return {'approved': learning_id}
+
+
+@router.post('/proposals/{learning_id}/skip')
+async def skip_proposal(learning_id: str, _op: dict = Depends(get_current_operator)):
+    """Skip a proposal — soft-archived so it leaves the queue but the audit
+    trail is kept (never silently deleted)."""
+    res = await db.ai_learnings.update_one(
+        {'id': learning_id},
+        {'$set': {'archived': True, 'archived_at': datetime.now(timezone.utc)}},
+    )
+    if res.matched_count == 0:
+        raise HTTPException(404, 'Proposal not found')
+    return {'skipped': learning_id}
+
+
+@router.post('/sync')
+async def sync_now(payload: dict = Body(default={}), op: dict = Depends(get_current_operator)):
+    """One-press sync: approve every pending proposal so all AIs are up to
+    date. Pass {"ai": "gpt"} to bring a single AI up to date instead."""
+    only = (payload or {}).get('ai')
+    pending = await _pending_proposals()
+    if only:
+        pending = [l for l in pending if _bucket_for_model(l.get('source_model')) == only]
+
+    ids = [l.get('id') for l in pending if l.get('id')]
+    approved = 0
+    if ids:
+        res = await db.ai_learnings.update_many(
+            {'id': {'$in': ids}},
+            {'$set': {'enabled': True, 'updated_at': datetime.now(timezone.utc)}},
+        )
+        approved = int(res.modified_count)
+
+    now = datetime.now(timezone.utc)
+    await db.ai_brain_meta.update_one(
+        {'_id': 'sync'},
+        {'$set': {'last_synced_at': now, 'last_synced_by': op.get('email')}},
+        upsert=True,
+    )
+    return {'approved': approved, 'ai': only or 'all', 'synced_at': now.isoformat()}
