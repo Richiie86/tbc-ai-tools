@@ -346,6 +346,12 @@ def resolve_model(name: Optional[str]):
 # ===== STARTUP =====
 @app.on_event('startup')
 async def startup():
+    # FIRST: pin a stable secret-encryption key so saved secrets (Porkbun,
+    # Vercel, Stripe, ...) survive MONGO_URL rotations / migrations. Must run
+    # before anything reads or writes encrypted settings.
+    from secrets_key_boot import ensure_persistent_secret_key
+    await ensure_persistent_secret_key()
+
     # Validate the environment BEFORE we touch the DB or serve traffic so a
     # misconfigured deploy fails loudly instead of leaking insecure defaults.
     _validate_production_env()
