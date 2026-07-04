@@ -113,6 +113,11 @@ async def launch_domain(
         logger.warning("launch-domain DNS error for %s: %s", domain, e)
 
     # Attach to the project's Vercel deployment when we know the project.
+    # NOTE: previously this only wrote `domain` to Mongo and *claimed*
+    # vercel_attached=True without ever telling Vercel — so the domain never
+    # actually served the app. We now call the real Vercel API so the domain
+    # goes live on the project (mirrors the operator "set domain" flow).
+    vercel_error = None
     if payload.projectId:
         try:
             proj = await db.deploy_projects.find_one({"id": payload.projectId})
@@ -121,8 +126,23 @@ async def launch_domain(
                     {"id": payload.projectId},
                     {"$set": {"domain": domain, "updated_at": now}},
                 )
-                launch_doc["vercel_attached"] = True
-        except Exception as e:  # pragma: no cover
+                vercel_project_id = proj.get("vercel_project_id")
+                if vercel_project_id:
+                    from payments_ext import get_settings_doc
+                    from vercel_api_ext import vercel_attach_domain
+                    settings = await get_settings_doc()
+                    await vercel_attach_domain(settings, vercel_project_id, domain)
+                    launch_doc["vercel_attached"] = True
+                else:
+                    vercel_error = (
+                        "Project has no Vercel deployment yet — run Deploy once "
+                        "to create it, then relaunch the domain to attach it."
+                    )
+        except HTTPException as e:
+            vercel_error = e.detail if isinstance(e.detail, str) else str(e.detail)
+            logger.warning("launch-domain Vercel attach failed for %s: %s", domain, vercel_error)
+        except Exception as e:  # pragma: no cover - network
+            vercel_error = f"Vercel attach failed: {e}"
             logger.warning("launch-domain project update failed: %s", e)
 
     ins = await db.domain_launches.insert_one(launch_doc)
@@ -156,6 +176,8 @@ async def launch_domain(
         "credits_remaining": fresh.get("credits"),
         "dns_configured": launch_doc["dns_configured"],
         "dns_error": dns_error,
+        "vercel_attached": launch_doc["vercel_attached"],
+        "vercel_error": vercel_error,
     }
 
 
