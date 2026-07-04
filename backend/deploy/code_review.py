@@ -72,6 +72,94 @@ def _is_placeholder_path(path: str) -> bool:
     return path.lower().endswith(_PLACEHOLDER_SUFFIXES)
 
 
+def _extract_json(text: str) -> Optional[dict]:
+    """Best-effort parse of an LLM response into a dict.
+
+    Handles the real-world ways models break strict-JSON instructions:
+      * ```json fenced blocks (anywhere, not just at the very start/end)
+      * leading/trailing prose ("Here is the review: { ... } Hope this helps")
+      * TRUNCATED output (response cut off by max_tokens mid-object) — we
+        balance the braces and close any dangling string so we still recover
+        summary + verdict + whatever findings arrived.
+      * trailing commas before } or ]
+
+    Returns a dict on success, or None if nothing usable could be recovered.
+    """
+    if not text:
+        return None
+    t = text.strip()
+    if '```' in t:
+        t = re.sub(r'```[a-zA-Z]*\n?', '', t).replace('```', '').strip()
+    # Fast path: already valid JSON.
+    try:
+        obj = json.loads(t)
+        return obj if isinstance(obj, dict) else None
+    except Exception:  # noqa: BLE001
+        pass
+    start = t.find('{')
+    if start == -1:
+        return None
+    # Scan for the matching close brace, respecting string literals/escapes,
+    # while keeping a stack of open delimiters so we can repair truncated
+    # output by closing them in the correct nesting order.
+    stack: list[str] = []
+    in_str = False
+    esc = False
+    end = -1
+    for i in range(start, len(t)):
+        ch = t[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == '\\':
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch in '{[':
+            stack.append(ch)
+        elif ch in '}]':
+            if stack:
+                stack.pop()
+            if not stack:
+                end = i
+                break
+    candidate = t[start:end + 1] if end != -1 else t[start:]
+
+    def _try(s: str) -> Optional[dict]:
+        try:
+            obj = json.loads(s)
+            return obj if isinstance(obj, dict) else None
+        except Exception:  # noqa: BLE001
+            return None
+
+    got = _try(candidate)
+    if got is not None:
+        return got
+    # Strip trailing commas and retry.
+    got = _try(re.sub(r',\s*([}\]])', r'\1', candidate))
+    if got is not None:
+        return got
+    # Truncation repair: close a dangling string, drop a trailing partial
+    # key/comma, then close every still-open delimiter in reverse order.
+    if end == -1 and stack:
+        repaired = candidate
+        if in_str:
+            repaired += '"'
+        repaired = re.sub(r',\s*$', '', repaired.rstrip())
+        closers = {'{': '}', '[': ']'}
+        for opener in reversed(stack):
+            repaired = re.sub(r',\s*$', '', repaired.rstrip())
+            repaired += closers[opener]
+        repaired = re.sub(r',\s*([}\]])', r'\1', repaired)
+        got = _try(repaired)
+        if got is not None:
+            return got
+    return None
+
+
 async def _gh_get_json(
     client: httpx.AsyncClient,
     url: str,
@@ -280,23 +368,13 @@ async def _second_opinion(snapshot: dict, first_review: dict, llm_key: str) -> d
         api_key=llm_key,
         session_id=f'code-review-second-{datetime.now(timezone.utc).timestamp():.0f}',
         system_message=_SECOND_OPINION_PROMPT,
+        max_tokens=2048,
     ).with_model('anthropic', _SECOND_OPINION_MODEL)
     try:
         raw = await chat.send_message(UserMessage(text=user_msg))
     except Exception as e:
         return {'verdict': 'review_skipped', 'summary': f'Second-opinion failed: {str(e)[:200]}', 'concerns': [], 'reviewer_model': _SECOND_OPINION_MODEL}
-    text = (raw or '').strip()
-    if text.startswith('```'):
-        text = re.sub(r'^```[a-zA-Z]*\n?', '', text)
-        text = re.sub(r'\n?```$', '', text)
-    try:
-        parsed = json.loads(text)
-    except Exception:
-        m = re.search(r'\{.*\}', text, re.DOTALL)
-        try:
-            parsed = json.loads(m.group(0)) if m else {}
-        except Exception:
-            parsed = {}
+    parsed = _extract_json(raw or '') or {}
     return {
         'verdict': parsed.get('verdict') or 'review_skipped',
         'summary': (parsed.get('summary') or '')[:280],
@@ -430,10 +508,16 @@ async def run_code_review(project: dict, settings: dict) -> dict:
     provider, model = resolved
     llm_key = ''  # legacy placeholder — llm_router resolves the provider key itself
 
+    # Give the reviewer enough output budget to return a full JSON findings
+    # array. The old 4096 default truncated the response mid-object on any
+    # non-trivial repo, so json.loads failed and we fell back to the
+    # "LLM returned non-JSON output" path — which then got hard-gated to
+    # do_not_ship by the second opinion. 8192 comfortably fits the schema.
     chat = LlmChat(
         api_key=llm_key,
         session_id=f'code-review-{project["id"]}',
         system_message=_SYSTEM_PROMPT,
+        max_tokens=8192,
     ).with_model(provider, model)  # uses whichever provider key the operator has
 
     try:
@@ -441,21 +525,11 @@ async def run_code_review(project: dict, settings: dict) -> dict:
     except Exception as e:
         raise HTTPException(502, f'LLM error: {str(e)[:300]}')
 
-    # Robust JSON parse: strip ```json fences if the model added them.
+    # Robust JSON parse: tolerates code fences, surrounding prose, trailing
+    # commas, and truncated output (see _extract_json).
     text = (raw or '').strip()
-    if text.startswith('```'):
-        text = re.sub(r'^```[a-zA-Z]*\n?', '', text)
-        text = re.sub(r'\n?```$', '', text)
-    parsed: Optional[dict] = None
-    try:
-        parsed = json.loads(text)
-    except Exception:
-        m = re.search(r'\{.*\}', text, re.DOTALL)
-        if m:
-            try:
-                parsed = json.loads(m.group(0))
-            except Exception:
-                parsed = None
+    parsed = _extract_json(text)
+    parse_ok = parsed is not None
 
     review = parsed or {
         'summary': 'LLM returned non-JSON output (shown below in raw_text).',
@@ -479,7 +553,17 @@ async def run_code_review(project: dict, settings: dict) -> dict:
     snapshot_for_review = {**snapshot, 'repo': project['repo']}
     second = await _second_opinion(snapshot_for_review, review, llm_key)
     review['second_opinion'] = second
-    if second.get('verdict') == 'do_not_ship' and review.get('verdict') != 'do_not_ship':
+    # Escalate to do_not_ship only when the PRIMARY review actually parsed.
+    # If the primary reviewer's JSON could not be recovered, its verdict is a
+    # placeholder ("ship_with_fixes" fallback) — letting the second opinion
+    # hard-gate on top of an unparseable review was exactly what left the
+    # Deploy button permanently blocked. In that case we surface a distinct
+    # `review_incomplete` verdict so the operator can retry or force-deploy
+    # instead of being stuck.
+    if not parse_ok:
+        review['verdict'] = 'review_incomplete'
+        review['review_incomplete'] = True
+    elif second.get('verdict') == 'do_not_ship' and review.get('verdict') != 'do_not_ship':
         review['verdict_promoted_by'] = 'second_opinion'
         review['verdict'] = 'do_not_ship'
 
