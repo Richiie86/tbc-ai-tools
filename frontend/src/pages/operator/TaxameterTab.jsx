@@ -3,7 +3,7 @@ import api from '../../lib/api';
 import { toast } from 'sonner';
 import {
   Gauge, ExternalLink, Plus, Trash2, Save, Loader2, RefreshCw,
-  Zap, CircleDot, KeyRound, Check, X,
+  Zap, CircleDot, KeyRound, Check, X, Link2, Sparkles,
 } from 'lucide-react';
 import { Input } from '../../components/ui/input';
 import { Button } from '../../components/ui/button';
@@ -55,6 +55,32 @@ function StatusBadge({ m }) {
       <CircleDot className="h-3 w-3" /> Manual
     </span>
   );
+}
+
+// Shows WHY a card exists: linked to a key the operator added, or hand-made.
+function OriginBadge({ m }) {
+  if (m.origin === 'custom-key') {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full border border-sky-500/30 bg-sky-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-sky-200"
+        title="Auto-added from a custom key you saved. Delete the key to remove this card.">
+        <Sparkles className="h-3 w-3" /> Custom key
+      </span>
+    );
+  }
+  if (m.origin === 'provider-key') {
+    const set = m.key_present;
+    return (
+      <span
+        className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${
+          set ? 'border-tbc-500/30 bg-tbc-500/10 text-tbc-200' : 'border-tbc-900/60 bg-ink-950 text-tbc-200/40'
+        }`}
+        title={set ? 'A key for this provider is configured.' : 'No key configured yet — add one in My Keys.'}
+      >
+        <Link2 className="h-3 w-3" /> {set ? 'Key set' : 'No key'}
+      </span>
+    );
+  }
+  return null;
 }
 
 // Inline billing/admin-key entry — only rendered for providers that CAN go live
@@ -145,6 +171,7 @@ function MeterCard({ m, keyInfo, onChange, onRemove, onSaveKey }) {
           aria-label="Provider name"
         />
         <div className="flex items-center gap-1">
+          <OriginBadge m={m} />
           <StatusBadge m={m} />
           {m.refill_url && (
             <a href={m.refill_url} target="_blank" rel="noopener noreferrer"
@@ -153,11 +180,15 @@ function MeterCard({ m, keyInfo, onChange, onRemove, onSaveKey }) {
               Refill <ExternalLink className="h-3 w-3" />
             </a>
           )}
-          <button type="button" onClick={onRemove}
-            className="rounded-md p-1.5 text-tbc-200/40 hover:bg-rose-500/10 hover:text-rose-300"
-            title="Remove meter" aria-label="Remove meter">
-            <Trash2 className="h-3.5 w-3.5" />
-          </button>
+          {/* Auto cards are managed by their key — remove the key to remove the
+              card. Only hand-made meters get a delete button. */}
+          {!m.auto && (
+            <button type="button" onClick={onRemove}
+              className="rounded-md p-1.5 text-tbc-200/40 hover:bg-rose-500/10 hover:text-rose-300"
+              title="Remove meter" aria-label="Remove meter">
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          )}
         </div>
       </div>
 
@@ -307,9 +338,10 @@ export default function TaxameterTab() {
             <Gauge className="h-5 w-5 text-tbc-300" /> Taxameter — provider usage
           </h2>
           <p className="mt-1 max-w-2xl text-sm text-tbc-200/60">
-            Press <span className="font-semibold text-tbc-100">Sync live</span> to pull real month-to-date spend from
-            each provider&apos;s API. OpenAI and Anthropic need an admin/billing key (add it on the card); providers
-            without a public spend API stay manual and say so.
+            Every key you add anywhere in the app shows up here automatically — no setup. Press{' '}
+            <span className="font-semibold text-tbc-100">Sync live</span> to pull real month-to-date spend from each
+            provider&apos;s API. OpenAI and Anthropic need an admin/billing key (add it on the card); providers without
+            a public spend API stay manual and say so.
           </p>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">

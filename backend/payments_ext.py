@@ -726,6 +726,115 @@ def _sanitize_meter(m: dict) -> dict:
         out['source'] = m['source']
     if 'synced_at' in m and m.get('synced_at'):
         out['synced_at'] = str(m.get('synced_at'))[:40]
+    # Carry through auto-reconcile metadata (set by _reconcile_meters) so the
+    # card keeps knowing it was auto-created from a key the operator added.
+    for f in ('auto', 'key_present', 'live_supported'):
+        if f in m:
+            out[f] = bool(m.get(f))
+    if m.get('origin'):
+        out['origin'] = str(m.get('origin'))[:24]
+    if m.get('sync_reason'):
+        out['sync_reason'] = str(m.get('sync_reason'))[:200]
+    return out
+
+
+# Known provider keys (fields in payment_settings) that each earn their own
+# Taxameter card the moment the operator saves one. This is what makes "add a
+# key once → it shows up here automatically" work for first-class providers.
+_PROVIDER_KEY_METERS = {
+    'openai_api_key':     {'id': 'openai',     'provider': 'OpenAI',        'unit': 'USD',    'refill_url': 'https://platform.openai.com/account/billing/overview'},
+    'anthropic_api_key':  {'id': 'anthropic',  'provider': 'Anthropic',     'unit': 'USD',    'refill_url': 'https://console.anthropic.com/settings/billing'},
+    'gemini_api_key':     {'id': 'gemini',     'provider': 'Google Gemini', 'unit': 'USD',    'refill_url': 'https://aistudio.google.com/app/apikey'},
+    'openrouter_api_key': {'id': 'openrouter', 'provider': 'OpenRouter',    'unit': 'USD',    'refill_url': 'https://openrouter.ai/settings/credits'},
+    'groq_api_key':       {'id': 'groq',       'provider': 'Groq',          'unit': 'USD',    'refill_url': 'https://console.groq.com/settings/billing'},
+    'render_api_key':     {'id': 'render',     'provider': 'Render',        'unit': 'USD',    'refill_url': 'https://dashboard.render.com/billing'},
+    'vercel_token':       {'id': 'vercel',     'provider': 'Vercel',        'unit': 'USD',    'refill_url': 'https://vercel.com/account/billing'},
+    'github_token':       {'id': 'github',     'provider': 'GitHub',        'unit': 'USD',    'refill_url': 'https://github.com/settings/billing'},
+    'resend_api_key':     {'id': 'resend',     'provider': 'Resend',        'unit': 'emails', 'refill_url': 'https://resend.com/settings/billing'},
+    'porkbun_api_key':    {'id': 'porkbun',    'provider': 'Porkbun',       'unit': 'USD',    'refill_url': 'https://porkbun.com/account/billing'},
+}
+
+# Default cards that ALWAYS show even before a key exists (so the tab is never
+# empty and nothing the operator relies on disappears).
+_ALWAYS_SHOWN_IDS = {m['id'] for m in _DEFAULT_USAGE_METERS}
+
+
+def _num(v) -> float:
+    try:
+        n = float(v)
+        return n if n >= 0 else 0.0
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _reconcile_meters(stored: list, settings_doc: dict) -> list:
+    """Merge the operator-saved meters with everything they've actually added
+    (provider keys + custom keys) so new things appear automatically and
+    removed things disappear — while KEEPING any used/total/notes they typed."""
+    stored = stored or []
+    by_id = {m.get('id'): dict(m) for m in stored if isinstance(m, dict) and m.get('id')}
+    seen: set = set()
+    out: list = []
+
+    def _emit(template: dict, *, origin: str, key_present: bool, live_supported: bool):
+        mid = template['id']
+        prev = by_id.get(mid, {})
+        merged = {
+            'id': mid,
+            # Operator's own edits win over the template defaults.
+            'provider': (prev.get('provider') or template['provider']),
+            'unit': prev.get('unit') if prev.get('unit') in _ALLOWED_UNITS else template.get('unit', 'USD'),
+            'used': _num(prev.get('used')),
+            'total': _num(prev.get('total')),
+            'refill_url': prev.get('refill_url') or template.get('refill_url', ''),
+            'notes': prev.get('notes') or '',
+            'auto': True,
+            'origin': origin,
+            'key_present': key_present,
+            'live_supported': live_supported,
+        }
+        # Preserve live-sync results if a sync already ran for this meter.
+        for f in ('source', 'synced_at', 'sync_reason'):
+            if prev.get(f):
+                merged[f] = prev[f]
+        out.append(_sanitize_meter(merged))
+        seen.add(mid)
+
+    # 1) First-class providers: shown if they're a default card OR a key is set.
+    for field, tmpl in _PROVIDER_KEY_METERS.items():
+        present = bool((settings_doc.get(field) or '').strip())
+        if present or tmpl['id'] in _ALWAYS_SHOWN_IDS:
+            _emit(tmpl, origin='provider-key', key_present=present,
+                  live_supported=tmpl['id'] in _LIVE_PROVIDERS)
+
+    # 2) Remaining default cards with no dedicated key field (mongodb, cloudflare…).
+    for tmpl in _DEFAULT_USAGE_METERS:
+        if tmpl['id'] not in seen:
+            _emit(tmpl, origin='default', key_present=False, live_supported=False)
+
+    # 3) Every custom key the operator added → its own card (stable id).
+    for entry in (settings_doc.get('custom_keys') or []):
+        cid = f"custom:{entry.get('id')}"
+        tmpl = {
+            'id': cid,
+            'provider': entry.get('name') or 'Custom key',
+            'unit': 'USD',
+            'refill_url': '',
+        }
+        _emit(tmpl, origin='custom-key', key_present=True, live_supported=False)
+
+    # 4) Keep any purely hand-made meters the operator created themselves
+    #    (not tied to a key). Auto meters for now-deleted keys are dropped.
+    for mid, m in by_id.items():
+        if mid in seen:
+            continue
+        if m.get('auto'):
+            continue  # its backing key/provider is gone → let the card go too
+        m2 = _sanitize_meter(m)
+        m2['auto'] = False
+        m2['origin'] = 'manual'
+        out.append(m2)
+
     return out
 
 
@@ -733,10 +842,17 @@ def _sanitize_meter(m: dict) -> dict:
 async def op_get_usage_meters(_: dict = Depends(get_current_operator)):
     db = await get_db()
     doc = await db.settings.find_one({'_id': _USAGE_METERS_ID})
-    if not doc:
-        await db.settings.insert_one({'_id': _USAGE_METERS_ID, 'meters': _DEFAULT_USAGE_METERS})
-        return {'meters': _DEFAULT_USAGE_METERS, 'updated_at': None}
-    return {'meters': doc.get('meters', _DEFAULT_USAGE_METERS), 'updated_at': doc.get('updated_at')}
+    settings_doc = await db.settings.find_one({'_id': 'payment_settings'}) or {}
+    stored = (doc.get('meters') if doc else None) or []
+    meters = _reconcile_meters(stored, settings_doc)
+    # Persist the reconciled set so ids/cards stay stable across reloads.
+    now = datetime.now(timezone.utc).isoformat()
+    await db.settings.update_one(
+        {'_id': _USAGE_METERS_ID},
+        {'$set': {'meters': meters, 'updated_at': (doc or {}).get('updated_at') or now}},
+        upsert=True,
+    )
+    return {'meters': meters, 'updated_at': (doc or {}).get('updated_at')}
 
 
 @router.put('/operator/usage-meters')
@@ -914,8 +1030,9 @@ async def op_sync_usage_meters(_: dict = Depends(get_current_operator)):
     """Pull live month-to-date spend for every provider that supports it."""
     db = await get_db()
     doc = await db.settings.find_one({'_id': _USAGE_METERS_ID})
-    meters = (doc.get('meters') if doc else None) or list(_DEFAULT_USAGE_METERS)
     settings_doc = await db.settings.find_one({'_id': 'payment_settings'}) or {}
+    # Reconcile first so a key added since the last reload is synced too.
+    meters = _reconcile_meters((doc.get('meters') if doc else None) or [], settings_doc)
 
     synced = [await _sync_one_meter(dict(m), settings_doc) for m in meters]
     now = datetime.now(timezone.utc).isoformat()
