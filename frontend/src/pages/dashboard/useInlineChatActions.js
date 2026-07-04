@@ -18,7 +18,7 @@ import api from '../../lib/api';
  * The behaviour is byte-for-byte identical to the previous inline
  * version — no behaviour change, only a relocation.
  */
-export function useInlineChatActions({ navigate, messages, currentId }) {
+export function useInlineChatActions({ navigate, messages, currentId, showResult }) {
   return useCallback(async (kind) => {
     // `fix-errors` deep-links to AI Build (which has its own project
     // picker) — no need to enforce projectId here. The other actions
@@ -250,48 +250,43 @@ export function useInlineChatActions({ navigate, messages, currentId }) {
           }
           toast.dismiss(t2);
           const v2 = again?.verdict || 'completed';
-          window.alert(
-            `Pushed. Re-review verdict: ${v2}\n`
-            + (again?.summary ? `Summary: ${again.summary}` : ''),
-          );
+          showResult?.({
+            kind: 'review',
+            verdict: v2,
+            summary: again?.summary,
+            findings: again?.findings || [],
+            second: again?.second_opinion,
+            promotedBySecond: again?.verdict_promoted_by === 'second_opinion',
+            fixSession: again?.fix_chat_session_id,
+          });
           return;
         }
         const second = data?.second_opinion;
-        const lines = [
-          `Verdict: ${v}`,
-          data?.summary ? `Summary: ${data.summary}` : '',
-          second && second.verdict !== 'review_skipped'
-            ? `Cross-AI (${second.reviewer_model || 'second'}): ${second.verdict}` : '',
-          second?.summary ? `  ${second.summary}` : '',
-          second?.concerns?.length ? `Concerns:\n  • ${second.concerns.join('\n  • ')}` : '',
-          data?.verdict_promoted_by === 'second_opinion'
-            ? '⚠ Block escalated by the second reviewer.' : '',
-        ].filter(Boolean).join('\n');
-        window.alert(lines || 'Review completed');
-        // If the verdict blocks shipping, immediately give the operator a
-        // reliable one-click override so they don't have to hunt for the
-        // Deploy button and rediscover the (now-fixed) prompt dead-end.
-        if (v === 'do_not_ship') {
-          offerOverride({
-            summary: data?.summary,
-            findingsCount: (data?.findings || []).length,
-            second,
-            fixSession: data?.fix_chat_session_id,
-          });
-        }
+        // Show the color-coded verdict modal (green = OK to ship, yellow =
+        // ship with concerns, red = do not ship) with a collapsible
+        // "Read explanation" section instead of a raw window.alert().
+        showResult?.({
+          kind: 'review',
+          verdict: v,
+          summary: data?.summary,
+          findings: data?.findings || [],
+          second,
+          promotedBySecond: data?.verdict_promoted_by === 'second_opinion',
+          fixSession: data?.fix_chat_session_id,
+        });
       } else if (kind === 'health') {
         const t = toast.loading('Running health check…');
         const { data } = await api.post(`/operator/deploy/${projectId}/healthcheck`, {});
         toast.dismiss(t);
-        const okText = data?.ok ? 'OK' : 'FAILED';
-        const lines = [
-          `Health check: ${data?.status || okText}`,
-          data?.url ? `URL: ${data.url}` : '',
-          data?.http_status ? `HTTP: ${data.http_status}` : '',
-          data?.latency_ms ? `Latency: ${data.latency_ms}ms` : '',
-          data?.detail ? `Detail: ${data.detail}` : '',
-        ].filter(Boolean).join('\n');
-        window.alert(lines || `Health: ${okText}`);
+        showResult?.({
+          kind: 'health',
+          ok: !!data?.ok,
+          status: data?.status,
+          url: data?.url,
+          httpStatus: data?.http_status,
+          latencyMs: data?.latency_ms,
+          detail: data?.detail,
+        });
       }
     } catch (e) {
       // Specialised handling for the AI code-review ship-gate (412).
@@ -316,5 +311,5 @@ export function useInlineChatActions({ navigate, messages, currentId }) {
       const msg = (detail && typeof detail === 'object' && detail.message) || detail || `Quick ${kind} failed`;
       toast.error(typeof msg === 'string' ? msg : `Quick ${kind} failed`);
     }
-  }, [navigate, messages, currentId]);
+  }, [navigate, messages, currentId, showResult]);
 }

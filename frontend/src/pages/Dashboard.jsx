@@ -16,6 +16,7 @@ import { OutOfCreditsDialog } from './dashboard/OutOfCreditsDialog';
 import { DashboardGuideTour } from './dashboard/DashboardGuideTour';
 import { PostAiDeploySuggestion } from './dashboard/PostAiDeploySuggestion';
 import { useInlineChatActions } from './dashboard/useInlineChatActions';
+import ReviewResultModal from './dashboard/ReviewResultModal';
 import { useStickToBottom } from './dashboard/useStickToBottom';
 import { useChatSessionsCrud } from './dashboard/useChatSessionsCrud';
 
@@ -42,6 +43,8 @@ export default function Dashboard({ variant = 'tbc1' }) {
   // Show the "AI is done — redeploy?" banner each time the AI finishes
   // a stream. The operator can dismiss; it re-shows on the next reply.
   const [showDeploySuggest, setShowDeploySuggest] = useState(false);
+  // Color-coded verdict modal for Run Code Review / Run Health Check.
+  const [actionResult, setActionResult] = useState(null);
   const taRef = useRef(null);
   const streamTextRef = useRef('');
 
@@ -105,7 +108,9 @@ export default function Dashboard({ variant = 'tbc1' }) {
 
   // Inline "Quick actions" handler used by assistant message bubbles
   // and the End-of-Session bar.
-  const handleInlineAction = useInlineChatActions({ navigate, messages, currentId });
+  const handleInlineAction = useInlineChatActions({
+    navigate, messages, currentId, showResult: setActionResult,
+  });
 
   // Mirror live stream text so the final-message commit doesn't lose the tail.
   useEffect(() => { streamTextRef.current = streamText; }, [streamText]);
@@ -299,6 +304,11 @@ export default function Dashboard({ variant = 'tbc1' }) {
         open={outOfCreditsOpen}
         onOpenChange={setOutOfCreditsOpen}
         user={user}
+      />
+      <ReviewResultModal
+        result={actionResult}
+        onClose={() => setActionResult(null)}
+        onOpenFixChat={(sid) => navigate(`${basePath}/${sid}`)}
       />
       <DashboardGuideTour key={guideKey} forceOpen={guideKey > 0} />
       {/* Floating preview link — silently hides if no deploy project URL
