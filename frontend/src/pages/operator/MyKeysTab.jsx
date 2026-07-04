@@ -34,6 +34,8 @@ const ALL_KINDS = [
   { kind: 'vercel', setKey: 'vercel_token' },
   { kind: 'github', setKey: 'github_token' },
   { kind: 'render', setKey: 'render_api_key' },
+  { kind: 'porkbun', setKey: 'porkbun_api_key' },
+  { kind: 'porkbun_secret', setKey: 'porkbun_secret_key' },
 ];
 
 const PRETTY = {
@@ -41,6 +43,7 @@ const PRETTY = {
   openai: 'OpenAI', gemini: 'Google Gemini',
   openrouter: 'OpenRouter (300+ models)', groq: 'Groq',
   render: 'Render', resend: 'Resend', stripe: 'Stripe',
+  porkbun: 'Porkbun API key', porkbun_secret: 'Porkbun secret key',
 };
 
 export default function MyKeysTab() {
@@ -258,8 +261,8 @@ function SmartPaste({ onSaved }) {
           <h3 className="text-base font-bold text-tbc-100">Add new key</h3>
           <p className="text-xs text-tbc-200/60">
             Paste any key — Anthropic, OpenAI, Gemini, OpenRouter, Groq, Vercel,
-            GitHub or Render. We figure out what it is and file it in your list
-            automatically.
+            GitHub, Render or Porkbun (pk1_/sk1_). We figure out what it is and
+            file it in your list automatically.
           </p>
         </div>
       </div>

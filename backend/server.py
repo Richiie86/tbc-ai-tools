@@ -2419,6 +2419,8 @@ from ai_build_ext import router as ai_build_router
 app.include_router(ai_build_router)
 from ai_visual_verify_ext import router as ai_visual_verify_router
 app.include_router(ai_visual_verify_router)
+from porkbun_ext import router as porkbun_router  # noqa: E402
+app.include_router(porkbun_router)
 from storage_config_ext import router as storage_config_router
 app.include_router(storage_config_router)
 from deploy_ext import router as deploy_router

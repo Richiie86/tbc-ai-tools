@@ -5,7 +5,7 @@ import { Input } from '../../components/ui/input';
 import { toast } from 'sonner';
 import {
   KeyRound, Save, Loader2, ShieldCheck, ShieldAlert, Eye, EyeOff,
-  RotateCw, CheckCircle2, XCircle, Github, Cloud, Sparkles, Bot, Server, Zap,
+  RotateCw, CheckCircle2, XCircle, Github, Cloud, Sparkles, Bot, Server, Zap, Globe,
 } from 'lucide-react';
 
 export const KIND_META = {
@@ -64,6 +64,24 @@ export const KIND_META = {
     fieldKey: 'groq_api_key',
     placeholder: 'Paste your Groq key (gsk_…) — fast open-model inference',
     helperUrl: 'https://console.groq.com/keys',
+  },
+  porkbun: {
+    label: 'Porkbun API Key',
+    icon: Globe,
+    fieldKey: 'porkbun_api_key',
+    placeholder: 'Paste your Porkbun API key (pk1_…) — powers the Domains tab',
+    helperUrl: 'https://porkbun.com/account/api',
+    // Porkbun's API needs BOTH keys together, so a single-key live test isn't
+    // possible — the Domains tab verifies the pair with a ping instead.
+    testable: false,
+  },
+  porkbun_secret: {
+    label: 'Porkbun Secret Key',
+    icon: Globe,
+    fieldKey: 'porkbun_secret_key',
+    placeholder: 'Paste your Porkbun secret key (sk1_…) — pairs with the API key',
+    helperUrl: 'https://porkbun.com/account/api',
+    testable: false,
   },
 };
 
@@ -270,16 +288,18 @@ export function SecretRow({ kind, isSet, masked, rotatedAt, onChanged }) {
             {reveal ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
           </button>
         </div>
-        <Button
-          variant="outline"
-          disabled={!draft || testing || saving}
-          onClick={runTest}
-          data-testid={`secret-test-${kind}`}
-          className="border-tbc-900/60 bg-ink-900 text-tbc-100 hover:bg-ink-950"
-        >
-          {testing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="mr-1 h-3.5 w-3.5" />}
-          Test
-        </Button>
+        {meta.testable !== false && (
+          <Button
+            variant="outline"
+            disabled={!draft || testing || saving}
+            onClick={runTest}
+            data-testid={`secret-test-${kind}`}
+            className="border-tbc-900/60 bg-ink-900 text-tbc-100 hover:bg-ink-950"
+          >
+            {testing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="mr-1 h-3.5 w-3.5" />}
+            Test
+          </Button>
+        )}
         <Button
           disabled={!draft || saving}
           onClick={save}

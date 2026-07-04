@@ -9,7 +9,7 @@ import {
   Code2, Sparkles, Wallet, KeyRound, Settings as SettingsIcon, Coins,
   FolderKanban, Activity, ScrollText, Megaphone, MessageCircle, FlaskConical,
   TrendingUp, Lock, Brain, Network, TestTube, AlertOctagon, Wand2, Link2,
-  Calculator, Gauge, Archive, BrainCircuit, Wrench, Server,
+  Calculator, Gauge, Archive, BrainCircuit, Wrench, Server, Globe,
 } from 'lucide-react';
 
 import PlansTab     from './operator/PlansTab';
@@ -32,6 +32,7 @@ import AITestBenchTab from './operator/AITestBenchTab';
 import ErrorsTab from './operator/ErrorsTab';
 import AIBuildTab from './operator/AIBuildTab';
 import MyKeysTab from './operator/MyKeysTab';
+import DomainsTab from './operator/DomainsTab';
 import ServerTab from './operator/ServerTab';
 import AmAiTab from './operator/AmAiTab';
 import ToolsTab from './operator/ToolsTab';
@@ -224,6 +225,7 @@ export default function Operator() {
                 <TabTrigger value="treasury"  icon={Wallet}>Treasury</TabTrigger>
                 <TabTrigger value="money"     icon={DollarSign}>Money</TabTrigger>
                 <TabTrigger value="keys"      icon={KeyRound}>My Keys</TabTrigger>
+                <TabTrigger value="domains"   icon={Globe}>Domains</TabTrigger>
                 <TabTrigger value="amai"      icon={BrainCircuit}>amAI</TabTrigger>
                 <TabTrigger value="tools"     icon={Wrench}>AI Tools</TabTrigger>
                 <TabTrigger value="licenses"  icon={KeyRound}>Licenses</TabTrigger>
@@ -260,6 +262,7 @@ export default function Operator() {
               <TabsContent value="treasury"  className="mt-5"><TreasuryTab /></TabsContent>
               <TabsContent value="money"     className="mt-5"><MoneyTab /></TabsContent>
               <TabsContent value="keys"      className="mt-5"><MyKeysTab /></TabsContent>
+              <TabsContent value="domains"   className="mt-5"><DomainsTab /></TabsContent>
               <TabsContent value="amai"      className="mt-5"><AmAiTab /></TabsContent>
               <TabsContent value="tools"     className="mt-5"><ToolsTab /></TabsContent>
               <TabsContent value="licenses"  className="mt-5"><LicensesTab /></TabsContent>

@@ -28,6 +28,12 @@ function classify(result) {
       ? { tone: 'green', headline: 'Healthy — OK to ship' }
       : { tone: 'red', headline: 'Unhealthy — do not ship' };
   }
+  if (result.kind === 'deploy') {
+    if (!result.ok) return { tone: 'red', headline: 'Deploy failed' };
+    return result.bypassed
+      ? { tone: 'yellow', headline: 'Deployed — shipped despite review' }
+      : { tone: 'green', headline: 'Deployed — shipped' };
+  }
   switch (result.verdict) {
     case 'ship':
     case 'ok':
@@ -93,6 +99,12 @@ export default function ReviewResultModal({ result, onClose, onOpenFixChat }) {
   const tone = TONES[cls.tone] || TONES.yellow;
   const { Icon } = tone;
   const isReview = result.kind === 'review';
+  const isDeploy = result.kind === 'deploy';
+  const title = isReview
+    ? 'Code review result'
+    : isDeploy
+      ? 'Deploy result'
+      : 'Health check result';
 
   const findings = isReview ? (result.findings || []) : [];
   const concerns = isReview ? (result.second?.concerns || []) : [];
@@ -107,7 +119,7 @@ export default function ReviewResultModal({ result, onClose, onOpenFixChat }) {
       <DialogContent className="border-slate-800 bg-slate-900 text-slate-100 sm:max-w-lg">
         <DialogHeader>
           <DialogTitle className="text-slate-200">
-            {isReview ? 'Code review result' : 'Health check result'}
+            {title}
           </DialogTitle>
         </DialogHeader>
 

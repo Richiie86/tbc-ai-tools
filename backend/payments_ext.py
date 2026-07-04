@@ -803,6 +803,14 @@ async def op_get_settings(_: dict = Depends(get_current_operator)):
         'groq_api_key_set': bool(doc.get('groq_api_key')),
         'groq_api_key_masked': _mask_key(doc.get('groq_api_key')),
         'groq_api_key_rotated_at': doc.get('groq_api_key_rotated_at'),
+        # Porkbun registrar — a public API key + secret key power the Domains
+        # tab (list domains, check availability, manage DNS).
+        'porkbun_api_key_set': bool(doc.get('porkbun_api_key')),
+        'porkbun_api_key_masked': _mask_key(doc.get('porkbun_api_key')),
+        'porkbun_api_key_rotated_at': doc.get('porkbun_api_key_rotated_at'),
+        'porkbun_secret_key_set': bool(doc.get('porkbun_secret_key')),
+        'porkbun_secret_key_masked': _mask_key(doc.get('porkbun_secret_key')),
+        'porkbun_secret_key_rotated_at': doc.get('porkbun_secret_key_rotated_at'),
         # Outbound webhook for ship-and-watch events.
         'deploy_webhook_url': doc.get('deploy_webhook_url') or '',
         'deploy_webhook_secret_set': bool(doc.get('deploy_webhook_secret')),
@@ -842,6 +850,7 @@ async def op_update_settings(payload: dict, _: dict = Depends(get_current_operat
         # Deploy & AI surface — same gate as the rest of the settings doc.
         'vercel_token', 'vercel_team_id', 'ai_api_key',
         'anthropic_api_key', 'openai_api_key', 'gemini_api_key', 'openrouter_api_key', 'render_api_key', 'groq_api_key',
+        'porkbun_api_key', 'porkbun_secret_key',
         'deploy_webhook_url', 'deploy_webhook_secret',
         'self_repo', 'self_git_ref', 'self_vercel_project_id',
         'github_token',
@@ -854,6 +863,7 @@ async def op_update_settings(payload: dict, _: dict = Depends(get_current_operat
     rotation_tracked = {
         'vercel_token', 'github_token',
         'anthropic_api_key', 'openai_api_key', 'gemini_api_key', 'openrouter_api_key', 'render_api_key', 'groq_api_key',
+        'porkbun_api_key', 'porkbun_secret_key',
     }
     for k, v in payload.items():
         if k not in allowed:
@@ -873,10 +883,10 @@ async def op_update_settings(payload: dict, _: dict = Depends(get_current_operat
 @router.post('/operator/settings/clear')
 async def op_clear_secret(key: str = Query(...), _: dict = Depends(get_current_operator)):
     db = await get_db()
-    if key not in {'stripe_secret_key', 'nowpayments_api_key', 'nowpayments_ipn_secret', 'paypal_client_id', 'paypal_client_secret', 'resend_api_key', 'vercel_token', 'ai_api_key', 'github_token', 'anthropic_api_key', 'openai_api_key', 'gemini_api_key', 'openrouter_api_key', 'render_api_key', 'groq_api_key'}:
+    if key not in {'stripe_secret_key', 'nowpayments_api_key', 'nowpayments_ipn_secret', 'paypal_client_id', 'paypal_client_secret', 'resend_api_key', 'vercel_token', 'ai_api_key', 'github_token', 'anthropic_api_key', 'openai_api_key', 'gemini_api_key', 'openrouter_api_key', 'render_api_key', 'groq_api_key', 'porkbun_api_key', 'porkbun_secret_key'}:
         raise HTTPException(400, 'Cannot clear this key')
     unset_extra = {}
-    if key in {'vercel_token', 'github_token', 'anthropic_api_key', 'openai_api_key', 'gemini_api_key', 'openrouter_api_key', 'render_api_key', 'groq_api_key'}:
+    if key in {'vercel_token', 'github_token', 'anthropic_api_key', 'openai_api_key', 'gemini_api_key', 'openrouter_api_key', 'render_api_key', 'groq_api_key', 'porkbun_api_key', 'porkbun_secret_key'}:
         unset_extra[f'{key}_rotated_at'] = None
     await db.settings.update_one(
         {'_id': 'payment_settings'},
@@ -1025,8 +1035,15 @@ _KIND_TO_FIELD = {
     'resend': 'resend_api_key',
     'stripe': 'stripe_secret_key',
     'groq': 'groq_api_key',
+    # Porkbun is a domain registrar and needs BOTH a public API key (`pk1_`)
+    # and a secret key (`sk1_`). Each pasted key files into its own field.
+    'porkbun': 'porkbun_api_key',
+    'porkbun_secret': 'porkbun_secret_key',
 }
-_ROTATION_STAMPED = {'vercel_token', 'github_token', 'anthropic_api_key', 'openai_api_key', 'gemini_api_key', 'openrouter_api_key', 'render_api_key', 'groq_api_key'}
+_ROTATION_STAMPED = {'vercel_token', 'github_token', 'anthropic_api_key', 'openai_api_key', 'gemini_api_key', 'openrouter_api_key', 'render_api_key', 'groq_api_key', 'porkbun_api_key', 'porkbun_secret_key'}
+# Porkbun keys can't be validated alone (its API requires the API key AND the
+# secret key together), so auto-detect saves them without a live provider ping.
+_SAVE_WITHOUT_VALIDATION = {'porkbun', 'porkbun_secret'}
 
 
 def _detect_key_kind(value: str) -> Optional[str]:
@@ -1038,6 +1055,12 @@ def _detect_key_kind(value: str) -> Optional[str]:
     """
     v = value.strip()
     low = v.lower()
+    # Porkbun keys have distinct prefixes: API key `pk1_`, secret key `sk1_`.
+    # Check these first so `sk1_` can never be mis-read as an OpenAI `sk-` key.
+    if low.startswith('pk1_'):
+        return 'porkbun'
+    if low.startswith('sk1_'):
+        return 'porkbun_secret'
     if low.startswith('sk-ant-'):
         return 'anthropic'
     # OpenRouter keys start with `sk-or-` — check before the generic `sk-`
@@ -1097,6 +1120,12 @@ async def op_auto_detect_key(
                 "field for it (Vercel/GitHub/Anthropic/OpenAI/Gemini/OpenRouter/Render/Groq).",
             )
 
+    # Porkbun keys can't be validated in isolation — save straight away and
+    # let the Domains tab verify the pair with a live ping.
+    if kind in _SAVE_WITHOUT_VALIDATION:
+        verdict = {'ok': True, 'identity': None}
+        do_validate = False
+
     if do_validate and verdict is None:
         verdict = await _validate_key(kind, value)
         if not verdict.get('ok'):
@@ -1111,13 +1140,14 @@ async def op_auto_detect_key(
         updates[f'{field}_rotated_at'] = datetime.now(timezone.utc).isoformat()
     await db.settings.update_one({'_id': 'payment_settings'}, {'$set': updates}, upsert=True)
 
+    _pretty = {'porkbun': 'Porkbun API', 'porkbun_secret': 'Porkbun secret'}.get(kind, kind.title())
     return {
         'kind': kind,
         'field': field,
         'saved': True,
         'ok': True,
         'identity': (verdict or {}).get('identity'),
-        'message': f"Detected {kind.title()} key and saved it.",
+        'message': f"Detected {_pretty} key and saved it.",
     }
 
 

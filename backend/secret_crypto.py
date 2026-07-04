@@ -57,6 +57,8 @@ SECRET_FIELDS = frozenset({
     'paypal_client_secret',
     'resend_api_key',
     'ai_api_key',
+    'porkbun_api_key',
+    'porkbun_secret_key',
 })
 
 
