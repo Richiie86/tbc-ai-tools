@@ -189,6 +189,33 @@ export function InChatDeployControls({ user }) {
       // Backend 412 with structured `repo_not_configured` error → the
       // operator hasn't set their GitHub repo yet. Surface a sticky
       // toast with a "Configure now" action that jumps to Settings.
+      // Backend 412 ship-gate: the AI code review returned do_not_ship.
+      // Give the operator a reliable one-click override (toast action —
+      // native prompt/confirm get suppressed after repeated clicks).
+      if (status === 412 && detail?.error === 'review_blocked') {
+        toast.error('Deploy blocked by AI code review', {
+          description: `${detail.review?.summary || 'Verdict: do_not_ship.'} You are the operator — you can override and ship.`,
+          duration: Infinity,
+          action: {
+            label: 'Deploy anyway',
+            onClick: async () => {
+              const t = toast.loading('Overriding review & deploying…');
+              try {
+                const { data } = await api.post(`/operator/deploy/${selectedId}/deploy`, { bypass_review: true });
+                toast.dismiss(t);
+                toast.success(`Deploy queued — ${data?.url || data?.deployment_id || 'OK'}`);
+              } catch (e2) {
+                toast.dismiss(t);
+                toast.error(e2?.response?.data?.detail?.message || e2?.response?.data?.detail || 'Forced deploy failed');
+              }
+            },
+          },
+          cancel: detail.fix_chat_session_id
+            ? { label: 'Open fix chat', onClick: () => { window.location.href = `/dashboard/${detail.fix_chat_session_id}`; } }
+            : { label: 'Dismiss', onClick: () => {} },
+        });
+        return;
+      }
       if (status === 412 && detail?.error === 'repo_not_configured') {
         toast.error(detail.message || 'GitHub repo not configured', {
           duration: 15000,

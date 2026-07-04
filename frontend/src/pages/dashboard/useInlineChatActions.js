@@ -78,6 +78,48 @@ export function useInlineChatActions({ navigate, messages, currentId }) {
       }
     };
 
+    // Robust operator override for the `do_not_ship` ship-gate.
+    //
+    // The old flow used window.prompt("type force") / window.confirm to
+    // collect the override. That is the actual reason Deploy felt broken:
+    // after a few clicks browsers show "prevent this page from creating
+    // additional dialogs" and then EVERY subsequent prompt()/confirm()
+    // returns null instantly — so the operator's "force" never registered
+    // and the deploy was silently cancelled. Toast action buttons are NOT
+    // subject to that suppression, so a single click reliably ships.
+    const offerOverride = ({ summary, findingsCount, second, fixSession }) => {
+      const desc = [
+        summary || 'The AI code review returned do_not_ship.',
+        findingsCount ? `${findingsCount} finding${findingsCount === 1 ? '' : 's'}.` : '',
+        second && second.verdict && second.verdict !== 'review_skipped'
+          ? `Cross-AI: ${second.verdict}.` : '',
+        'You are the operator — you can override and ship.',
+      ].filter(Boolean).join(' ');
+      toast.error('Deploy blocked by AI code review', {
+        description: desc,
+        duration: Infinity,
+        action: {
+          label: 'Deploy anyway',
+          onClick: () => {
+            const t = toast.loading('Overriding review & deploying…');
+            runDeploy(true)
+              .then(() => toast.dismiss(t))
+              .catch((e2) => {
+                toast.dismiss(t);
+                toast.error(
+                  e2?.response?.data?.detail?.message
+                  || e2?.response?.data?.detail
+                  || 'Forced deploy failed',
+                );
+              });
+          },
+        },
+        cancel: fixSession
+          ? { label: 'Open fix chat', onClick: () => navigate(`/dashboard/${fixSession}`) }
+          : { label: 'Dismiss', onClick: () => { /* just close */ } },
+      });
+    };
+
     // Auto cross-AI review before the deploy fires. Operator requested
     // "deploy auto-runs the testing agent for all AIs" — we surface the
     // review verdict in-chat first so they see it, then chain into the
@@ -120,22 +162,15 @@ export function useInlineChatActions({ navigate, messages, currentId }) {
           }
         }
         if (v === 'do_not_ship') {
-          const msg = `Review blocked deploy.\n\n`
-            + `Primary verdict: ${v}\n`
-            + (data?.summary ? `Summary: ${data.summary}\n` : '')
-            + (second && second.verdict !== 'review_skipped'
-                ? `Second opinion (${second.reviewer_model || 'cross-AI'}): ${second.verdict}\n`
-                + (second.summary ? `  ${second.summary}\n` : '')
-                + (second.concerns?.length ? `  • ${second.concerns.slice(0,3).join('\n  • ')}\n` : '')
-                : '')
-            + (promotedBy === 'second_opinion' ? `⚠ Block escalated by the second reviewer.\n` : '')
-            + `\nType one:\n  fix   → open the AI fix chat\n  force → deploy anyway\n  (blank) → cancel`;
-          const choice = (window.prompt(msg, 'fix') || '').trim().toLowerCase();
-          if (choice === 'force') {
-            try { await runDeploy(true); } catch (e2) {
-              toast.error(e2?.response?.data?.detail?.message || e2?.response?.data?.detail || 'Forced deploy failed');
-            }
-          }
+          // Surface a reliable, click-to-override toast instead of a native
+          // prompt (see offerOverride for why prompt() was the real bug).
+          offerOverride({
+            summary: data?.summary
+              + (promotedBy === 'second_opinion' ? ' (block escalated by the second reviewer)' : ''),
+            findingsCount: (data?.findings || []).length,
+            second,
+            fixSession: data?.fix_chat_session_id,
+          });
           return false;
         }
         const note = v === 'ship_with_concerns' || v === 'ship_with_fixes'
@@ -222,6 +257,17 @@ export function useInlineChatActions({ navigate, messages, currentId }) {
             ? '⚠ Block escalated by the second reviewer.' : '',
         ].filter(Boolean).join('\n');
         window.alert(lines || 'Review completed');
+        // If the verdict blocks shipping, immediately give the operator a
+        // reliable one-click override so they don't have to hunt for the
+        // Deploy button and rediscover the (now-fixed) prompt dead-end.
+        if (v === 'do_not_ship') {
+          offerOverride({
+            summary: data?.summary,
+            findingsCount: (data?.findings || []).length,
+            second,
+            fixSession: data?.fix_chat_session_id,
+          });
+        }
       } else if (kind === 'health') {
         const t = toast.loading('Running health check…');
         const { data } = await api.post(`/operator/deploy/${projectId}/healthcheck`, {});
@@ -245,38 +291,14 @@ export function useInlineChatActions({ navigate, messages, currentId }) {
         && detail && typeof detail === 'object'
         && detail.error === 'review_blocked';
       if (kind === 'deploy' && isReviewBlock) {
-        const findings = detail.review?.findings || [];
-        const summary = detail.review?.summary || '';
-        const second = detail.review?.second_opinion;
         const promotedBy = detail.review?.verdict_promoted_by;
-        const fixSession = detail.fix_chat_session_id;
-        const choice = window.prompt(
-          `AI code review blocked this production deploy.\n\n`
-          + (summary ? `Summary: ${summary}\n` : '')
-          + (findings.length ? `Findings: ${findings.length}\n` : '')
-          + (second && second.verdict !== 'review_skipped'
-            ? `Cross-AI second opinion (${second.reviewer_model || 'second model'}): ${second.verdict}`
-              + (second.summary ? ` — ${second.summary}` : '') + '\n'
-              + (second.concerns?.length ? `  • ${second.concerns.slice(0,3).join('\n  • ')}\n` : '')
-            : '')
-          + (promotedBy === 'second_opinion'
-            ? `⚠ Block escalated by the second reviewer (primary said ship).\n` : '')
-          + `\nType one and press OK:\n`
-          + `  fix   → open the AI fix chat\n`
-          + `  force → deploy anyway (override the gate)\n`
-          + `  (blank) → cancel`,
-          'fix',
-        );
-        const c = (choice || '').trim().toLowerCase();
-        if (c === 'force') {
-          try {
-            await runDeploy(true);
-          } catch (e2) {
-            toast.error(e2?.response?.data?.detail?.message || e2?.response?.data?.detail || 'Forced deploy failed');
-          }
-        } else if (c === 'fix' && fixSession) {
-          navigate(`/dashboard/${fixSession}`);
-        }
+        offerOverride({
+          summary: (detail.review?.summary || '')
+            + (promotedBy === 'second_opinion' ? ' (block escalated by the second reviewer)' : ''),
+          findingsCount: (detail.review?.findings || []).length,
+          second: detail.review?.second_opinion,
+          fixSession: detail.fix_chat_session_id,
+        });
         return;
       }
       // Generic path: detail may be a string OR a structured object.
