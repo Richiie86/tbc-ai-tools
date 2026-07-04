@@ -606,6 +606,14 @@ async def op_code_review(
     _user: dict = Depends(get_current_operator),
 ):
     """Run an AI code review on this project's repo."""
+    # Rate-limit this LLM-backed (and expensive) endpoint per operator so it
+    # can't be triggered in a tight loop. Generous default; tunable via env.
+    from rate_limit import rate_limit_operator
+    rate_limit_operator(
+        _user, 'code-review:run',
+        limit=int(os.environ.get('CODE_REVIEW_LIMIT', '10')),
+        window_seconds=int(os.environ.get('CODE_REVIEW_WINDOW', '60')),
+    )
     project = await db.deploy_projects.find_one({'id': project_id})
     if not project and project_id == SELF_PROJECT_ID:
         project = await _ensure_self_project()

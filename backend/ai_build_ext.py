@@ -61,11 +61,11 @@ _PLAN_RATE_WINDOW = int(os.environ.get('AI_BUILD_PLAN_WINDOW', '60'))
 _PR_RATE_LIMIT = int(os.environ.get('AI_BUILD_PR_LIMIT', '20'))
 _PR_RATE_WINDOW = int(os.environ.get('AI_BUILD_PR_WINDOW', '60'))
 
-# Model used for the cross-AI patch reviewer. The old hardcoded
-# "claude-opus-4-5" is NOT a real model id and the provider gateway
-# rejected it ("Invalid model name passed in model=claude-opus-4-5"),
-# crashing every cross-AI review. Default to the proven-working Sonnet 4.5;
-# operators can override with the SECOND_OPINION_MODEL env var.
+# Model id for the cross-AI patch reviewer. Resolved from the
+# SECOND_OPINION_MODEL env var so operators can point it at any provider/model
+# without a code change; the default below is a current, provider-validated
+# Anthropic model. (A previously hardcoded, non-existent id was removed — it
+# was rejected by the gateway and broke cross-AI review.)
 _CROSS_AI_REVIEW_MODEL = (
     os.environ.get('SECOND_OPINION_MODEL') or 'claude-sonnet-4-5-20250929'
 )

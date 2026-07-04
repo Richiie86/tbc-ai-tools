@@ -1334,6 +1334,16 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
     """
     from llm_router import LlmChat, UserMessage, TextDelta, StreamDone, ImageContent
 
+    # Rate-limit the LLM-backed chat endpoint so a single account can't drive
+    # unbounded paid model spend via rapid-fire requests. Generous default so
+    # normal interactive use is never affected; tunable via env.
+    from rate_limit import rate_limit_operator
+    rate_limit_operator(
+        user, 'chat:stream',
+        limit=int(os.environ.get('CHAT_STREAM_LIMIT', '30')),
+        window_seconds=int(os.environ.get('CHAT_STREAM_WINDOW', '60')),
+    )
+
     db_user = await db.users.find_one({'id': user['sub']})
     if not db_user:
         raise HTTPException(404, 'User not found')
@@ -2452,7 +2462,19 @@ app.include_router(user_analytics_router)
 # built-in middleware now owns the actual response headers + preflight
 # handling so we don't accidentally drop credentials on production.
 _cors_env = (os.environ.get('CORS_ORIGINS') or '').strip()
+_is_prod_cors = os.environ.get('TBC_ENV', 'production').lower() not in (
+    'dev', 'development', 'test', 'local',
+)
+if _cors_env == '*' and _is_prod_cors:
+    # Refuse a wildcard CORS policy in production — fall through to the locked
+    # tbctools.org regex below. (Even here credentials would be disabled, but a
+    # wildcard origin has no place on a production auth surface.)
+    logger.warning(
+        "[cors] CORS_ORIGINS='*' ignored in production; using locked origin policy."
+    )
+    _cors_env = ''
 if _cors_env == '*':
+    # Non-production only: wildcard origins WITHOUT credentials (spec-safe combo).
     app.add_middleware(
         CORSMiddleware,
         allow_origins=['*'],
