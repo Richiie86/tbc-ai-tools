@@ -22,7 +22,17 @@ services:
         sync: false
       - key: RESET_OPERATOR_PASSWORD
         value: "false"
+      # Set your allowed frontend origins in the Render dashboard (comma-
+      # separated). Leave unset to fall back to the locked-origin policy in
+      # server.py (tbctools.org + any PRIMARY_DOMAIN below). Never hardcode
+      # origins here — that would override the flexible env config and commit
+      # production domains to version control.
       - key: CORS_ORIGINS
-        value: "https://tbctools.org,https://www.tbctools.org"
+        sync: false
+      # Optional: your own launch domain. When set, the fallback CORS policy
+      # and previews automatically trust `https://<PRIMARY_DOMAIN>` and its
+      # subdomains — so a deploy "just works" on the domain you chose.
+      - key: PRIMARY_DOMAIN
+        sync: false
       - key: ANTHROPIC_API_KEY
         sync: false

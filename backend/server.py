@@ -8,6 +8,7 @@ Endpoints:
 - Operator: admin routes (users, transactions, contacts)
 """
 import os
+import re
 import json
 import hashlib
 import logging
@@ -2515,10 +2516,24 @@ elif _cors_env:
         expose_headers=['*'],
     )
 else:
+    # Locked-origin fallback when CORS_ORIGINS isn't set. Always trusts
+    # tbctools.org; ALSO trusts the operator's own PRIMARY_DOMAIN (and its
+    # subdomains) when configured, so a deploy on a custom domain works
+    # out-of-the-box without hand-maintaining an origin list.
+    _allowed_hosts = ['tbctools\\.org']
+    _primary = (os.environ.get('PRIMARY_DOMAIN') or '').strip().lower()
+    # Strip any scheme/path the operator may have pasted, keep the bare host.
+    _primary = re.sub(r'^https?://', '', _primary).strip('/').split('/')[0]
+    if _primary and _primary != 'tbctools.org':
+        _allowed_hosts.append(re.escape(_primary))
+    _cors_fallback_regex = (
+        r'^https://([a-z0-9-]+\.)?(' + '|'.join(_allowed_hosts) + r')(:\d+)?$'
+    )
+    logger.info("[cors] locked-origin fallback active for: %s", ', '.join(
+        h.replace('\\', '') for h in _allowed_hosts))
     app.add_middleware(
         CORSMiddleware,
-        # Production domain (+ optional `www.` / other subdomain prefix).
-        allow_origin_regex=r'^https://([a-z0-9-]+\.)?(tbctools\.org|www\.tbctools\.org)(:\d+)?$',
+        allow_origin_regex=_cors_fallback_regex,
         allow_credentials=True,
         allow_methods=['*'],
         allow_headers=['*'],

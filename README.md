@@ -68,9 +68,15 @@ and [`frontend/.env.example`](frontend/.env.example). Key ones:
 | `OPERATOR_EMAIL`     |    Yes   | Bootstrap operator login                       |
 | `OPERATOR_PASSWORD`  |    Yes   | Bootstrap operator password (rotate after use) |
 | `ANTHROPIC_API_KEY`  | One LLM  | LLM provider key (or `OPENAI_API_KEY`/`GEMINI_API_KEY`/`OPENROUTER_API_KEY`/`GROQ_API_KEY`) |
-| `CORS_ORIGINS`       |    No    | Comma-separated allow-list (default: prod regex)|
+| `CORS_ORIGINS`       |    No    | Comma-separated allow-list. Unset → locked fallback (see below) |
+| `PRIMARY_DOMAIN`     |    No    | Your launch domain. Trusted by the CORS fallback + previews so a deploy works on the domain you chose |
 | `GITHUB_TOKEN`       |    No    | Repo review + deploy                           |
 | `SECOND_OPINION_MODEL`|   No    | Override cross-AI reviewer model               |
+
+**CORS / custom domains:** if `CORS_ORIGINS` is set it is used verbatim.
+Otherwise the server trusts `tbctools.org` **and** `https://<PRIMARY_DOMAIN>`
+(plus its subdomains) with credentials — so deploying on your own domain is
+just one env var, no code changes.
 
 Real `.env` files are git-ignored — never commit secrets. Only the
 `.env.example` templates are tracked.
@@ -83,6 +89,9 @@ pip install -r requirements.txt
 # Integration tests that need a live login read credentials from env vars
 # and SKIP when unset — no secrets are stored in the test sources:
 export TEST_OPERATOR_EMAIL=...    TEST_OPERATOR_PASSWORD=...
+# If the operator account has 2FA enabled, ALSO export the TOTP secret,
+# otherwise the 2FA login tests silently skip and CI gives false green:
+export TEST_OPERATOR_TOTP_SECRET=...   # base32 secret from the authenticator setup
 pytest
 ```
 
