@@ -8,8 +8,11 @@ services:
     startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /api/
     envVars:
+      # Render only offers 3.11.x / 3.12.x — 3.13.4 does not exist there and
+      # made every deploy fail instantly on the build step. Pin a real,
+      # supported version.
       - key: PYTHON_VERSION
-        value: "3.13.4"
+        value: "3.12.7"
       - key: MONGO_URL
         sync: false
       - key: DB_NAME
