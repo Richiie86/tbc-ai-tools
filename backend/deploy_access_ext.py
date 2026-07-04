@@ -57,6 +57,37 @@ async def _request_to_out(doc: dict) -> dict:
     }
 
 
+async def _notify_operators(subject: str, body: str) -> int:
+    """Drop an in-app notification into every operator's inbox (the bell in
+    the header). Best-effort: never raises, so it can't break the caller."""
+    try:
+        from notifications_ext import Notification
+        ops = [op async for op in db.users.find({'role': 'operator'}, {'id': 1})]
+        if not ops:
+            return 0
+        docs = [
+            Notification(user_id=op['id'], kind='dm',
+                         subject=subject[:200], body=body[:1000]).model_dump()
+            for op in ops
+        ]
+        await db.user_notifications.insert_many(docs)
+        return len(docs)
+    except Exception:  # noqa: BLE001
+        logger.warning('Could not notify operators (subject=%s)', subject, exc_info=True)
+        return 0
+
+
+async def _notify_user(user_id: str, subject: str, body: str) -> None:
+    """Best-effort in-app notification to a single user."""
+    try:
+        from notifications_ext import Notification
+        await db.user_notifications.insert_one(Notification(
+            user_id=user_id, kind='dm', subject=subject[:200], body=body[:1000],
+        ).model_dump())
+    except Exception:  # noqa: BLE001
+        logger.warning('Could not notify user %s (subject=%s)', user_id, subject, exc_info=True)
+
+
 # ---------- Models ---------------------------------------------------
 class RequestBody(BaseModel):
     message: Optional[str] = Field(default=None, max_length=500)
@@ -129,6 +160,15 @@ async def me_request_access(
     }
     await db.deploy_access_requests.insert_one(doc)
     logger.info('Deploy access requested by %s (%s)', doc['user_email'], doc['id'])
+    who = doc['user_email'] or doc['user_name'] or doc['user_id']
+    await _notify_operators(
+        subject='New deploy access request',
+        body=(
+            f'{who} has requested permission to deploy. '
+            f'{("Message: " + doc["message"]) if doc["message"] else "No message provided."} '
+            'Review it under Users \u2192 Deploy, or the deploy-access requests queue, to approve or reject.'
+        ),
+    )
     return await _request_to_out(doc)
 
 
@@ -171,6 +211,17 @@ async def _decide_request(req_id: str, decision: str, operator: dict) -> dict:
         )
         logger.info('Granted deploy access to %s (%s) by %s',
                     doc.get('user_email'), doc['user_id'], operator.get('email'))
+        await _notify_user(
+            doc['user_id'],
+            subject='Deploy access approved',
+            body='Your request to deploy has been approved. You can now deploy your projects from the dashboard.',
+        )
+    else:
+        await _notify_user(
+            doc['user_id'],
+            subject='Deploy access request declined',
+            body='Your request to deploy was not approved this time. Reach out to us if you have questions.',
+        )
     fresh = await db.deploy_access_requests.find_one({'id': req_id})
     return await _request_to_out(fresh)
 
