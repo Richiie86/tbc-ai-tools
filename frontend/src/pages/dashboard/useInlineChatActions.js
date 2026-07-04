@@ -162,16 +162,25 @@ export function useInlineChatActions({ navigate, messages, currentId }) {
           }
         }
         if (v === 'do_not_ship') {
-          // Surface a reliable, click-to-override toast instead of a native
-          // prompt (see offerOverride for why prompt() was the real bug).
-          offerOverride({
-            summary: data?.summary
-              + (promotedBy === 'second_opinion' ? ' (block escalated by the second reviewer)' : ''),
-            findingsCount: (data?.findings || []).length,
-            second,
-            fixSession: data?.fix_chat_session_id,
+          // The operator is the final authority over their own deploys. A
+          // do_not_ship verdict is now ADVISORY on the deploy path: we show
+          // the verdict for visibility but do NOT stop the deploy or force a
+          // second "Deploy anyway" click. We return the 'bypass' signal so
+          // the caller ships immediately with bypass_review=true.
+          const findingsCount = (data?.findings || []).length;
+          toast.warning('Deploying despite AI review (do_not_ship)', {
+            description: [
+              data?.summary || 'The AI code review returned do_not_ship.',
+              findingsCount ? `${findingsCount} finding${findingsCount === 1 ? '' : 's'}.` : '',
+              promotedBy === 'second_opinion' ? 'Block escalated by the second reviewer.' : '',
+              'You can review findings anytime via Run Code Review.',
+            ].filter(Boolean).join(' '),
+            duration: 8000,
+            action: data?.fix_chat_session_id
+              ? { label: 'Open fix chat', onClick: () => navigate(`/dashboard/${data.fix_chat_session_id}`) }
+              : undefined,
           });
-          return false;
+          return 'bypass';
         }
         const note = v === 'ship_with_concerns' || v === 'ship_with_fixes'
           ? `Review: ${v}${second?.concerns?.length ? ` · ${second.concerns.length} cross-AI concern${second.concerns.length === 1 ? '' : 's'}` : ''}`
@@ -199,12 +208,14 @@ export function useInlineChatActions({ navigate, messages, currentId }) {
         return;
       }
       if (kind === 'deploy') {
-        // Auto-run the cross-AI review FIRST. If it blocks, previewReview
-        // handles the fix/force prompt itself (and may have already fired
-        // the deploy with bypass=true). If it passes, we proceed.
+        // Auto-run the cross-AI review FIRST for visibility. It returns:
+        //   false     -> genuinely can't deploy (e.g. empty repo) — stop.
+        //   'bypass'  -> do_not_ship, but operator is final authority — ship
+        //                with bypass_review=true (verdict already surfaced).
+        //   true      -> clean/advisory verdict — ship normally.
         const ok = await previewReview();
-        if (!ok) return;
-        await runDeploy(false);
+        if (ok === false) return;
+        await runDeploy(ok === 'bypass');
       } else if (kind === 'review') {
         const t = toast.loading('Running cross-AI code review…');
         let data;
