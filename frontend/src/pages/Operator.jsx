@@ -37,8 +37,10 @@ import ServerTab from './operator/ServerTab';
 import AmAiTab from './operator/AmAiTab';
 import ToolsTab from './operator/ToolsTab';
 import LinksTab from './operator/LinksTab';
+import SocialTab from './operator/SocialTab';
 import TaxCalculatorTab from './operator/TaxCalculatorTab';
 import TaxameterTab from './operator/TaxameterTab';
+import PricingTab from './operator/PricingTab';
 import UserProjectsTab from './operator/UserProjectsTab';
 import PreviewWidget from './PreviewWidget';
 import EmergencyLockdownPill from '../components/EmergencyLockdownPill';
@@ -224,6 +226,7 @@ export default function Operator() {
                 <TabTrigger value="payments"  icon={CreditCard}>Payments</TabTrigger>
                 <TabTrigger value="treasury"  icon={Wallet}>Treasury</TabTrigger>
                 <TabTrigger value="money"     icon={DollarSign}>Money</TabTrigger>
+                <TabTrigger value="pricing"   icon={DollarSign}>Pricing</TabTrigger>
                 <TabTrigger value="keys"      icon={KeyRound}>My Keys</TabTrigger>
                 <TabTrigger value="domains"   icon={Globe}>Domains</TabTrigger>
                 <TabTrigger value="amai"      icon={BrainCircuit}>amAI</TabTrigger>
@@ -234,6 +237,7 @@ export default function Operator() {
                 <TabTrigger value="server"    icon={Server}>Server</TabTrigger>
                 <TabTrigger value="ops"       icon={Activity}>Ops</TabTrigger>
                 <TabTrigger value="links"     icon={Link2}>Links</TabTrigger>
+                <TabTrigger value="social"    icon={Share2}>Social</TabTrigger>
                 <TabTrigger value="taxcalc"   icon={Calculator}>Tax Calc</TabTrigger>
                 <TabTrigger value="taxameter" icon={Gauge}>Taxameter</TabTrigger>
                 <TabTrigger value="audit"     icon={ScrollText}>Audit</TabTrigger>
@@ -261,6 +265,7 @@ export default function Operator() {
               <TabsContent value="payments"  className="mt-5"><PaymentsTab /></TabsContent>
               <TabsContent value="treasury"  className="mt-5"><TreasuryTab /></TabsContent>
               <TabsContent value="money"     className="mt-5"><MoneyTab /></TabsContent>
+              <TabsContent value="pricing"   className="mt-5"><PricingTab users={users} /></TabsContent>
               <TabsContent value="keys"      className="mt-5"><MyKeysTab /></TabsContent>
               <TabsContent value="domains"   className="mt-5"><DomainsTab /></TabsContent>
               <TabsContent value="amai"      className="mt-5"><AmAiTab /></TabsContent>
@@ -271,6 +276,7 @@ export default function Operator() {
               <TabsContent value="server"    className="mt-5"><ServerTab /></TabsContent>
               <TabsContent value="ops"       className="mt-5"><OpsTab /></TabsContent>
               <TabsContent value="links"     className="mt-5"><LinksTab /></TabsContent>
+              <TabsContent value="social"    className="mt-5"><SocialTab /></TabsContent>
               <TabsContent value="taxcalc"   className="mt-5"><TaxCalculatorTab /></TabsContent>
               <TabsContent value="taxameter" className="mt-5"><TaxameterTab /></TabsContent>
               <TabsContent value="audit"     className="mt-5"><AuditTab /></TabsContent>

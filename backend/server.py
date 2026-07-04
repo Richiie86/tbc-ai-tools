@@ -1587,8 +1587,22 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
         )
         # Decrement credits (non-operator). BYOK-served messages are free —
         # the user paid their own provider, so we don't spend an app credit.
+        # The amount is the AI's real estimated cost + margin (default 10%),
+        # or a fixed/per-user cost the operator set in the Pricing tab — so the
+        # app always earns on every message. Falls back to 1 credit on error.
         if db_user.get('role') != 'operator' and not byok_served:
-            await db.users.update_one({'id': user['sub']}, {'$inc': {'credits': -1}})
+            charge = 1
+            try:
+                from amai_ext import credits_for_request
+                pricing = await credits_for_request(
+                    user['sub'], used_model,
+                    input_text=req.message, output_text=full_response,
+                )
+                charge = int(pricing.get('credits', 1))
+            except Exception as e:  # noqa: BLE001
+                logger.warning('credit pricing fell back to 1 credit: %s', e)
+            if charge > 0:
+                await db.users.update_one({'id': user['sub']}, {'$inc': {'credits': -charge}})
         # Log estimated spend for the amAI monthly summary (fire-and-forget).
         if full_response.strip():
             await record_usage(user['sub'], used_model, kind=auto_kind, source='chat')
@@ -2407,6 +2421,9 @@ app.include_router(ai_test_bench_router)
 app.include_router(deploy_previews_router)
 app.include_router(app_settings_public_router)
 app.include_router(app_settings_op_router)
+from social_ext import public_router as social_public_router, op_router as social_op_router
+app.include_router(social_public_router)
+app.include_router(social_op_router)
 app.include_router(runtime_errors_public_router)
 app.include_router(runtime_errors_op_router)
 app.include_router(sandbox_ai_router)

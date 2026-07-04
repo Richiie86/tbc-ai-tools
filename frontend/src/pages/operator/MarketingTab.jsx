@@ -7,6 +7,7 @@ import { Switch } from '../../components/ui/switch';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '../../components/ui/tabs';
 import { toast } from 'sonner';
 import { Loader2, Megaphone, Save, Eye, EyeOff, Globe, UserPlus, BadgeCheck } from 'lucide-react';
+import SocialShareSection from './SocialShareSection';
 
 const EMPTY_CFG = {
   enabled: false,
@@ -70,6 +71,10 @@ export default function MarketingTab() {
           </TabsContent>
         ))}
       </Tabs>
+
+      <div className="border-t border-tbc-900/60 pt-6">
+        <SocialShareSection />
+      </div>
     </div>
   );
 }

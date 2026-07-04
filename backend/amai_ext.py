@@ -28,10 +28,11 @@ operator setting is kept.
 from __future__ import annotations
 
 import logging
+import math
 from datetime import datetime, timezone
 from typing import Optional, Tuple
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 from pydantic import BaseModel
 
 from auth_utils import get_current_operator
@@ -243,6 +244,81 @@ async def record_usage(
         logger.warning('record_usage failed (non-fatal): %s', e)
 
 
+# ─── Credit pricing engine (what a message costs the USER) ─────────────────
+# The operator earns on every message by charging the AI's ACTUAL estimated
+# cost plus a margin (default 10%), converted into credits. They can instead
+# pin a FIXED credit cost globally, and/or override the cost for a specific
+# user. All of this lives on payment_settings.billing so it's one source of
+# truth shared with the Pricing tab.
+PRICING_DEFAULTS = {
+    'mode': 'margin',          # 'margin' = cost + margin%  |  'fixed' = flat credits
+    'margin_pct': 10.0,        # guaranteed profit over actual AI cost
+    'usd_per_credit': 0.09,    # what one credit is worth (100 credits = $9)
+    'fixed_cost_credits': 1.0, # used when mode == 'fixed' (or as a floor idea)
+    'min_credits_per_msg': 1,  # never charge 0 for a normal message
+}
+
+
+def _count_tokens(text: str) -> int:
+    """Cheap, dependency-free token estimate (~4 chars/token)."""
+    return max(1, len(text or '') // 4)
+
+
+def cost_usd_for(model: str, input_text: str = '', output_text: str = '') -> float:
+    """Estimated USD the AI actually cost for this one request, from the real
+    prompt + response sizes (far better than a fixed guess)."""
+    price_in, price_out = _PRICES.get(model, _PRICES[DEFAULT_MODEL])
+    ti, to = _count_tokens(input_text), _count_tokens(output_text)
+    return ti / 1_000_000 * price_in + to / 1_000_000 * price_out
+
+
+async def get_pricing() -> dict:
+    """Merge stored billing config over the defaults."""
+    s = await _settings()
+    stored = s.get('billing') if isinstance(s.get('billing'), dict) else {}
+    cfg = {**PRICING_DEFAULTS, **{k: stored[k] for k in PRICING_DEFAULTS if k in stored}}
+    cfg['user_overrides'] = stored.get('user_overrides') or {}
+    return cfg
+
+
+async def credits_for_request(
+    user_id: str, model: str, *, input_text: str = '', output_text: str = ''
+) -> dict:
+    """Decide how many credits to charge this user for this message.
+
+    Priority: per-user fixed override → global fixed cost → cost + margin.
+    Always returns whole credits (rounded up) so we never under-charge.
+    Returns a dict so callers can log the basis, but `credits` is what matters.
+    """
+    cfg = await get_pricing()
+    upc = float(cfg.get('usd_per_credit') or 0.09) or 0.09
+    floor = max(0, int(cfg.get('min_credits_per_msg') or 1))
+    est_usd = cost_usd_for(model, input_text, output_text)
+
+    # 1) Per-user override (a fixed number of credits for this user only).
+    ov = cfg.get('user_overrides') or {}
+    if user_id in ov:
+        credits = max(0, int(math.ceil(float(ov[user_id]))))
+        return {'credits': credits, 'basis': 'user_override', 'est_usd': round(est_usd, 6)}
+
+    # 2) Global fixed cost.
+    if cfg.get('mode') == 'fixed':
+        credits = max(0, int(math.ceil(float(cfg.get('fixed_cost_credits') or 1))))
+        return {'credits': credits, 'basis': 'fixed', 'est_usd': round(est_usd, 6)}
+
+    # 3) Actual cost + margin → credits.
+    margin = float(cfg.get('margin_pct') or 0) / 100.0
+    usd_charged = est_usd * (1.0 + margin)
+    credits = max(floor, int(math.ceil(usd_charged / upc)))
+    return {
+        'credits': credits,
+        'basis': 'margin',
+        'est_usd': round(est_usd, 6),
+        'charged_usd': round(usd_charged, 6),
+        'margin_pct': cfg.get('margin_pct'),
+    }
+
+
 async def _spend_summary() -> dict:
     """Aggregate this calendar month's estimated spend, grouped by model and
     by user (so the operator can see who is costing what)."""
@@ -437,3 +513,114 @@ async def amai_set_auto(body: AutoUpdate, _op: dict = Depends(get_current_operat
     )
     logger.info('amAI auto mode set to %s', bool(body.enabled))
     return {'ok': True, 'auto_mode': bool(body.enabled)}
+
+
+# ─── Pricing tab API ────────────────────────────────────────────────────────
+def _example_charges(cfg: dict) -> list:
+    """Show the operator what each model would cost a user under the current
+    config, using a representative medium request — so the effect is concrete."""
+    out = []
+    upc = float(cfg.get('usd_per_credit') or 0.09) or 0.09
+    margin = float(cfg.get('margin_pct') or 0) / 100.0
+    for model, (pin, pout) in _PRICES.items():
+        est = _EST_INPUT_TOKENS / 1e6 * pin + _EST_OUTPUT_TOKENS / 1e6 * pout
+        if cfg.get('mode') == 'fixed':
+            credits = max(0, int(math.ceil(float(cfg.get('fixed_cost_credits') or 1))))
+        else:
+            credits = max(int(cfg.get('min_credits_per_msg') or 1),
+                          int(math.ceil(est * (1 + margin) / upc)))
+        revenue = credits * upc
+        out.append({
+            'model': model,
+            'ai_cost_usd': round(est, 4),
+            'credits_charged': credits,
+            'user_pays_usd': round(revenue, 4),
+            'your_profit_usd': round(revenue - est, 4),
+        })
+    return out
+
+
+@router.get('/pricing')
+async def amai_get_pricing(_op: dict = Depends(get_current_operator)):
+    """Current credit-pricing config + a preview of the profit per model."""
+    cfg = await get_pricing()
+    # Attach friendly labels to per-user overrides so the tab can show names.
+    overrides = cfg.get('user_overrides') or {}
+    labelled = []
+    if overrides:
+        async for u in db.users.find(
+            {'id': {'$in': list(overrides.keys())}},
+            {'id': 1, 'name': 1, 'email': 1},
+        ):
+            labelled.append({
+                'user_id': u['id'],
+                'label': u.get('name') or u.get('email') or u['id'],
+                'email': u.get('email'),
+                'credits': overrides.get(u['id']),
+            })
+    return {
+        'pricing': {k: cfg[k] for k in PRICING_DEFAULTS},
+        'user_overrides': labelled,
+        'examples': _example_charges(cfg),
+    }
+
+
+class PricingUpdate(BaseModel):
+    mode: Optional[str] = None            # 'margin' | 'fixed'
+    margin_pct: Optional[float] = None
+    usd_per_credit: Optional[float] = None
+    fixed_cost_credits: Optional[float] = None
+    min_credits_per_msg: Optional[int] = None
+
+
+@router.put('/pricing')
+async def amai_set_pricing(body: PricingUpdate, _op: dict = Depends(get_current_operator)):
+    """Update the global credit-pricing rules."""
+    updates = {}
+    if body.mode is not None:
+        if body.mode not in ('margin', 'fixed'):
+            raise HTTPException(400, "mode must be 'margin' or 'fixed'")
+        updates['billing.mode'] = body.mode
+    if body.margin_pct is not None:
+        updates['billing.margin_pct'] = max(0.0, float(body.margin_pct))
+    if body.usd_per_credit is not None:
+        upc = float(body.usd_per_credit)
+        if upc <= 0:
+            raise HTTPException(400, 'usd_per_credit must be greater than 0')
+        updates['billing.usd_per_credit'] = upc
+    if body.fixed_cost_credits is not None:
+        updates['billing.fixed_cost_credits'] = max(0.0, float(body.fixed_cost_credits))
+    if body.min_credits_per_msg is not None:
+        updates['billing.min_credits_per_msg'] = max(0, int(body.min_credits_per_msg))
+    if not updates:
+        raise HTTPException(400, 'No pricing fields provided.')
+    await db.settings.update_one(
+        {'_id': 'payment_settings'}, {'$set': updates}, upsert=True)
+    logger.info('amAI pricing updated: %s', list(updates.keys()))
+    return await amai_get_pricing(_op)
+
+
+class UserOverrideUpdate(BaseModel):
+    user_id: str
+    credits: Optional[float] = None       # None / omitted → clear the override
+
+
+@router.put('/pricing/user-override')
+async def amai_set_user_override(body: UserOverrideUpdate, _op: dict = Depends(get_current_operator)):
+    """Pin (or clear) a fixed per-message credit cost for ONE user."""
+    uid = (body.user_id or '').strip()
+    if not uid:
+        raise HTTPException(400, 'user_id is required')
+    exists = await db.users.find_one({'id': uid}, {'id': 1})
+    if not exists:
+        raise HTTPException(404, 'User not found')
+    field = f'billing.user_overrides.{uid}'
+    if body.credits is None:
+        await db.settings.update_one({'_id': 'payment_settings'}, {'$unset': {field: ''}})
+        logger.info('amAI per-user cost override cleared for %s', uid)
+    else:
+        await db.settings.update_one(
+            {'_id': 'payment_settings'},
+            {'$set': {field: max(0.0, float(body.credits))}}, upsert=True)
+        logger.info('amAI per-user cost override set for %s = %s', uid, body.credits)
+    return await amai_get_pricing(_op)
