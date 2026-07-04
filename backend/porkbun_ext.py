@@ -18,6 +18,7 @@ Porkbun requires and are never logged or echoed back to the client.
 from __future__ import annotations
 
 import logging
+import time
 from typing import Optional
 
 import httpx
@@ -73,6 +74,39 @@ async def _call(path: str, apikey: str, secret: str, extra: Optional[dict] = Non
         # Porkbun puts the human-readable reason in `message`.
         raise HTTPException(400, data.get('message') or f'Porkbun error ({r.status_code}).')
     return data
+
+
+# --- Availability speed-ups -------------------------------------------------
+# Porkbun's /domain/checkDomain endpoint is heavily rate-limited (~1 call every
+# ~10s per account) — that is exactly why the availability check felt slow. Two
+# caches make repeat checks instant and let us skip the slow call entirely for
+# domains the operator already owns.
+_CHECK_TTL = 600.0   # trust a checkDomain result for 10 minutes
+_OWNED_TTL = 120.0   # trust the cached account domain list for 2 minutes
+_check_cache: dict[str, tuple[float, dict]] = {}
+_owned_cache: dict[str, tuple[float, set]] = {}
+
+
+async def _owned_roots(apikey: str, secret: str) -> set:
+    """Root domains in the connected account, cached briefly. Best-effort:
+    a listing hiccup returns the last known set (or empty) rather than raising,
+    so it can never break an availability check."""
+    ck = apikey[:12]  # per-account cache key without exposing the full secret
+    now = time.time()
+    hit = _owned_cache.get(ck)
+    if hit and now - hit[0] < _OWNED_TTL:
+        return hit[1]
+    try:
+        data = await _call('/domain/listAll', apikey, secret)
+    except HTTPException:
+        return hit[1] if hit else set()
+    roots = {
+        (d.get('domain') or '').strip().lower()
+        for d in (data.get('domains') or [])
+        if (d.get('domain') or '').strip()
+    }
+    _owned_cache[ck] = (now, roots)
+    return roots
 
 
 # Vercel's published DNS targets for pointing an external domain at a Vercel
@@ -207,18 +241,46 @@ async def porkbun_check(
     domain: str = Query(..., min_length=3),
     _: dict = Depends(get_current_operator),
 ):
-    """Check availability + registration price for a single domain."""
+    """Check availability + registration price for a single domain.
+
+    Fast paths avoid Porkbun's slow, rate-limited checkDomain call:
+      1. the domain is already in the operator's account -> instant, owned=True
+      2. a fresh cached result exists                     -> instant
+      3. otherwise fall back to the live (slower) lookup and cache it
+    """
     apikey, secret = await _creds()
     d = (domain or '').strip().lower()
     if '.' not in d or ' ' in d:
         raise HTTPException(400, 'Enter a full domain, e.g. example.com')
+
+    root, _sub = _split_domain(d)
+
+    # 1) Already owned in this Porkbun account? Answer instantly, no API call.
+    owned = await _owned_roots(apikey, secret)
+    if d in owned or root in owned:
+        return {
+            'domain': d, 'available': False, 'owned': True,
+            'price': None, 'first_year_promo': None,
+            'regular_price': None, 'premium': False, 'cached': True,
+        }
+
+    # 2) Fresh cached availability result?
+    now = time.time()
+    hit = _check_cache.get(d)
+    if hit and now - hit[0] < _CHECK_TTL:
+        return {**hit[1], 'cached': True}
+
+    # 3) Slow path: ask Porkbun (rate-limited to ~1 call / 10s).
     data = await _call(f'/domain/checkDomain/{d}', apikey, secret)
     resp = data.get('response') or {}
-    return {
+    result = {
         'domain': d,
         'available': str(resp.get('avail')).lower() in ('yes', 'true', '1'),
+        'owned': False,
         'price': resp.get('price'),
         'first_year_promo': resp.get('firstYearPromo'),
         'regular_price': resp.get('regularPrice'),
         'premium': str(resp.get('premium')).lower() in ('yes', 'true', '1'),
     }
+    _check_cache[d] = (now, result)
+    return {**result, 'cached': False}
