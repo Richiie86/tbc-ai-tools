@@ -71,22 +71,37 @@ def login_operator():
         return token
     
     if data.get("pending_2fa"):
-        # Need to compute TOTP and verify
-        print("  2FA required, computing TOTP...")
-        
-        # Get user info to retrieve TOTP secret
-        headers = {"Authorization": f"Bearer {token}"}
-        me_resp = requests.get(f"{BASE_URL}/auth/me", headers=headers)
-        
-        # We need the TOTP secret - try to get it from setup endpoint
-        # Actually, we need to use the pending token to verify
-        # Let's assume operator has already set up 2FA, we need to get the secret
-        # For testing, we'll try to verify with a code
-        
-        # Since we can't get the secret directly, we'll need to handle this differently
-        # Let's check if we can bypass by using the token directly
-        log_test("Operator login (pending 2FA)", False, "Cannot proceed without TOTP secret")
-        return None
+        # 2FA is enabled — complete the flow the same way the real client does:
+        # compute the current TOTP code from the operator's secret and POST it
+        # to /auth/2fa/verify using the short-lived pending token. The secret is
+        # supplied via env (never committed) so this test can authenticate end
+        # to end instead of giving up:
+        #   export TEST_OPERATOR_TOTP_SECRET="<base32 secret>"
+        totp_secret = os.environ.get("TEST_OPERATOR_TOTP_SECRET", "")
+        if not totp_secret:
+            log_test(
+                "Operator login (pending 2FA)", False,
+                "2FA is enabled but TEST_OPERATOR_TOTP_SECRET is not set — "
+                "export it to run operator-authenticated tests.",
+            )
+            return None
+
+        print("  2FA required, computing TOTP from TEST_OPERATOR_TOTP_SECRET...")
+        code = pyotp.TOTP(totp_secret).now()
+        verify_resp = requests.post(
+            f"{BASE_URL}/auth/2fa/verify",
+            json={"code": code},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        if verify_resp.status_code != 200:
+            log_test(
+                "Operator login (2FA verify)", False,
+                f"Status {verify_resp.status_code}: {verify_resp.text}",
+            )
+            return None
+        full_token = verify_resp.json().get("token")
+        log_test("Operator login (2FA verified)", True, "Full token received after 2FA")
+        return full_token
     
     log_test("Operator login", True, "Full token received")
     return token
