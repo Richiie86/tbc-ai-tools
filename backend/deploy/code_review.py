@@ -315,7 +315,24 @@ _SYSTEM_PROMPT = (
     "Focus on: correctness bugs, security holes (secrets, auth, injection), "
     "performance footguns, deployment-readiness, and missing essentials (env "
     "examples, README, build config). Be specific — name files, lines, and the "
-    "exact change. Do NOT output anything except the JSON object."
+    "exact change. Do NOT output anything except the JSON object.\n\n"
+    "IMPORTANT REVIEW RULES — avoid these false positives:\n"
+    "1. The files below are a SIZE-LIMITED SNAPSHOT. Each file is sampled and "
+    "may be cut off; a block ending with the marker '[TRUNCATED]' means the "
+    "SNAPSHOT was clipped for length, NOT that the source file is incomplete, "
+    "broken, or ends mid-function. NEVER report truncation, a file 'ending "
+    "mid-function', or 'unable to verify because the file is cut off' as a "
+    "finding — it is an artifact of sampling, not a code defect.\n"
+    "2. Do NOT flag AI/LLM model identifier strings (e.g. names like "
+    "'claude-sonnet-4-5-20250929', 'gpt-4o', or other dated model ids) as "
+    "'invalid', 'non-existent', or 'hallucinated'. You do not have the "
+    "provider's current model catalog; newer or date-versioned model names are "
+    "frequently valid. Only comment on model usage if the CODE clearly "
+    "mishandles it (e.g. an obvious empty string), never on the name itself.\n"
+    "3. Files under test/, tests/, or named *_test.py / test_*.py are TEST "
+    "code, not production runtime. Do not treat literals there as production "
+    "secrets when they are read from environment variables or are obvious "
+    "placeholders."
 )
 
 
@@ -330,7 +347,12 @@ _SECOND_OPINION_PROMPT = (
     "Focus ONLY on what the first reviewer might have missed: hallucinated "
     "files, missing imports, security regressions, auth/payment misuse. Be "
     "concise — max 6 concerns. If you broadly agree, return `ship` with empty "
-    "concerns. If the first reviewer marked do_not_ship, agree with them."
+    "concerns. If the first reviewer marked do_not_ship, agree with them.\n\n"
+    "Do NOT raise concerns based on snapshot truncation ('[TRUNCATED]' means "
+    "the sample was clipped for length, not that the file is broken), on AI "
+    "model identifier names being 'invalid/non-existent' (you lack the "
+    "provider's live catalog), or on literals in test files that are read from "
+    "environment variables."
 )
 
 
