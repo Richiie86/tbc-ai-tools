@@ -1,7 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { toast } from 'sonner';
-import { Rocket, Loader2, X, Activity, ShieldCheck, Eye, ExternalLink, BadgeCheck } from 'lucide-react';
+import { Rocket, Loader2, X, Activity, ShieldCheck, Eye, ExternalLink, BadgeCheck, Globe } from 'lucide-react';
 import api from '../../lib/api';
+
+// Flat credit cost to launch onto a custom domain (mirrors the backend).
+const DOMAIN_LAUNCH_COST = 50;
 
 const STORAGE_KEY = 'tbc.inChat.selectedProjectId';
 const PREVIEW_KEY = 'tbc.inChat.lastPreviewUrl';
@@ -70,6 +73,52 @@ export function PostAiDeploySuggestion({ user, visible, onDismiss }) {
 
   if (!visible || !projectId) return null;
 
+  return (
+    <ShipItPill
+      projectId={projectId}
+      busy={busy}
+      setBusy={setBusy}
+      setPreviewUrl={setPreviewUrl}
+      onDismiss={onDismiss}
+    />
+  );
+}
+
+/**
+ * The "AI is done — ship it?" pill: Review / Health / Redeploy, PLUS a domain
+ * field so the operator can launch this project straight onto a custom domain
+ * (any registrar) from the session. Launching charges a flat credit fee and
+ * points the domain's DNS at the deployment.
+ */
+function ShipItPill({ projectId, busy, setBusy, setPreviewUrl, onDismiss }) {
+  const [domain, setDomain] = useState('');
+  const [launching, setLaunching] = useState(false);
+
+  const launchDomain = async () => {
+    const d = domain.trim();
+    if (!d || !d.includes('.')) { toast.error('Enter a full domain, e.g. app.example.com'); return; }
+    if (!window.confirm(
+      `Launch this project on ${d}?\nThis costs ${DOMAIN_LAUNCH_COST} credits and points the domain's DNS at your deployment.`
+    )) return;
+    setLaunching(true);
+    try {
+      const { data } = await api.post('/deploy/launch-domain', { domain: d, projectId });
+      const remaining = data?.credits_remaining;
+      toast.success(
+        `Launched on ${data.domain} — ${data.credits_charged} credits charged` +
+        (remaining != null && remaining !== 'inf' ? ` (${remaining} left)` : ''),
+      );
+      if (data?.dns_error) {
+        toast.message(`DNS auto-setup skipped — ${data.dns_error}`, { duration: 5000 });
+      }
+      setDomain('');
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Launch failed');
+    } finally {
+      setLaunching(false);
+    }
+  };
+
   const run = async (kind) => {
     setBusy(kind);
     try {
@@ -103,9 +152,10 @@ export function PostAiDeploySuggestion({ user, visible, onDismiss }) {
 
   return (
     <div
-      className="mx-auto my-3 flex max-w-3xl items-center gap-3 rounded-xl border border-tbc-500/40 bg-gradient-to-r from-tbc-500/10 via-ink-950 to-tbc-500/10 px-4 py-2.5 text-xs text-tbc-100 shadow-[0_0_20px_rgba(212,160,40,0.08)]"
+      className="mx-auto my-3 flex max-w-3xl flex-col gap-2 rounded-xl border border-tbc-500/40 bg-gradient-to-r from-tbc-500/10 via-ink-950 to-tbc-500/10 px-4 py-2.5 text-xs text-tbc-100 shadow-[0_0_20px_rgba(212,160,40,0.08)]"
       data-testid="post-ai-deploy-suggestion"
     >
+    <div className="flex items-center gap-3">
       <span className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-tbc-500/25 text-tbc-200">
         <Rocket className="h-3.5 w-3.5" />
       </span>
@@ -154,6 +204,35 @@ export function PostAiDeploySuggestion({ user, visible, onDismiss }) {
       >
         <X className="h-3 w-3" />
       </button>
+    </div>
+
+      {/* Session domain launcher — paste any domain (any registrar) to take
+          this project live on it directly. Costs credits; points DNS at the
+          deployment via the connected Porkbun account. */}
+      <div className="flex items-center gap-2 border-t border-tbc-500/15 pt-2">
+        <Globe className="h-3.5 w-3.5 shrink-0 text-tbc-300" />
+        <input
+          type="text"
+          value={domain}
+          onChange={(e) => setDomain(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) launchDomain(); }}
+          placeholder="yourdomain.com — launch this project directly on it"
+          data-testid="session-domain-input"
+          disabled={launching}
+          className="min-w-0 flex-1 rounded-md border border-slate-700 bg-slate-900 px-2.5 py-1.5 text-[11px] text-tbc-100 placeholder:text-tbc-200/40 focus:border-tbc-500/60 focus:outline-none disabled:opacity-50"
+        />
+        <button
+          type="button"
+          onClick={launchDomain}
+          disabled={launching || !domain.trim()}
+          data-testid="session-launch-domain-btn"
+          title={`Launch on this domain (${DOMAIN_LAUNCH_COST} credits)`}
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-tbc-500 px-3 py-1.5 text-[11px] font-bold text-ink-950 transition hover:bg-tbc-400 disabled:opacity-50"
+        >
+          {launching ? <Loader2 className="h-3 w-3 animate-spin" /> : <Rocket className="h-3 w-3" />}
+          {launching ? 'Launching…' : `Launch · ${DOMAIN_LAUNCH_COST} cr`}
+        </button>
+      </div>
     </div>
   );
 }

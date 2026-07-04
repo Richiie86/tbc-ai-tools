@@ -28,6 +28,40 @@ export default function DomainsTab() {
   const [domains, setDomains] = useState(null); // null = not loaded yet
   const [loadingDomains, setLoadingDomains] = useState(false);
 
+  // Domains that come from deployed operator projects (Vercel URLs / custom
+  // domains attached in db.deploy_projects) — independent of Porkbun.
+  const [deployed, setDeployed] = useState(null);
+  const [loadingDeployed, setLoadingDeployed] = useState(false);
+
+  const loadDeployed = useCallback(async () => {
+    setLoadingDeployed(true);
+    try {
+      const { data } = await api.get('/operator/deploy/projects');
+      const list = data?.projects || data || [];
+      const rows = list
+        .map((p) => {
+          const raw = p.domain || p.url || p.last_deployment_url || '';
+          if (!raw) return null;
+          const url = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+          let host = url;
+          try { host = new URL(url).host; } catch { /* keep raw */ }
+          return {
+            id: p.id,
+            name: p.projectName || p.name || host,
+            host,
+            url,
+            isSelf: p.id === 'tbctools-self',
+          };
+        })
+        .filter(Boolean);
+      setDeployed(rows);
+    } catch {
+      setDeployed([]);
+    } finally {
+      setLoadingDeployed(false);
+    }
+  }, []);
+
   const loadStatus = useCallback(async () => {
     try {
       const { data } = await api.get('/operator/porkbun/status');
@@ -58,7 +92,9 @@ export default function DomainsTab() {
       const ok = await loadStatus();
       if (ok) loadDomains();
     })();
-  }, [loadStatus, loadDomains]);
+    // Deployed-project domains don't depend on Porkbun — always load them.
+    loadDeployed();
+  }, [loadStatus, loadDomains, loadDeployed]);
 
   const ping = async () => {
     setPinging(true);
@@ -113,6 +149,86 @@ export default function DomainsTab() {
         </>
       ) : (
         <NotConnected />
+      )}
+
+      {/* Live domains from deployed operator projects — shown regardless of
+          the Porkbun connection, since these come from Vercel/db.deploy_projects. */}
+      <DeployedDomains
+        rows={deployed}
+        loading={loadingDeployed}
+        onRefresh={loadDeployed}
+      />
+    </div>
+  );
+}
+
+function DeployedDomains({ rows, loading, onRefresh }) {
+  return (
+    <div className="rounded-xl border border-sky-500/25 bg-gradient-to-br from-sky-500/[0.04] via-ink-900/60 to-ink-900/60 p-5">
+      <div className="mb-3 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Globe className="h-4 w-4 text-sky-300" />
+          <h3 className="text-base font-bold text-tbc-100">Deployed project domains</h3>
+          {Array.isArray(rows) && (
+            <span className="rounded-full bg-sky-500/15 px-2 py-0.5 text-xs font-semibold text-sky-200">
+              {rows.length}
+            </span>
+          )}
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={onRefresh}
+          disabled={loading}
+          data-testid="refresh-deployed-domains"
+          className="border-tbc-900/60 bg-ink-900 text-tbc-100 hover:bg-ink-950"
+        >
+          {loading
+            ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+            : <RefreshCw className="mr-1.5 h-3.5 w-3.5" />}
+          Refresh
+        </Button>
+      </div>
+
+      {loading && rows == null ? (
+        <div className="grid place-items-center py-10">
+          <Loader2 className="h-5 w-5 animate-spin text-tbc-400" />
+        </div>
+      ) : rows && rows.length > 0 ? (
+        <div className="space-y-2" data-testid="deployed-domains-list">
+          {rows.map((r) => (
+            <div
+              key={r.id}
+              data-testid={`deployed-domain-row-${r.id}`}
+              className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-tbc-900/60 bg-ink-950/50 px-3 py-2.5"
+            >
+              <div className="flex items-center gap-2">
+                <Globe className="h-4 w-4 text-sky-300" />
+                <span className="text-sm font-bold text-tbc-100">{r.name}</span>
+                {r.isSelf && (
+                  <span className="rounded-full bg-tbc-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-tbc-300">
+                    This app
+                  </span>
+                )}
+              </div>
+              <div className="flex flex-wrap items-center gap-3 text-xs text-tbc-200/60">
+                <span className="font-mono text-tbc-200/70">{r.host}</span>
+                <a
+                  href={r.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 text-sky-300 hover:text-sky-200"
+                >
+                  Open <ExternalLink className="h-3 w-3" />
+                </a>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="rounded-md border border-dashed border-sky-500/25 bg-ink-900/40 px-3 py-4 text-center text-sm text-tbc-200/60">
+          No deployed project domains yet — deploy a project to see its live URL here.
+        </p>
       )}
     </div>
   );

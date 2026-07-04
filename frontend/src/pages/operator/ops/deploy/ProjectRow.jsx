@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { toast } from 'sonner';
+import api from '../../../../lib/api';
 import { Button } from '../../../../components/ui/button';
 import { Input } from '../../../../components/ui/input';
 import { Switch } from '../../../../components/ui/switch';
@@ -10,7 +12,7 @@ import {
 import {
   Rocket, Globe, Loader2, Copy, Check, GitBranch, ExternalLink, RotateCw, Save,
   Sparkles, Activity, AlertCircle, CheckCircle2, GitFork, Pencil, ShieldCheck, Bot,
-  Cog, BadgeCheck, Zap, ArrowUpCircle, UploadCloud, RotateCcw,
+  Cog, BadgeCheck, Zap, ArrowUpCircle, UploadCloud, RotateCcw, Trash2, X,
 } from 'lucide-react';
 
 import { CodeReviewDialog } from './CodeReviewDialog';
@@ -55,6 +57,45 @@ export function ProjectRow({ project, onDeployed }) {
   // Lives here in the row (not the hook) since it's pure dialog state.
   const [promoteConfirmText, setPromoteConfirmText] = useState('');
 
+  // Inline rename + delete. Kept local to the row (like the domain editor)
+  // so operators can rename or remove a project without leaving the Ops tab.
+  const [renaming, setRenaming] = useState(false);
+  const [nameDraft, setNameDraft] = useState(project.projectName || '');
+  const [savingName, setSavingName] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const saveName = async () => {
+    const next = nameDraft.trim();
+    if (!next) { toast.error('Name required'); return; }
+    if (next === project.projectName) { setRenaming(false); return; }
+    setSavingName(true);
+    try {
+      const { data } = await api.patch(`/operator/deploy/${project.id}`, { projectName: next });
+      toast.success('Renamed');
+      setRenaming(false);
+      onDeployed?.(data);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Rename failed');
+    } finally {
+      setSavingName(false);
+    }
+  };
+
+  const doDelete = async () => {
+    setDeleting(true);
+    try {
+      await api.delete(`/operator/deploy/${project.id}`);
+      toast.success(`Deleted "${project.projectName}"`);
+      setDeleteOpen(false);
+      onDeployed?.();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Delete failed');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   return (
     <div
       data-testid={`deploy-project-${project.id}`}
@@ -74,7 +115,53 @@ export function ProjectRow({ project, onDeployed }) {
             </span>
             <div className="min-w-0">
               <div className="flex items-center gap-2 truncate">
-                <span className="truncate text-sm font-bold text-tbc-100">{project.projectName}</span>
+                {renaming ? (
+                  <span className="relative z-10 flex items-center gap-1">
+                    <Input
+                      data-testid={`rename-input-${project.id}`}
+                      autoFocus
+                      value={nameDraft}
+                      onChange={(e) => setNameDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') saveName();
+                        else if (e.key === 'Escape') { setNameDraft(project.projectName || ''); setRenaming(false); }
+                      }}
+                      className="h-7 w-52 border-tbc-900/60 bg-ink-900 text-sm font-bold text-tbc-100"
+                    />
+                    <Button
+                      size="sm"
+                      data-testid={`rename-save-${project.id}`}
+                      onClick={saveName}
+                      disabled={savingName}
+                      className="h-7 bg-tbc-500 px-2 text-ink-950 hover:bg-tbc-400"
+                    >
+                      {savingName ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
+                    </Button>
+                    <button
+                      type="button"
+                      onClick={() => { setNameDraft(project.projectName || ''); setRenaming(false); }}
+                      className="rounded p-1 text-tbc-200/70 hover:bg-ink-950 hover:text-tbc-200"
+                      title="Cancel"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                ) : (
+                  <>
+                    <span className="truncate text-sm font-bold text-tbc-100">{project.projectName}</span>
+                    {!isSelf && (
+                      <button
+                        type="button"
+                        data-testid={`rename-${project.id}`}
+                        onClick={() => { setNameDraft(project.projectName || ''); setRenaming(true); }}
+                        title="Rename project"
+                        className="relative z-10 rounded p-1 text-tbc-200/70 hover:bg-ink-950 hover:text-tbc-200"
+                      >
+                        <Pencil className="h-3 w-3" />
+                      </button>
+                    )}
+                  </>
+                )}
                 {isSelf && (
                   <span className="rounded-full bg-tbc-500 px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-slate-950">this app</span>
                 )}
@@ -348,6 +435,20 @@ export function ProjectRow({ project, onDeployed }) {
             {a.busy === 'rollback' ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : <RotateCcw className="mr-1.5 h-3 w-3" />}
             Rollback
           </Button>
+          {!isSelf && (
+            <Button
+              size="sm"
+              data-testid={`delete-${project.id}`}
+              onClick={() => setDeleteOpen(true)}
+              disabled={a.busy !== null || deleting}
+              variant="outline"
+              title="Delete this deploy project"
+              className="border-rose-500/40 bg-ink-900 text-rose-300 hover:bg-rose-500/10"
+            >
+              {deleting ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : <Trash2 className="mr-1.5 h-3 w-3" />}
+              Delete
+            </Button>
+          )}
           <label
             className="inline-flex items-center gap-2 rounded-md border border-tbc-900/60 bg-ink-900 px-2.5 py-1.5 text-[11px] text-tbc-200/80"
             title="When ON, a successful preview deploy is automatically promoted to production."
@@ -435,6 +536,42 @@ export function ProjectRow({ project, onDeployed }) {
         onOpenChange={a.setAutopilotOpen}
         project={project}
       />
+
+      {/* Delete confirmation — shadcn AlertDialog to match the rest of the
+          Ops surface. Guarded above so the self-project can't be deleted. */}
+      <AlertDialog open={deleteOpen} onOpenChange={(v) => { if (!deleting) setDeleteOpen(v); }}>
+        <AlertDialogContent
+          data-testid={`delete-confirm-${project.id}`}
+          className="border-rose-500/30 bg-ink-950 text-tbc-100"
+        >
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-tbc-100">Delete this project?</AlertDialogTitle>
+            <AlertDialogDescription className="text-tbc-200/70">
+              This removes the deploy project{' '}
+              <span className="font-semibold text-tbc-100">{project.projectName}</span>{' '}
+              from TBC. It does not delete anything on Vercel or your Git repo —
+              you can re-create it later. This action cannot be undone here.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              disabled={deleting}
+              className="border-tbc-900/60 bg-ink-900 text-tbc-200 hover:bg-ink-950"
+            >
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              data-testid={`delete-confirm-btn-${project.id}`}
+              onClick={(e) => { e.preventDefault(); doDelete(); }}
+              disabled={deleting}
+              className="bg-rose-500 text-ink-950 hover:bg-rose-400 font-semibold"
+            >
+              {deleting ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : <Trash2 className="mr-1.5 h-3 w-3" />}
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Promote-to-prod confirmation. Replaces window.confirm() so the
           visual language matches the rest of our shadcn dialogs.

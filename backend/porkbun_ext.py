@@ -75,6 +75,91 @@ async def _call(path: str, apikey: str, secret: str, extra: Optional[dict] = Non
     return data
 
 
+# Vercel's published DNS targets for pointing an external domain at a Vercel
+# deployment: apex → A record 76.76.21.21, any sub-domain → CNAME
+# cname.vercel-dns.com. (https://vercel.com/docs/projects/domains)
+_VERCEL_APEX_A = '76.76.21.21'
+_VERCEL_CNAME = 'cname.vercel-dns.com'
+
+
+def _split_domain(host: str) -> tuple[str, str]:
+    """Return (root_domain, subdomain) for a bare host.
+
+    `app.example.com`  -> ('example.com', 'app')
+    `example.com`      -> ('example.com', '')
+    `a.b.example.co.uk`-> best-effort ('example.co.uk', 'a.b')  (two-label TLD)
+    """
+    host = (host or '').strip().rstrip('.').lower()
+    parts = host.split('.')
+    if len(parts) <= 2:
+        return host, ''
+    # Handle common two-label public suffixes (co.uk, com.au, ...).
+    two_label = {'co.uk', 'com.au', 'co.nz', 'co.za', 'com.br', 'co.jp'}
+    if '.'.join(parts[-2:]) in two_label and len(parts) >= 3:
+        root = '.'.join(parts[-3:])
+        sub = '.'.join(parts[:-3])
+    else:
+        root = '.'.join(parts[-2:])
+        sub = '.'.join(parts[:-2])
+    return root, sub
+
+
+async def configure_vercel_dns(domain: str) -> dict:
+    """Best-effort: point `domain` at Vercel via the connected Porkbun account.
+
+    Creates (or refreshes) the correct DNS record so the pasted domain serves
+    the Vercel deployment directly — an apex gets an A record to Vercel's
+    anycast IP, a sub-domain gets a CNAME to cname.vercel-dns.com.
+
+    Returns a small status dict; never raises for "not connected" so the deploy
+    flow can call it opportunistically. Raises only on hard Porkbun API errors
+    the caller explicitly wants surfaced.
+    """
+    apikey, secret = await _creds()  # raises 400 if Porkbun not connected
+    root, sub = _split_domain(domain)
+    if not root:
+        raise HTTPException(400, 'Could not parse a root domain to configure DNS')
+
+    if sub:
+        rtype, name, content = 'CNAME', sub, _VERCEL_CNAME
+    else:
+        rtype, name, content = 'A', '', _VERCEL_APEX_A
+
+    # Idempotent: delete any existing record of the same type+host first so we
+    # don't stack duplicates, then create the Vercel-pointing one.
+    try:
+        existing = await _call(f'/dns/retrieveByNameType/{root}/{rtype}/{name}', apikey, secret)
+        for rec in (existing.get('records') or []):
+            rid = rec.get('id')
+            if rid:
+                try:
+                    await _call(f'/dns/delete/{root}/{rid}', apikey, secret)
+                except HTTPException:
+                    pass  # best-effort cleanup
+    except HTTPException:
+        pass  # retrieve may 400 if none exist — ignore
+
+    await _call('/dns/create', apikey, secret, {
+        'type': rtype,
+        'name': name,
+        'content': content,
+        'ttl': '600',
+    })
+    return {'ok': True, 'root': root, 'record': f'{rtype} {name or "@"} → {content}'}
+
+
+@router.post('/point-to-vercel')
+async def porkbun_point_to_vercel(
+    domain: str = Query(..., min_length=3),
+    _: dict = Depends(get_current_operator),
+):
+    """Manually (re)point a Porkbun domain at Vercel from the Domains tab."""
+    d = (domain or '').strip().lower()
+    if '.' not in d or ' ' in d:
+        raise HTTPException(400, 'Enter a full domain, e.g. app.example.com')
+    return await configure_vercel_dns(d)
+
+
 @router.get('/status')
 async def porkbun_status(_: dict = Depends(get_current_operator)):
     """Lightweight connection check used to render the Domains tab header.

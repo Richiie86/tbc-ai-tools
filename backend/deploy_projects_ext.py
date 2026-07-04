@@ -606,6 +606,70 @@ async def op_list_projects(_user: dict = Depends(get_current_operator)):
     return [_project_to_out(d) async for d in cursor]
 
 
+class OperatorProjectIn(BaseModel):
+    """Request body for `POST /api/operator/deploy/projects` (operator create).
+
+    Mirrors the AI-agent `ProjectIn` but lets the operator create a deploy
+    project straight from the Ops tab UI — name it up-front, optionally paste
+    a custom domain (any registrar, not just tbctools.org) and a repo. The
+    domain is stored bare; it attaches to Vercel + auto-configures Porkbun DNS
+    on the first Deploy / domain-save so the project goes live on THAT domain.
+    """
+    projectName: str
+    repo: str = ''
+    domain: str = ''
+    repoType: str = 'github'
+    gitRef: Optional[str] = None
+
+
+@ops_router.post('/projects', status_code=201)
+async def op_create_project(
+    payload: OperatorProjectIn,
+    request: Request,
+    op: dict = Depends(get_current_operator),
+):
+    """Operator-driven create so a human can start a deploy project (with a
+    name they choose) without needing the AI API key. Domain is optional at
+    create time — it can be pasted/edited inline on the row afterwards."""
+    name = (payload.projectName or '').strip()
+    if not name:
+        raise HTTPException(400, 'Project name is required')
+    # Normalize a pasted domain/URL to a bare host (same rule as domain PATCH).
+    domain = (payload.domain or '').strip()
+    for prefix in ('https://', 'http://'):
+        if domain.lower().startswith(prefix):
+            domain = domain[len(prefix):]
+    domain = domain.split('/', 1)[0].rstrip('.')
+
+    now = datetime.now(timezone.utc)
+    pid = _gen_project_id(name)
+    doc = {
+        'id': pid,
+        'projectName': name,
+        'repo': (payload.repo or '').strip(),
+        'domain': domain,
+        'repoType': payload.repoType or 'github',
+        'gitRef': payload.gitRef,
+        'auto_promote': False,
+        'auto_heal': False,
+        'auto_rollback': False,
+        'created_at': now,
+        'updated_at': now,
+    }
+    await db.deploy_projects.insert_one(doc)
+    try:
+        from audit_ext import record_audit
+        await record_audit(
+            op, 'deploy_project.create', target=name,
+            details={'project_id': pid, 'repo': doc['repo'], 'domain': domain, 'via': 'operator_ui'},
+            request=request,
+        )
+    except Exception:
+        pass
+    logger.info('Operator created deploy project %s (%s → %s)', pid, doc['repo'], domain or '—')
+    return _project_to_out(doc)
+
+
 @ops_router.get('/key')
 async def op_get_key_status(_user: dict = Depends(get_current_operator)):
     """Returns presence flags only — never echoes the token values."""
@@ -1165,6 +1229,11 @@ class ProjectFlagsUpdate(BaseModel):
     auto_promote: Optional[bool] = None
     auto_heal: Optional[bool] = None
     auto_rollback: Optional[bool] = None
+    # Editable identity fields so the operator can rename a project (or fix
+    # its repo / branch) after creation, right from the Ops row.
+    projectName: Optional[str] = None
+    repo: Optional[str] = None
+    gitRef: Optional[str] = None
 
 
 @ops_router.patch('/{project_id}')
@@ -1173,7 +1242,8 @@ async def op_patch_project_flags(
     payload: ProjectFlagsUpdate,
     op: dict = Depends(get_current_operator),
 ):
-    """Toggle per-project automation flags. Today: `auto_promote`."""
+    """Toggle per-project automation flags AND edit identity fields
+    (projectName / repo / gitRef) so a project can be renamed after creation."""
     project = await db.deploy_projects.find_one({'id': project_id})
     if not project:
         raise HTTPException(404, 'Project not found')
@@ -1184,6 +1254,15 @@ async def op_patch_project_flags(
         update['auto_heal'] = bool(payload.auto_heal)
     if payload.auto_rollback is not None:
         update['auto_rollback'] = bool(payload.auto_rollback)
+    if payload.projectName is not None:
+        new_name = payload.projectName.strip()
+        if not new_name:
+            raise HTTPException(400, 'Project name cannot be empty')
+        update['projectName'] = new_name
+    if payload.repo is not None:
+        update['repo'] = payload.repo.strip()
+    if payload.gitRef is not None:
+        update['gitRef'] = payload.gitRef.strip() or None
     await db.deploy_projects.update_one({'id': project_id}, {'$set': update})
     fresh = await db.deploy_projects.find_one({'id': project_id})
     return _project_to_out(fresh)
@@ -1715,9 +1794,27 @@ async def op_update_domain(
             vercel_error = f'Vercel attach failed: {e}'
             logger.warning('Vercel attach unexpected error: %s', e)
 
+    # Auto-point the domain's DNS at Vercel via the connected Porkbun account
+    # so it goes live on THIS domain directly (any registrar the operator uses
+    # through Porkbun). Fully best-effort: a missing Porkbun connection or a
+    # domain hosted elsewhere just skips silently with a friendly note.
+    dns_configured = False
+    dns_error: Optional[str] = None
+    try:
+        from porkbun_ext import configure_vercel_dns
+        dns_res = await configure_vercel_dns(domain)
+        dns_configured = bool(dns_res.get('ok'))
+    except HTTPException as e:
+        dns_error = e.detail if isinstance(e.detail, str) else str(e.detail)
+    except Exception as e:  # network / unexpected — non-fatal
+        dns_error = f'Porkbun DNS setup skipped: {e}'
+        logger.warning('Porkbun DNS auto-config error for %s: %s', domain, e)
+
     out = _project_to_out(doc)
     out['vercel_attached'] = vercel_attached
     out['vercel_error'] = vercel_error
+    out['dns_configured'] = dns_configured
+    out['dns_error'] = dns_error
     return out
 
 
