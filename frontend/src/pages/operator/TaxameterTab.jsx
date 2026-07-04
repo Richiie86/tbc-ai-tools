@@ -291,23 +291,45 @@ export default function TaxameterTab() {
     }
   }, [meters]);
 
-  const syncLive = useCallback(async () => {
-    setSyncing(true);
+  // `silent` auto-syncs (on open / on a timer) run quietly with no toast so the
+  // AIs keep their own figures fresh without nagging the operator. A manual
+  // press of "Sync live" reports the result.
+  const syncLive = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) setSyncing(true);
     try {
       const { data } = await api.post('/operator/usage-meters/sync');
       setMeters(data.meters || []);
       setUpdatedAt(data.updated_at || null);
-      toast.success(
-        data.live_count > 0
-          ? `Synced live — ${data.live_count} provider${data.live_count === 1 ? '' : 's'} pulled real spend.`
-          : 'Synced. No provider returned live spend yet — add an admin/billing key to light one up.',
-      );
+      if (!silent) {
+        toast.success(
+          data.live_count > 0
+            ? `Synced live — ${data.live_count} provider${data.live_count === 1 ? '' : 's'} pulled real spend.`
+            : 'Synced. No provider returned live spend yet — add an admin/billing key to light one up.',
+        );
+      }
+      return data;
     } catch {
-      toast.error('Live sync failed. Try again.');
+      if (!silent) toast.error('Live sync failed. Try again.');
+      return null;
     } finally {
-      setSyncing(false);
+      if (!silent) setSyncing(false);
     }
   }, []);
+
+  // Auto-update: as soon as the tab opens, pull live spend for any provider that
+  // can self-report (has an admin/billing key), then keep refreshing every 5 min
+  // while the tab stays open. Manual entry remains the fallback for the rest.
+  useEffect(() => {
+    if (loading) return undefined;
+    const hasLiveCapable = meters.some((m) => m.live_supported && m.key_present);
+    if (!hasLiveCapable) return undefined;
+    // Kick off an immediate silent sync on open.
+    syncLive({ silent: true });
+    const id = setInterval(() => syncLive({ silent: true }), 5 * 60 * 1000);
+    return () => clearInterval(id);
+    // Re-arm when the set of live-capable providers changes (e.g. a key added).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, meters.map((m) => `${m.id}:${m.live_supported ? 1 : 0}:${m.key_present ? 1 : 0}`).join('|'), syncLive]);
 
   const saveProviderKey = useCallback(async (provider, value) => {
     try {
@@ -338,16 +360,17 @@ export default function TaxameterTab() {
             <Gauge className="h-5 w-5 text-tbc-300" /> Taxameter — provider usage
           </h2>
           <p className="mt-1 max-w-2xl text-sm text-tbc-200/60">
-            Every key you add anywhere in the app shows up here automatically — no setup. Press{' '}
-            <span className="font-semibold text-tbc-100">Sync live</span> to pull real month-to-date spend from each
-            provider&apos;s API. OpenAI and Anthropic need an admin/billing key (add it on the card); providers without
-            a public spend API stay manual and say so.
+            Every key you add anywhere in the app shows up here automatically. Providers that can report their own
+            spend (OpenAI, Anthropic — with an admin/billing key added on the card) <span className="font-semibold text-tbc-100">update themselves
+            automatically</span> when this tab is open and every few minutes after. The manual boxes are only the
+            fallback for providers with no public spend API. <span className="font-semibold text-tbc-100">Sync now</span> forces an
+            immediate refresh.
           </p>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
-          <Button onClick={syncLive} disabled={syncing || loading}
+          <Button onClick={() => syncLive({ silent: false })} disabled={syncing || loading}
             className="bg-emerald-500 font-semibold text-ink-950 hover:bg-emerald-400">
-            {syncing ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Zap className="mr-1.5 h-4 w-4" />} Sync live
+            {syncing ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Zap className="mr-1.5 h-4 w-4" />} Sync now
           </Button>
           <Button variant="outline" onClick={load} disabled={loading}
             className="border-tbc-900/60 bg-ink-900 text-tbc-200 hover:bg-ink-800">
