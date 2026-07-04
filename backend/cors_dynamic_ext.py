@@ -25,6 +25,7 @@ Cache invalidation: operator-facing endpoints (PATCH /domain, the
 `/cors-origins` endpoints below) call `invalidate_cors_cache()` so the
 new domain is honoured immediately without waiting for the 60s TTL.
 """
+import asyncio
 import logging
 import os
 import re
@@ -34,6 +35,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
@@ -145,6 +147,95 @@ def invalidate_cors_cache() -> None:
     the operator mutates a domain or adds an extra origin."""
     _state['origins'] = None
     _state['fetched_at'] = 0.0
+    # Wake the background refresher so a freshly-launched domain is trusted
+    # within milliseconds instead of waiting for the next poll tick.
+    ev = _state.get('refresh_event')
+    if ev is not None:
+        try:
+            ev.set()
+        except Exception:
+            pass
+
+
+# ---------- Synchronous, in-memory dynamic origin check ----------
+# The built-in Starlette CORSMiddleware handles cookies/preflight correctly
+# (this is what fixed the post-2FA login bounce), but it only checks a static
+# allow-list. We keep the *dynamic* half — every domain launched through the
+# app — in the in-memory `_state['origins']` set, refreshed by a background
+# task. The subclass below consults that set with ZERO awaits, so it never
+# touches the request/cookie flow that the async middleware used to break.
+
+def _origin_in_dynamic_set(origin: str) -> bool:
+    """Non-blocking check against the cached dynamic allow-list."""
+    if not origin:
+        return False
+    if _state.get('wildcard'):
+        return True
+    origins = _state.get('origins')
+    if not origins:
+        return False
+    return _norm(origin) in origins
+
+
+async def _cors_refresh_loop(interval: float = 30.0) -> None:
+    """Keep `_state['origins']` warm so the sync middleware always has a
+    current snapshot of every launched domain + operator extra. Refreshes
+    on a timer, and immediately whenever `invalidate_cors_cache()` fires."""
+    ev = _state.get('refresh_event')
+    if ev is None:
+        ev = asyncio.Event()
+        _state['refresh_event'] = ev
+    while True:
+        try:
+            origins, wildcard = await _load_origins()
+            _state['origins'] = origins
+            _state['wildcard'] = wildcard
+            _state['fetched_at'] = time.monotonic()
+        except Exception as e:  # never let the loop die
+            logger.warning('[cors] refresh loop load failed: %s', e)
+        # Wait for either the interval to elapse or an explicit invalidation.
+        try:
+            await asyncio.wait_for(ev.wait(), timeout=interval)
+        except asyncio.TimeoutError:
+            pass
+        finally:
+            ev.clear()
+
+
+async def start_cors_refresher() -> None:
+    """Called once from the app startup handler. Does an initial synchronous
+    load so the very first request already sees launched domains, then spawns
+    the background refresh task."""
+    if _state.get('refresher_started'):
+        return
+    _state['refresher_started'] = True
+    _state['refresh_event'] = asyncio.Event()
+    try:
+        origins, wildcard = await _load_origins()
+        _state['origins'] = origins
+        _state['wildcard'] = wildcard
+        _state['fetched_at'] = time.monotonic()
+        logger.info('[cors] dynamic allow-list primed with %d origin(s)', len(origins))
+    except Exception as e:
+        logger.warning('[cors] initial dynamic load failed: %s', e)
+    asyncio.create_task(_cors_refresh_loop())
+
+
+class DynamicOriginCORSMiddleware(CORSMiddleware):
+    """Battle-tested Starlette CORSMiddleware (correct cookie + preflight
+    handling) widened to also trust any domain launched through the app.
+
+    The base class already matches `allow_origins` + `allow_origin_regex`
+    (tbctools.org, PRIMARY_DOMAIN, any explicit CORS_ORIGINS). We additionally
+    accept any origin present in the in-memory dynamic set, which the
+    background refresher keeps in sync with `deploy_projects.domain` +
+    operator-managed extras. This makes launching thousands of customer
+    domains work automatically, with no env changes and no redeploys."""
+
+    def is_allowed_origin(self, origin: str) -> bool:  # type: ignore[override]
+        if super().is_allowed_origin(origin):
+            return True
+        return _origin_in_dynamic_set(origin)
 
 
 class DynamicCORSMiddleware(BaseHTTPMiddleware):

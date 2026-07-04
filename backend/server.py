@@ -79,6 +79,8 @@ from runtime_errors_ext import (
 from sandbox_ai_ext import router as sandbox_ai_router, proj_router as sandbox_ai_proj_router
 from cors_dynamic_ext import (
     DynamicCORSMiddleware,
+    DynamicOriginCORSMiddleware,
+    start_cors_refresher,
     router as cors_origins_router,
     invalidate_cors_cache,
 )
@@ -347,6 +349,11 @@ async def startup():
     # Validate the environment BEFORE we touch the DB or serve traffic so a
     # misconfigured deploy fails loudly instead of leaking insecure defaults.
     _validate_production_env()
+
+    # Prime + keep warm the dynamic CORS allow-list so every domain launched
+    # through the app (deploy_projects.domain + operator extras) is trusted
+    # automatically, without env changes or redeploys.
+    await start_cors_refresher()
 
     # Ensure indexes
     await db.users.create_index('email', unique=True)
@@ -2529,17 +2536,21 @@ else:
     _cors_fallback_regex = (
         r'^https://([a-z0-9-]+\.)?(' + '|'.join(_allowed_hosts) + r')(:\d+)?$'
     )
-    logger.info("[cors] locked-origin fallback active for: %s", ', '.join(
-        h.replace('\\', '') for h in _allowed_hosts))
+    logger.info("[cors] dynamic locked-origin policy active for: %s (+ every "
+                "domain launched through the app)", ', '.join(
+                    h.replace('\\', '') for h in _allowed_hosts))
+    # DynamicOriginCORSMiddleware = the battle-tested built-in CORSMiddleware
+    # (correct cookie/preflight handling — this is what fixed the post-2FA
+    # login bounce) WIDENED to also trust any domain launched through the app.
+    # The regex still guarantees tbctools.org + PRIMARY_DOMAIN, while a
+    # background refresher keeps every `deploy_projects.domain` + operator
+    # extra trusted automatically. Launching thousands of customer domains
+    # "just works" with no env changes and no redeploys.
     app.add_middleware(
-        CORSMiddleware,
+        DynamicOriginCORSMiddleware,
         allow_origin_regex=_cors_fallback_regex,
         allow_credentials=True,
         allow_methods=['*'],
         allow_headers=['*'],
         expose_headers=['*'],
     )
-# DynamicCORSMiddleware temporarily removed — it interfered with the
-# built-in middleware's cookie handling and bounced operators back to
-# login after 2FA. Will re-add as a non-overriding "extra origins"
-# layer in a separate session.

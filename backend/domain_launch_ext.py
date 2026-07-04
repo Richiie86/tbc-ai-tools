@@ -127,6 +127,15 @@ async def launch_domain(
 
     ins = await db.domain_launches.insert_one(launch_doc)
 
+    # Trust the freshly-launched domain for CORS immediately (otherwise it
+    # would wait for the next background refresh tick). Safe no-op if the
+    # dynamic CORS layer isn't loaded.
+    try:
+        from cors_dynamic_ext import invalidate_cors_cache
+        invalidate_cors_cache()
+    except Exception:
+        pass
+
     try:
         from audit_ext import record_audit
         await record_audit(
