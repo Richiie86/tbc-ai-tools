@@ -32,7 +32,7 @@ load_dotenv(Path('/app/frontend/.env'))
 
 BASE = os.environ['REACT_APP_BACKEND_URL'].rstrip('/')
 API = f'{BASE}/api'
-OP_EMAIL = os.environ.get('TEST_OPERATOR_EMAIL', 'rac.investments.swe@gmail.com')
+OP_EMAIL = os.environ.get('TEST_OPERATOR_EMAIL', 'set-TEST_OPERATOR_EMAIL-to-run')
 OP_PASS = os.environ.get('TEST_OPERATOR_PASSWORD', 'set-TEST_OPERATOR_PASSWORD-to-run')
 
 

@@ -11,7 +11,31 @@ from typing import Optional
 from fastapi import HTTPException, Depends, Request, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
-JWT_SECRET = os.environ.get('JWT_SECRET', 'change-me')
+import logging as _logging
+import secrets as _secrets
+
+_INSECURE_JWT_DEFAULT = 'change-me'
+_IS_PRODUCTION = bool(os.environ.get('RENDER'))
+_env_secret = os.environ.get('JWT_SECRET', '')
+
+# Security: never sign production tokens with the well-known 'change-me'
+# default (anyone could forge a session). If the env secret is missing,
+# too short, or the placeholder while running in production, fall back to a
+# strong process-generated secret instead of the predictable default. We do
+# NOT hard-crash the app here: crashing the backend would take the whole
+# product down. The trade-off of a generated secret is that a restart
+# invalidates existing sessions, so we log a loud warning telling the
+# operator to set a persistent JWT_SECRET.
+if _IS_PRODUCTION and (not _env_secret or _env_secret == _INSECURE_JWT_DEFAULT or len(_env_secret) < 16):
+    JWT_SECRET = _secrets.token_urlsafe(48)
+    _logging.getLogger('auth').error(
+        'JWT_SECRET is missing/insecure in production — using a strong '
+        'process-generated secret. Set a persistent JWT_SECRET (e.g. '
+        '`openssl rand -base64 48`) in the backend environment so sessions '
+        'survive restarts.'
+    )
+else:
+    JWT_SECRET = _env_secret or _INSECURE_JWT_DEFAULT
 JWT_ALG = 'HS256'
 JWT_EXP_HOURS = 24 * 7  # 7 days
 
