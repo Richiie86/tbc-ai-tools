@@ -50,6 +50,8 @@ from vercel_api_ext import (
     VERCEL_TOKEN_MISSING_DETAIL as _VERCEL_TOKEN_MISSING_DETAIL,
     vercel_attach_domain as _vercel_attach_domain,
     vercel_create_deployment,
+    vercel_domain_config as _vercel_domain_config,
+    vercel_find_project_id as _vercel_find_project_id,
     vercel_get_deployment as _vercel_get_deployment,
     vercel_promote_to_production as _vercel_promote_to_production,
     vercel_redeploy as _vercel_redeploy,
@@ -1728,6 +1730,51 @@ async def ai_clone_project(
 
 
 # ---------- Inline domain edit (Copy URL UX) ---------------------------
+async def _resolve_vercel_project_id(doc: dict, settings: dict) -> Optional[str]:
+    """Resolve (and persist) the Vercel project id for a deploy-project doc.
+
+    The domain-attach flow used to silently no-op whenever `vercel_project_id`
+    was missing — which is the norm for the "This app" self-project and for
+    any freshly-created project that has only ever been deployed by name. That
+    made the Launch button appear to "do nothing". This resolver fills the gap
+    with three best-effort strategies, in order:
+
+      1. The id already stored on the doc.
+      2. The `projectId` reported by the project's last deployment (most
+         reliable right after a Deploy — which is exactly when operators try
+         to launch a domain).
+      3. A name lookup on Vercel (`GET /v9/projects/{slug}`).
+
+    Whatever it finds is written back onto the doc so future launches are
+    instant. Returns None only when every strategy comes up empty.
+    """
+    existing = (doc or {}).get('vercel_project_id')
+    if existing:
+        return existing
+
+    resolved: Optional[str] = None
+    # Strategy 2 — ask the last deployment who its project is.
+    dep_id = (doc or {}).get('last_deployment_id')
+    if dep_id:
+        try:
+            dep = await _vercel_get_deployment(settings, dep_id)
+            resolved = dep.get('projectId') or (dep.get('project') or {}).get('id')
+        except Exception as e:
+            logger.info('Resolve project id via deployment failed: %s', str(e)[:120])
+
+    # Strategy 3 — look the project up by its slug/name.
+    if not resolved:
+        name = _slugify((doc or {}).get('projectName') or '')
+        resolved = await _vercel_find_project_id(settings, name)
+
+    if resolved:
+        await db.deploy_projects.update_one(
+            {'id': (doc or {}).get('id')},
+            {'$set': {'vercel_project_id': resolved, 'updated_at': datetime.now(timezone.utc)}},
+        )
+    return resolved
+
+
 class DomainUpdate(BaseModel):
     domain: str
 
@@ -1774,14 +1821,15 @@ async def op_update_domain(
     except Exception:
         pass
 
-    # Best-effort Vercel attach. Skips silently if no Vercel project id yet
-    # (operator must Deploy once to create the project) or no PAT configured.
+    # Best-effort Vercel attach. We now auto-resolve the Vercel project id
+    # when it's missing (self-project / freshly-deployed projects), so the
+    # Launch button actually attaches instead of silently no-opping.
+    settings = await get_settings_doc()
     vercel_attached = False
     vercel_error: Optional[str] = None
-    vercel_project_id = (doc or {}).get('vercel_project_id')
+    vercel_project_id = await _resolve_vercel_project_id(doc, settings)
     if vercel_project_id:
         try:
-            settings = await get_settings_doc()
             await _vercel_attach_domain(settings, vercel_project_id, domain)
             vercel_attached = True
         except HTTPException as e:
@@ -1793,6 +1841,13 @@ async def op_update_domain(
         except Exception as e:  # network / unexpected — non-fatal
             vercel_error = f'Vercel attach failed: {e}'
             logger.warning('Vercel attach unexpected error: %s', e)
+    else:
+        # Couldn't resolve a Vercel project id by any strategy — tell the
+        # operator exactly what unblocks it instead of silently no-opping.
+        vercel_error = (
+            'Deploy this project once (hit Deploy) so Vercel creates the '
+            'project, then Launch the domain — it will attach automatically.'
+        )
 
     # Auto-point the domain's DNS at Vercel via the connected Porkbun account
     # so it goes live on THIS domain directly (any registrar the operator uses
@@ -1816,6 +1871,63 @@ async def op_update_domain(
     out['dns_configured'] = dns_configured
     out['dns_error'] = dns_error
     return out
+
+
+@ops_router.get('/dns-status')
+async def op_dns_status(_user: dict = Depends(get_current_operator)):
+    """Live DNS readiness for every project that has a custom domain.
+
+    Powers the dashboard's DNS sidebar: each domain gets a red/green dot
+    (`ready` bool) sourced from Vercel's authoritative
+    `GET /v6/domains/{domain}/config` (`misconfigured=false` ⇒ ready). The
+    tbctools.org self-domain is skipped — it's the platform's own host, not a
+    launched customer domain, so it never needs a readiness dot.
+
+    Shape:
+      { ready: bool,                 # true only when ALL domains are ready
+        total: int, ready_count: int,
+        domains: [{project_id, projectName, domain, ready, checked}] }
+
+    Fully best-effort: a missing Vercel token or a per-domain lookup error
+    just yields `ready=False, checked=False` for that row instead of 500ing
+    the whole sidebar.
+    """
+    settings = await get_settings_doc()
+    await _ensure_self_project()
+    self_domain = ((settings or {}).get('self_domain') or 'tbctools.org').strip().lower()
+
+    rows: list[dict] = []
+    cursor = db.deploy_projects.find({}).sort('updated_at', -1)
+    async for d in cursor:
+        domain = (d.get('domain') or '').strip().lower()
+        # Skip empty domains and the platform's own host.
+        if not domain or domain == self_domain:
+            continue
+        rows.append({
+            'project_id': d.get('id'),
+            'projectName': d.get('projectName') or d.get('id'),
+            'domain': domain,
+        })
+
+    async def _check(row: dict) -> dict:
+        try:
+            cfg = await _vercel_domain_config(settings, row['domain'])
+            return {**row, 'ready': bool(cfg.get('ready')), 'checked': True}
+        except HTTPException as e:
+            # 503 (no token) or 4xx — surface as "unknown" rather than error.
+            return {**row, 'ready': False, 'checked': False,
+                    'note': e.detail if isinstance(e.detail, str) else 'unavailable'}
+        except Exception:
+            return {**row, 'ready': False, 'checked': False}
+
+    checked = await asyncio.gather(*[_check(r) for r in rows]) if rows else []
+    ready_count = sum(1 for r in checked if r.get('ready'))
+    return {
+        'ready': bool(checked) and ready_count == len(checked),
+        'total': len(checked),
+        'ready_count': ready_count,
+        'domains': list(checked),
+    }
 
 
 
