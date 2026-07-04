@@ -73,6 +73,31 @@ def _mask_key(k: Optional[str]) -> Optional[str]:
     return k[:4] + '\u2022\u2022\u2022\u2022' + k[-4:]
 
 
+async def _notify_operators(db, subject: str, body: str) -> int:
+    """Drop an in-app notification into every operator's inbox (the same bell
+    users see). Best-effort: never raises, so it can't break the caller.
+    Returns the number of operators notified."""
+    try:
+        from notifications_ext import Notification
+        ops = [op async for op in db.users.find({'role': 'operator'}, {'id': 1})]
+        if not ops:
+            return 0
+        docs = [
+            Notification(
+                user_id=op['id'],
+                kind='dm',
+                subject=subject[:200],
+                body=body[:1000],
+            ).model_dump()
+            for op in ops
+        ]
+        await db.user_notifications.insert_many(docs)
+        return len(docs)
+    except Exception:  # noqa: BLE001
+        logger.warning('Could not notify operators (subject=%s)', subject, exc_info=True)
+        return 0
+
+
 def _sniff_provider(value: str) -> Optional[str]:
     """Best-effort provider detection from a key prefix. Used to validate that
     the pasted key looks like it belongs to the provider the user selected."""
@@ -155,6 +180,18 @@ async def byok_enquire(payload: dict = Body(default={}), user: dict = Depends(ge
     }
     await db.byok_enquiries.insert_one(doc)
     logger.info('BYOK enquiry from %s', doc['user_email'])
+    # Alert operators in their notification bell so requests aren't missed.
+    who = doc['user_email'] or doc['user_name'] or u['id']
+    extra = f' — {doc["company"]}' if doc['company'] else ''
+    await _notify_operators(
+        db,
+        subject='New Bring Your Own Keys request',
+        body=(
+            f'{who}{extra} has requested access to Bring Your Own Keys. '
+            f'{("Message: " + doc["message"]) if doc["message"] else "No message provided."} '
+            'Review it under Users → open their profile → Bring Your Own Keys to approve and set a price.'
+        ),
+    )
     return {'success': True, 'submitted': True}
 
 
@@ -351,11 +388,33 @@ async def op_set_byok(user_id: str, body: dict = Body(...), op: dict = Depends(g
 
     await db.users.update_one({'id': user_id}, update)
 
-    # Close any open enquiry from this user.
+    # Close any open enquiry from this user and let them know the outcome.
+    now = datetime.now(timezone.utc)
     if approved:
         await db.byok_enquiries.update_many(
             {'user_id': user_id, 'status': 'open'},
-            {'$set': {'status': 'approved', 'decided_at': datetime.now(timezone.utc),
+            {'$set': {'status': 'approved', 'decided_at': now,
+                      'decided_by_email': op.get('email', '')}},
+        )
+        try:
+            from notifications_ext import Notification
+            price = set_fields.get('byok_monthly_credits') or _monthly_cost(target)
+            await db.user_notifications.insert_one(Notification(
+                user_id=user_id,
+                kind='dm',
+                subject='Bring Your Own Keys is now available',
+                body=(
+                    f'Your account has been approved for Bring Your Own Keys at '
+                    f'{price} credits/month. Open Settings \u2192 Bring your own keys to '
+                    'add your provider keys and switch it on.'
+                ),
+            ).model_dump())
+        except Exception:  # noqa: BLE001
+            logger.warning('Could not notify user %s of BYOK approval', user_id, exc_info=True)
+    else:
+        await db.byok_enquiries.update_many(
+            {'user_id': user_id, 'status': 'open'},
+            {'$set': {'status': 'declined', 'decided_at': now,
                       'decided_by_email': op.get('email', '')}},
         )
     logger.info('Operator %s set BYOK approved=%s (price=%s) for %s',
