@@ -145,6 +145,26 @@ async def launch_domain(
             vercel_error = f"Vercel attach failed: {e}"
             logger.warning("launch-domain project update failed: %s", e)
 
+    # Money-safety: the docstring promises we don't charge for a launch that
+    # did nothing. If we actually charged AND both the DNS step and the Vercel
+    # attach failed, refund the credits and record the launch as free so the
+    # user (or a customer) is never billed for a no-op. A partial success
+    # (either DNS or Vercel worked) is still a real launch and stays charged.
+    refunded = False
+    both_failed = (not launch_doc["dns_configured"]) and (not launch_doc["vercel_attached"])
+    if charged > 0 and both_failed:
+        try:
+            await db.users.update_one({"id": uid}, {"$inc": {"credits": charged}})
+            launch_doc["credits_charged"] = 0
+            launch_doc["refunded"] = True
+            refunded = True
+            logger.info(
+                "Domain launch %s refunded %d credits (DNS + Vercel both failed)",
+                domain, charged,
+            )
+        except Exception as e:  # pragma: no cover - refund best-effort
+            logger.error("Refund failed for %s launch by %s: %s", domain, uid, e)
+
     ins = await db.domain_launches.insert_one(launch_doc)
 
     # Trust the freshly-launched domain for CORS immediately (otherwise it
@@ -167,17 +187,45 @@ async def launch_domain(
         pass
 
     fresh = await db.users.find_one({"id": uid})
-    logger.info("Domain launch %s by %s (-%d credits)", domain, u.get("email"), charged)
+    logger.info(
+        "Domain launch %s by %s (-%d credits%s)",
+        domain, u.get("email"), launch_doc["credits_charged"],
+        ", refunded" if refunded else "",
+    )
+
+    # A single, human-readable summary the UI can show as-is.
+    if launch_doc["dns_configured"] and launch_doc["vercel_attached"]:
+        message = (
+            f"{domain} is launching. DNS is pointed at Vercel and the domain is "
+            "attached to your project — it goes live once DNS propagates "
+            "(usually a few minutes, up to an hour)."
+        )
+    elif refunded:
+        message = (
+            f"Couldn't launch {domain} automatically, so you were NOT charged. "
+            + (dns_error or vercel_error or "Check that both your Porkbun keys and "
+               "Vercel token are saved in Operator settings, then try again.")
+        )
+    else:
+        parts = []
+        parts.append("DNS pointed at Vercel." if launch_doc["dns_configured"]
+                     else f"DNS not set ({dns_error}).")
+        parts.append("Domain attached to Vercel." if launch_doc["vercel_attached"]
+                     else f"Vercel attach pending ({vercel_error}).")
+        message = f"{domain}: " + " ".join(parts)
+
     return {
         "ok": True,
         "id": str(ins.inserted_id),
         "domain": domain,
-        "credits_charged": charged,
+        "credits_charged": launch_doc["credits_charged"],
         "credits_remaining": fresh.get("credits"),
         "dns_configured": launch_doc["dns_configured"],
         "dns_error": dns_error,
         "vercel_attached": launch_doc["vercel_attached"],
         "vercel_error": vercel_error,
+        "refunded": refunded,
+        "message": message,
     }
 
 
