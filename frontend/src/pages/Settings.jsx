@@ -418,6 +418,9 @@ function ByokSection({ refresh }) {
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [enquiring, setEnquiring] = useState(false);
+  const [enquiryMsg, setEnquiryMsg] = useState('');
+  const [enquirySent, setEnquirySent] = useState(false);
 
   const load = async () => {
     try { const { data } = await api.get('/byok/status'); setStatus(data); }
@@ -425,6 +428,17 @@ function ByokSection({ refresh }) {
     finally { setLoading(false); }
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
+
+  const enquire = async () => {
+    setEnquiring(true);
+    try {
+      await api.post('/byok/enquire', { message: enquiryMsg.trim() });
+      setEnquirySent(true);
+      toast.success('Request sent — we\u2019ll be in touch about access and pricing.');
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Could not send your request');
+    } finally { setEnquiring(false); }
+  };
 
   const activate = async () => {
     setBusy(true);
@@ -453,6 +467,51 @@ function ByokSection({ refresh }) {
   if (loading) return <Card title="Bring your own keys"><Loader2 className="h-6 w-6 animate-spin text-tbc-400" /></Card>;
   if (!status) return <Card title="Bring your own keys" desc="Could not load your key settings right now." />;
 
+  // ---- Not approved: company-only feature. Show info + enquiry only.
+  // No price, no activation, no key fields until the operator approves.
+  if (!status.approved) {
+    return (
+      <Card
+        title="Bring your own keys"
+        desc="A company add-on that lets your team run the AI on your own provider accounts (Anthropic, OpenAI, Gemini, or OpenRouter) instead of spending credits per message."
+      >
+        <div className="mb-4 rounded-xl border border-tbc-900/60 bg-ink-950/60 p-4">
+          <div className="flex items-center gap-2 text-sm font-semibold text-tbc-50">
+            <KeyRound className="h-4 w-4 text-tbc-300" />
+            Available to companies on request
+          </div>
+          <ul className="mt-3 space-y-2 text-xs leading-relaxed text-tbc-200/70">
+            <li className="flex gap-2"><Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-tbc-400" />Your messages run on your own API keys — billed directly by your provider.</li>
+            <li className="flex gap-2"><Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-tbc-400" />One OpenRouter key alone unlocks 300+ models.</li>
+            <li className="flex gap-2"><Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-tbc-400" />Pricing is agreed per company. Contact us for a quote — access is enabled by our team once approved.</li>
+          </ul>
+        </div>
+
+        {enquirySent ? (
+          <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
+            Thanks — your request has been sent. We&apos;ll reach out about access and pricing.
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <textarea
+              value={enquiryMsg}
+              onChange={(e) => setEnquiryMsg(e.target.value)}
+              rows={3}
+              placeholder="Tell us about your company and expected usage (optional)…"
+              className="w-full rounded-lg border border-tbc-900/60 bg-ink-950 px-3 py-2 text-sm text-tbc-100 placeholder:text-tbc-200/30 focus:border-tbc-500/60 focus:outline-none"
+            />
+            <Button onClick={enquire} disabled={enquiring}
+              className="bg-tbc-500 font-semibold text-ink-950 hover:bg-tbc-400">
+              {enquiring ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Request access &amp; pricing
+            </Button>
+          </div>
+        )}
+      </Card>
+    );
+  }
+
+  // ---- Approved company account: full management UI at the agreed price.
   const enabled = status.enabled;
   const nextCharge = status.next_charge_at ? new Date(status.next_charge_at).toLocaleDateString() : null;
 

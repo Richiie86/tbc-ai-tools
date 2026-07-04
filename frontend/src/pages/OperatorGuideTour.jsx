@@ -71,7 +71,7 @@ const STEPS = [
   {
     tab: 'keys', icon: KeyRound, title: 'My Keys',
     body: 'Your own provider keys, so the platform runs entirely on your accounts — no shared or third-party dependency. Add Anthropic, OpenAI, Google Gemini, or OpenRouter (a single key that unlocks 300+ models). Use "Add a specific key", pick the provider, paste, Test, and Save. Each key also has Rotate and Clear.',
-    tip: 'OpenRouter is the easiest way to offer lots of models at once — one key covers 300+ of them. Members can also bring their own keys via the Bring Your Own Keys add-on in their account.',
+    tip: 'OpenRouter is the easiest way to offer lots of models at once — one key covers 300+ of them. Company accounts can also run on their own keys via Bring Your Own Keys — but only after you approve them and set a price in the Users tab.',
   },
   {
     tab: 'amai', icon: BrainCircuit, title: 'amAI (smart model routing)',

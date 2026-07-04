@@ -92,15 +92,15 @@ const FEATURES = [
   },
   {
     icon: KeyRound,
-    title: 'Bring your own keys',
-    desc: 'Optional add-on: run on your own provider accounts and stop spending credits per message.',
-    long: 'Already have your own Anthropic, OpenAI, Gemini, or OpenRouter account? Switch on Bring Your Own Keys for a flat 50 credits/month and every message runs on your own key at zero credits each — you pay your provider directly. One OpenRouter key alone covers 300+ models. Turn it off any time; your saved keys are kept for next time.',
+    title: 'Bring your own keys (for companies)',
+    desc: 'A company add-on: run on your own provider accounts instead of spending credits per message.',
+    long: 'Built for companies with their own AI provider accounts. Once approved, your team\u2019s messages run on your own Anthropic, OpenAI, Gemini, or OpenRouter keys — billed directly by your provider — and one OpenRouter key alone covers 300+ models. Pricing is agreed per company based on your usage, so it\u2019s not self-serve: contact us and our team enables it for your account.',
     points: [
-      'Flat 50 credits/month — then messages cost 0 credits',
+      'Company accounts only — enabled by our team once approved',
       'Use Anthropic, OpenAI, Gemini, or OpenRouter (300+ models on one key)',
-      'Fully optional — occasional users can stick with per-message credits',
+      'Custom pricing — talk to us for a quote before you commit',
     ],
-    cta: { label: 'Set up your keys', to: '/register' },
+    cta: { label: 'Contact us about BYOK', to: '/contact' },
   },
   {
     icon: ShieldCheck,
@@ -201,8 +201,8 @@ export default function Landing() {
           </p>
           <p className="mt-4 max-w-2xl text-sm leading-relaxed text-slate-400">
             An independent product from <span className="font-semibold text-slate-200">TradeBridge Club</span>, running on our own
-            infrastructure and accounts. Prefer to run on your own API keys? Switch on
-            <span className="font-medium text-tbc-300"> Bring Your Own Keys</span> and pay your provider directly.
+            infrastructure and accounts. Companies can also run on their own API keys with
+            <span className="font-medium text-tbc-300"> Bring Your Own Keys</span> — <a href="/contact" className="underline decoration-dotted underline-offset-2 hover:text-tbc-200">contact us</a> for access and pricing.
           </p>
           <div className="mt-9 flex flex-wrap items-center gap-3">
             <Link to="/register">

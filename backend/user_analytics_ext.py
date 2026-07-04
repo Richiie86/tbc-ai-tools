@@ -46,7 +46,7 @@ def _iso(dt) -> str | None:
 def _serialize_user(u: dict) -> dict:
     """Strip secrets + coerce timestamps; matches `_serialize` in server.py
     closely so the FE doesn't have to special-case the analytics row."""
-    out = {k: v for k, v in u.items() if k not in ('_id', 'password_hash', 'totp_secret')}
+    out = {k: v for k, v in u.items() if k not in ('_id', 'password_hash', 'totp_secret', 'byok_keys')}
     for k in ('created_at', 'updated_at', 'last_seen_at', 'banned_at', 'last_login_at'):
         if k in out:
             out[k] = _iso(out[k])

@@ -58,9 +58,9 @@ const STEPS = [
     body: 'The chip in the top-right shows how many credits you have left — credits are what each message spends. When they run low, buy a top-up pack or upgrade to a monthly plan from the Pricing page. Click the chip any time to see your usage history.',
   },
   {
-    icon: KeyRound, title: 'Bring your own keys (optional)',
-    body: 'Power user with your own AI provider accounts? Turn on "Bring your own keys" in Settings for 50 credits/month. After that, your messages run on your own Anthropic, OpenAI, Gemini, or OpenRouter key (one key = 300+ models) and cost you 0 credits each — you just pay your provider directly. Switch it off any time; your saved keys are kept.',
-    tip: 'This pays off if you send a lot of messages. Occasional user? The normal per-message credits are simpler and cheaper.',
+    icon: KeyRound, title: 'Bring your own keys (companies)',
+    body: 'Running a company with your own AI provider accounts? "Bring your own keys" lets your team run on your own Anthropic, OpenAI, Gemini, or OpenRouter keys (one key = 300+ models) so messages cost 0 credits — you pay your provider directly. It\'s not self-serve: pricing is agreed per company, so open Settings → Bring your own keys and request access, or contact us for a quote.',
+    tip: 'Our team enables this once your account is approved. Individual users can stick with simple per-message credits.',
   },
   {
     icon: Gift, title: 'Refer a friend',

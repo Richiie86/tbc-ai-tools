@@ -94,13 +94,17 @@ class User(BaseModel):
     dob: Optional[str] = None
     # Year of the last birthday payout so we never double-grant in a year.
     birthday_rewarded_year: Optional[int] = None
-    # ----- BYOK (Bring Your Own Keys) add-on -----
-    # When enabled, the user's chat runs on THEIR OWN provider API keys, so
-    # those messages don't burn app credits. The add-on itself costs a flat
-    # 50 credits/month (deducted on activation, then every 30 days by the
-    # billing scheduler). `byok_keys` maps provider -> raw key (stored the same
-    # way operator keys are; never returned to the client except masked).
-    byok_enabled: bool = False
+    # ----- BYOK (Bring Your Own Keys) — company-only, operator-approved -----
+    # BYOK is NOT self-serve. It is offered to company accounts on request:
+    # the customer contacts us, we agree a monthly price, and the operator
+    # approves the account (`byok_approved=True`) and records the negotiated
+    # monthly credit cost (`byok_monthly_credits`). Only then can the account
+    # switch it on. When enabled, chat runs on THEIR OWN provider keys so
+    # messages cost 0 app credits. `byok_keys` maps provider -> raw key (stored
+    # like operator keys; never returned to the client except masked).
+    byok_approved: bool = False           # operator granted access to this account
+    byok_monthly_credits: Optional[int] = None  # negotiated price; set by operator on approval
+    byok_enabled: bool = False            # the account has switched it on
     byok_keys: Dict[str, str] = Field(default_factory=dict)
     byok_activated_at: Optional[datetime] = None
     byok_next_charge_at: Optional[datetime] = None

@@ -3,7 +3,9 @@ import api from '../../../lib/api';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from '../../../components/ui/dialog';
-import { Loader2, MessageCircle, Calendar, Layers, DollarSign, ShieldOff, ShieldCheck, ExternalLink } from 'lucide-react';
+import { Loader2, MessageCircle, Calendar, Layers, DollarSign, ShieldOff, ShieldCheck, ExternalLink, KeyRound } from 'lucide-react';
+import { Button } from '../../../components/ui/button';
+import { toast } from 'sonner';
 
 /**
  * Per-user analytics drill-down modal. Fetches `/api/operator/users/{id}/analytics`
@@ -82,10 +84,106 @@ export default function UserAnalyticsModal({ user, onClose }) {
               <KV label="Last payment" value={data.payments.last_payment_at ? new Date(data.payments.last_payment_at).toLocaleDateString() : '—'} />
               <KV label="2FA" value={data.user.totp_enabled ? 'On' : 'Off'} />
             </div>
+
+            <ByokControl user={data.user} />
           </div>
         )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * Operator control for the company-only Bring Your Own Keys feature.
+ * BYOK is gated: an account can only switch it on after the operator approves
+ * it here and records the negotiated monthly price (in credits). Pricing is
+ * agreed per company out-of-band, so it's never shown to users publicly.
+ */
+function ByokControl({ user }) {
+  const [approved, setApproved] = useState(!!user.byok_approved);
+  const [price, setPrice] = useState(
+    user.byok_monthly_credits != null ? String(user.byok_monthly_credits) : '',
+  );
+  const [busy, setBusy] = useState(false);
+  const enabled = !!user.byok_enabled;
+
+  const save = async (nextApproved) => {
+    const body = { approved: nextApproved };
+    if (nextApproved) {
+      const n = parseInt(price, 10);
+      if (!Number.isFinite(n) || n <= 0) {
+        toast.error('Set the agreed monthly price (in credits) before approving.');
+        return;
+      }
+      body.monthly_credits = n;
+    }
+    setBusy(true);
+    try {
+      await api.patch(`/operator/users/${user.id}/byok`, body);
+      setApproved(nextApproved);
+      toast.success(nextApproved
+        ? `BYOK approved at ${body.monthly_credits} credits/month.`
+        : 'BYOK access revoked.');
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Could not update BYOK access');
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="rounded-lg border border-tbc-900/60 bg-ink-950 p-3">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2 text-xs font-semibold text-tbc-100">
+          <KeyRound className="h-3.5 w-3.5 text-tbc-300" />
+          Bring Your Own Keys
+          <span className="text-[10px] font-normal uppercase tracking-wider text-tbc-200/50">company add-on</span>
+        </div>
+        <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider">
+          {approved ? (
+            <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-emerald-300">Approved</span>
+          ) : (
+            <span className="rounded-full bg-tbc-900/60 px-2 py-0.5 text-tbc-200/60">Not approved</span>
+          )}
+          {enabled && <span className="rounded-full bg-tbc-500/15 px-2 py-0.5 text-tbc-300">On</span>}
+        </div>
+      </div>
+
+      <p className="mt-2 text-[11px] leading-relaxed text-tbc-200/60">
+        Approve this account only after agreeing a price. Enter the negotiated monthly cost in credits — the account
+        is charged this on activation and every 30 days.
+      </p>
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <label className="flex items-center gap-1.5 text-[11px] text-tbc-200/70">
+          <span>Price</span>
+          <input
+            type="number"
+            min="1"
+            value={price}
+            onChange={(e) => setPrice(e.target.value)}
+            placeholder="e.g. 500"
+            className="w-24 rounded border border-tbc-900/60 bg-ink-900 px-2 py-1 text-xs text-tbc-100 focus:border-tbc-500/60 focus:outline-none"
+          />
+          <span className="text-tbc-200/50">credits/mo</span>
+        </label>
+        {approved ? (
+          <>
+            <Button size="sm" disabled={busy} onClick={() => save(true)}
+              className="bg-tbc-500 text-ink-950 hover:bg-tbc-400 font-semibold">
+              {busy ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null} Update price
+            </Button>
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => save(false)}
+              className="border-rose-500/40 text-rose-300 hover:bg-rose-500/10">
+              Revoke access
+            </Button>
+          </>
+        ) : (
+          <Button size="sm" disabled={busy} onClick={() => save(true)}
+            className="bg-tbc-500 text-ink-950 hover:bg-tbc-400 font-semibold">
+            {busy ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null} Approve access
+          </Button>
+        )}
+      </div>
+    </div>
   );
 }
 
