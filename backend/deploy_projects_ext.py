@@ -936,7 +936,14 @@ async def _trigger_deploy(
                     'can_auto_push': True,
                 },
             )
-        if last_review.get('verdict') == 'do_not_ship':
+        # Operator kill-switch: when `enforce_ship_gate` is turned off in
+        # Operator Settings, a `do_not_ship` verdict becomes advisory — the
+        # human operator has explicitly opted out of the hard block, so we
+        # let the deploy proceed (the verdict is still recorded/visible).
+        # Defaults to True so existing behaviour and the autonomous-AI safety
+        # net are preserved unless the operator deliberately disables it.
+        gate_enforced = bool((settings or {}).get('enforce_ship_gate', True))
+        if last_review.get('verdict') == 'do_not_ship' and gate_enforced:
             fix_session_id = await _create_fix_review_chat(project, last_review, user_id)
             raise HTTPException(
                 412,
@@ -944,8 +951,9 @@ async def _trigger_deploy(
                     'error': 'review_blocked',
                     'message': (
                         f"Production deploy blocked by AI code review verdict "
-                        f"'{last_review.get('verdict')}'. Resolve the findings or "
-                        f"pass bypass_review=true to override."
+                        f"'{last_review.get('verdict')}'. Resolve the findings, "
+                        f"pass bypass_review=true, or turn off 'Enforce AI ship-gate' "
+                        f"in Operator Settings to override."
                     ),
                     'review': last_review,
                     'fix_chat_session_id': fix_session_id,

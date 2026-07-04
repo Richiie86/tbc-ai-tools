@@ -458,6 +458,27 @@ export default function SettingsTab() {
             </Button>
           </div>
         </div>
+
+        <div id="ship-gate" className="border-t border-tbc-900/60 pt-3 scroll-mt-20">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-tbc-200/60">
+                Enforce AI ship-gate
+              </div>
+              <p className="mt-1 text-[11px] text-tbc-200/50">
+                When on, a <code>do_not_ship</code> code-review verdict hard-blocks
+                production deploys (you can still override per-deploy with
+                &ldquo;Deploy anyway&rdquo;). Turn this <strong>off</strong> to make the
+                verdict advisory so your Deploy button always ships in one click.
+              </p>
+            </div>
+            <Switch
+              data-testid="settings-enforce-ship-gate"
+              checked={settings.enforce_ship_gate !== false}
+              onCheckedChange={(v) => save({ enforce_ship_gate: v })}
+            />
+          </div>
+        </div>
       </Section>
     </div>
   );

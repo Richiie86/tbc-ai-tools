@@ -821,6 +821,9 @@ async def op_get_settings(_: dict = Depends(get_current_operator)):
         # and proactively nag the operator before tokens expire.
         'vercel_token_rotated_at': doc.get('vercel_token_rotated_at'),
         'github_token_rotated_at': doc.get('github_token_rotated_at'),
+        # Deploy ship-gate: when False, a do_not_ship review verdict is
+        # advisory and the operator's production deploy is never hard-blocked.
+        'enforce_ship_gate': bool(doc.get('enforce_ship_gate', True)),
     }
 
 
@@ -841,6 +844,9 @@ async def op_update_settings(payload: dict, _: dict = Depends(get_current_operat
         'deploy_webhook_url', 'deploy_webhook_secret',
         'self_repo', 'self_git_ref', 'self_vercel_project_id',
         'github_token',
+        # Deploy ship-gate kill-switch (bool). When False a do_not_ship code
+        # review verdict is advisory instead of a hard 412 block.
+        'enforce_ship_gate',
     }
     updates = {}
     now = datetime.now(timezone.utc).isoformat()
