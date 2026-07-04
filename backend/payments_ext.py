@@ -712,7 +712,7 @@ def _sanitize_meter(m: dict) -> dict:
     url = str(m.get('refill_url') or '').strip()[:400]
     if url and not url.startswith(('http://', 'https://')):
         url = ''
-    return {
+    out = {
         'id': mid,
         'provider': str(m.get('provider') or 'Provider').strip()[:60],
         'unit': unit,
@@ -721,6 +721,12 @@ def _sanitize_meter(m: dict) -> dict:
         'refill_url': url,
         'notes': str(m.get('notes') or '').strip()[:200],
     }
+    # Carry through live-sync metadata so a manual Save never wipes it.
+    if m.get('source') in ('live', 'manual'):
+        out['source'] = m['source']
+    if 'synced_at' in m and m.get('synced_at'):
+        out['synced_at'] = str(m.get('synced_at'))[:40]
+    return out
 
 
 @router.get('/operator/usage-meters')
@@ -749,6 +755,213 @@ async def op_update_usage_meters(payload: dict = Body(...), _: dict = Depends(ge
         upsert=True,
     )
     return {'success': True, 'meters': meters, 'updated_at': now}
+
+
+# -------------------------------------------------------------------
+# LIVE SYNC — pull real month-to-date spend from each provider's API.
+#
+# Honest reality per provider (why some are live and some can't be):
+#   • OpenAI    — real USD spend IS available, but ONLY via an Admin key
+#                 (sk-admin-…). A normal chat key returns 401.
+#   • Anthropic — same: needs an Admin key (sk-ant-admin-…).
+#   • Groq / Render / Vercel / Google — no public "spend/credits-left" API,
+#                 so these stay manual. We say so plainly in `sync_reason`.
+#
+# The operator can paste a billing/admin key per provider (stored separately
+# from the chat keys) so OpenAI/Anthropic light up automatically.
+# -------------------------------------------------------------------
+_TAXAMETER_KEYS_FIELD = 'taxameter_keys'  # payment_settings.taxameter_keys.<id>
+
+# Which meter ids can be synced live, and what the operator must provide.
+_LIVE_PROVIDERS = {
+    'openai': {
+        'label': 'OpenAI',
+        'needs': 'an OpenAI Admin key (sk-admin-…)',
+        'fallback_field': 'openai_api_key',
+    },
+    'anthropic': {
+        'label': 'Anthropic',
+        'needs': 'an Anthropic Admin key (sk-ant-admin-…)',
+        'fallback_field': 'anthropic_api_key',
+    },
+}
+
+# Providers with no usable spend API — always manual, with an honest reason.
+_MANUAL_ONLY_REASON = {
+    'groq': 'Groq has no usage/billing API yet — update this figure manually.',
+    'render': 'Render does not expose account balance via API — update manually.',
+    'vercel': 'Vercel does not expose credits/spend via API — update manually.',
+    'gemini': 'Google/Gemini billing is not available via API key — update manually.',
+    'github': 'GitHub does not expose total USD spend via API — update manually.',
+    'mongodb': 'MongoDB Atlas has no simple spend API — update manually.',
+    'resend': 'Resend has no usage API for this — update manually.',
+    'cloudflare': 'Cloudflare has no simple spend API — update manually.',
+}
+
+
+def _month_start_utc() -> datetime:
+    now = datetime.now(timezone.utc)
+    return now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+
+def _sum_amounts(obj) -> float:
+    """Defensively walk a JSON cost payload and total every money amount we can
+    find — handles both {'amount': {'value': n}} and {'amount': '1.23'} shapes
+    so a provider tweaking its response doesn't silently break the total."""
+    total = 0.0
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if k == 'amount':
+                if isinstance(v, dict) and 'value' in v:
+                    try:
+                        total += float(v['value'])
+                    except (TypeError, ValueError):
+                        pass
+                else:
+                    try:
+                        total += float(v)
+                    except (TypeError, ValueError):
+                        pass
+            else:
+                total += _sum_amounts(v)
+    elif isinstance(obj, list):
+        for it in obj:
+            total += _sum_amounts(it)
+    return total
+
+
+async def _fetch_openai_cost(key: str) -> float:
+    import httpx
+    start = int(_month_start_utc().timestamp())
+    async with httpx.AsyncClient(timeout=25) as client:
+        r = await client.get(
+            'https://api.openai.com/v1/organization/costs',
+            headers={'Authorization': f'Bearer {key}'},
+            params={'start_time': start, 'bucket_width': '1d', 'limit': 31},
+        )
+    if r.status_code in (401, 403):
+        raise PermissionError('admin_key_required')
+    r.raise_for_status()
+    return round(_sum_amounts(r.json().get('data', [])), 4)
+
+
+async def _fetch_anthropic_cost(key: str) -> float:
+    import httpx
+    start = _month_start_utc().strftime('%Y-%m-%dT%H:%M:%SZ')
+    async with httpx.AsyncClient(timeout=25) as client:
+        r = await client.get(
+            'https://api.anthropic.com/v1/organizations/cost_report',
+            headers={'x-api-key': key, 'anthropic-version': '2023-06-01'},
+            params={'starting_at': start},
+        )
+    if r.status_code in (401, 403):
+        raise PermissionError('admin_key_required')
+    r.raise_for_status()
+    return round(_sum_amounts(r.json().get('data', [])), 4)
+
+
+_LIVE_FETCHERS = {
+    'openai': _fetch_openai_cost,
+    'anthropic': _fetch_anthropic_cost,
+}
+
+
+async def _sync_one_meter(meter: dict, settings_doc: dict) -> dict:
+    """Return the meter updated with live spend + status metadata."""
+    mid = meter.get('id')
+    now_iso = datetime.now(timezone.utc).isoformat()
+    tax_keys = settings_doc.get(_TAXAMETER_KEYS_FIELD) or {}
+
+    if mid in _LIVE_PROVIDERS:
+        spec = _LIVE_PROVIDERS[mid]
+        key = (tax_keys.get(mid) or settings_doc.get(spec['fallback_field']) or '').strip()
+        if not key:
+            meter['source'] = 'manual'
+            meter['live_supported'] = True
+            meter['sync_reason'] = f'Add {spec["needs"]} to sync spend automatically.'
+            return meter
+        try:
+            used = await _LIVE_FETCHERS[mid](key)
+            meter['used'] = used
+            meter['source'] = 'live'
+            meter['live_supported'] = True
+            meter['synced_at'] = now_iso
+            meter['sync_reason'] = ''
+        except PermissionError:
+            meter['source'] = 'manual'
+            meter['live_supported'] = True
+            meter['sync_reason'] = (
+                f'The saved key is not an admin key. {spec["label"]} needs '
+                f'{spec["needs"]} to read spend.'
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning('Taxameter live sync failed for %s: %s', mid, e)
+            meter['source'] = 'manual'
+            meter['live_supported'] = True
+            meter['sync_reason'] = f'Could not reach {spec["label"]} just now — try again.'
+        return meter
+
+    # Providers with no usable spend API.
+    meter['source'] = 'manual'
+    meter['live_supported'] = False
+    meter['sync_reason'] = _MANUAL_ONLY_REASON.get(
+        mid, 'No live usage API for this provider — update manually.')
+    return meter
+
+
+@router.post('/operator/usage-meters/sync')
+async def op_sync_usage_meters(_: dict = Depends(get_current_operator)):
+    """Pull live month-to-date spend for every provider that supports it."""
+    db = await get_db()
+    doc = await db.settings.find_one({'_id': _USAGE_METERS_ID})
+    meters = (doc.get('meters') if doc else None) or list(_DEFAULT_USAGE_METERS)
+    settings_doc = await db.settings.find_one({'_id': 'payment_settings'}) or {}
+
+    synced = [await _sync_one_meter(dict(m), settings_doc) for m in meters]
+    now = datetime.now(timezone.utc).isoformat()
+    await db.settings.update_one(
+        {'_id': _USAGE_METERS_ID},
+        {'$set': {'meters': synced, 'updated_at': now}},
+        upsert=True,
+    )
+    live = sum(1 for m in synced if m.get('source') == 'live')
+    return {'success': True, 'meters': synced, 'updated_at': now, 'live_count': live}
+
+
+@router.get('/operator/usage-meters/keys')
+async def op_get_taxameter_keys(_: dict = Depends(get_current_operator)):
+    """Which providers can go live, and whether a billing key is already set."""
+    db = await get_db()
+    settings_doc = await db.settings.find_one({'_id': 'payment_settings'}) or {}
+    tax_keys = settings_doc.get(_TAXAMETER_KEYS_FIELD) or {}
+    out = {}
+    for pid, spec in _LIVE_PROVIDERS.items():
+        stored = (tax_keys.get(pid) or settings_doc.get(spec['fallback_field']) or '').strip()
+        out[pid] = {
+            'needs': spec['needs'],
+            'set': bool(tax_keys.get(pid)),
+            'masked': _mask_key(stored) if stored else None,
+        }
+    return {'providers': out}
+
+
+@router.put('/operator/usage-meters/keys')
+async def op_set_taxameter_key(payload: dict = Body(...), _: dict = Depends(get_current_operator)):
+    """Store (or clear) a per-provider billing/admin key used only for live sync.
+    Kept separate from the chat keys so an admin key never affects inference."""
+    provider = (payload.get('provider') or '').strip().lower()
+    value = (payload.get('value') or '').strip()
+    if provider not in _LIVE_PROVIDERS:
+        raise HTTPException(400, f'Unsupported provider: {provider}')
+    db = await get_db()
+    field = f'{_TAXAMETER_KEYS_FIELD}.{provider}'
+    if value:
+        await db.settings.update_one(
+            {'_id': 'payment_settings'}, {'$set': {field: value}}, upsert=True)
+    else:
+        await db.settings.update_one(
+            {'_id': 'payment_settings'}, {'$unset': {field: ''}})
+    return {'success': True, 'provider': provider, 'set': bool(value)}
 
 
 # ===================================================================
