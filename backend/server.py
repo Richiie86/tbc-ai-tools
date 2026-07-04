@@ -2461,6 +2461,9 @@ from context7_ext import router as context7_router, build_context_block
 from tools_ext import router as tools_router, build_tools_block
 app.include_router(operator_search_router)
 app.include_router(user_projects_router)
+from domain_launch_ext import launch_router, money_domains_router
+app.include_router(launch_router)
+app.include_router(money_domains_router)
 app.include_router(amai_router)
 app.include_router(context7_router)
 app.include_router(tools_router)

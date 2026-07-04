@@ -197,7 +197,7 @@ export default function Operator() {
               <StatCard icon={MessageSquare} label="Total Messages" value={stats?.total_messages?.toLocaleString() ?? '–'}
                 onClick={() => onTabChange('contacts')} hint="Read messages" />
               <StatCard icon={DollarSign}   label="Revenue (USD)"   value={`$${(stats?.revenue_usd ?? 0).toLocaleString()}`}
-                onClick={() => onTabChange('money')} hint="Open Money tab" />
+                onClick={() => onTabChange('money')} hint="Open Income tab" />
             </div>
 
             <StatsToolbar stats={stats} onRefresh={loadAll} />
@@ -225,7 +225,7 @@ export default function Operator() {
                 <TabTrigger value="plans"     icon={Sparkles}>Plans</TabTrigger>
                 <TabTrigger value="payments"  icon={CreditCard}>Payments</TabTrigger>
                 <TabTrigger value="treasury"  icon={Wallet}>Treasury</TabTrigger>
-                <TabTrigger value="money"     icon={DollarSign}>Money</TabTrigger>
+                <TabTrigger value="money"     icon={DollarSign}>Income</TabTrigger>
                 <TabTrigger value="pricing"   icon={DollarSign}>Pricing</TabTrigger>
                 <TabTrigger value="keys"      icon={KeyRound}>My Keys</TabTrigger>
                 <TabTrigger value="domains"   icon={Globe}>Domains</TabTrigger>
