@@ -6,9 +6,10 @@ import { Card } from '../../../components/ui/card';
 import { toast } from 'sonner';
 import {
   Rocket, Loader2, KeyRound, RefreshCw, Eye, EyeOff, Copy, Check,
-  ExternalLink, Save,
+  ExternalLink, Save, Plus,
 } from 'lucide-react';
 import { ProjectRow } from './deploy/ProjectRow';
+import { NewProjectDialog } from './deploy/NewProjectDialog';
 
 // ---------- Self-source download button --------------------------------
 /**
@@ -362,6 +363,8 @@ export function OpsDeploySection() {
   const [keysStatus, setKeysStatus] = useState(null);
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [newOpen, setNewOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -391,6 +394,20 @@ export function OpsDeploySection() {
     load();
   }, [load]);
 
+  const createProject = useCallback(async (payload) => {
+    setCreating(true);
+    try {
+      const { data } = await api.post('/operator/deploy/projects', payload);
+      toast.success(`Created "${data.projectName}"`);
+      setNewOpen(false);
+      load();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Create failed');
+    } finally {
+      setCreating(false);
+    }
+  }, [load]);
+
   useEffect(() => { load(); }, [load]);
 
   if (loading || !keysStatus) {
@@ -417,8 +434,25 @@ export function OpsDeploySection() {
             </p>
           </div>
         </div>
-        <SelfSourceDownloadButton />
+        <div className="flex shrink-0 items-center gap-2">
+          <Button
+            size="sm"
+            data-testid="new-deploy-project-btn"
+            onClick={() => setNewOpen(true)}
+            className="bg-tbc-500 text-ink-950 hover:bg-tbc-400 font-semibold"
+          >
+            <Plus className="mr-1.5 h-3 w-3" /> New project
+          </Button>
+          <SelfSourceDownloadButton />
+        </div>
       </div>
+
+      <NewProjectDialog
+        open={newOpen}
+        onOpenChange={setNewOpen}
+        onCreate={createProject}
+        busy={creating}
+      />
 
       <KeysCard keysStatus={keysStatus} onSaved={load} />
 
@@ -427,11 +461,19 @@ export function OpsDeploySection() {
           <Card className="border-tbc-900/60 bg-ink-900/40 p-6 text-center">
             <p className="text-sm text-tbc-200/80">No deploy projects yet.</p>
             <p className="mt-2 text-xs text-tbc-200/50">
-              Have your AI agent POST to{' '}
+              Click <span className="font-semibold text-tbc-300">New project</span> to name one and
+              paste the domain you want it to deploy to. Or have your AI agent POST to{' '}
               <code className="rounded bg-ink-950 px-1 text-tbc-300">/api/projects</code>{' '}
-              with the AI API key above, or seed one manually with{' '}
-              <code className="rounded bg-ink-950 px-1 text-tbc-300">curl</code>.
+              with the AI API key above.
             </p>
+            <Button
+              size="sm"
+              data-testid="new-deploy-project-empty-btn"
+              onClick={() => setNewOpen(true)}
+              className="mt-4 bg-tbc-500 text-ink-950 hover:bg-tbc-400 font-semibold"
+            >
+              <Plus className="mr-1.5 h-3 w-3" /> New project
+            </Button>
           </Card>
         ) : (
           <div className="space-y-2" data-testid="ops-deploy-projects">

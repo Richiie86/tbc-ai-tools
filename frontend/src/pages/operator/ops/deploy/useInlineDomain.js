@@ -45,6 +45,15 @@ export function useInlineDomain(project, onSaved) {
           duration: 4500,
         });
       }
+      // Porkbun DNS auto-config: when connected, the backend points the
+      // domain's DNS straight at Vercel so it goes live on THIS domain.
+      if (data?.dns_configured) {
+        toast.success('Porkbun DNS pointed at Vercel', { duration: 2500 });
+      } else if (data?.dns_error) {
+        toast.message(`DNS auto-setup skipped — ${data.dns_error}`, {
+          duration: 4500,
+        });
+      }
       setEditing(false);
       // Optimistic refresh: pass the updated project doc so the parent
       // can merge it into local state without waiting for a full refetch.
