@@ -5,12 +5,13 @@ import { Input } from '../../components/ui/input';
 import { toast } from 'sonner';
 import {
   KeyRound, Loader2, Wand2, Eye, EyeOff, CheckCircle2, XCircle,
-  Plus, ChevronDown, ShieldCheck,
+  Plus, ChevronDown, ShieldCheck, ArrowDown,
 } from 'lucide-react';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '../../components/ui/select';
 import { SecretRow } from './SecretsCard';
+import CustomKeysCard from './CustomKeysCard';
 
 /**
  * "My Keys" — one place for every key the app needs.
@@ -49,6 +50,9 @@ const PRETTY = {
 export default function MyKeysTab() {
   const [settings, setSettings] = useState(null);
   const [loading, setLoading] = useState(true);
+  // When Smart Paste can't recognise a key, we pre-fill the Custom keys form
+  // with the pasted value so the operator can just name it and save.
+  const [customPrefill, setCustomPrefill] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -108,7 +112,13 @@ export default function MyKeysTab() {
       </div>
 
       {/* Add new key */}
-      <SmartPaste onSaved={load} />
+      <SmartPaste
+        onSaved={load}
+        onUnrecognized={(value) => {
+          setCustomPrefill(value);
+          toast.message('Add it as a Custom key below — just give it a name.');
+        }}
+      />
 
       {/* Your keys — sorted list of everything already added */}
       <div className="rounded-xl border border-tbc-500/30 bg-gradient-to-br from-tbc-500/[0.04] via-ink-900/60 to-ink-900/60 p-5">
@@ -137,6 +147,12 @@ export default function MyKeysTab() {
         settings={settings}
         missing={missing}
         row={row}
+      />
+
+      {/* Custom keys — add an API key for ANY system, no per-provider code. */}
+      <CustomKeysCard
+        initialValue={customPrefill}
+        onAdded={() => setCustomPrefill('')}
       />
     </div>
   );
@@ -217,7 +233,7 @@ function AddSpecificKey({ settings, missing, row }) {
   );
 }
 
-function SmartPaste({ onSaved }) {
+function SmartPaste({ onSaved, onUnrecognized }) {
   const [value, setValue] = useState('');
   const [reveal, setReveal] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -240,9 +256,18 @@ function SmartPaste({ onSaved }) {
         toast.error(data.message || 'Key rejected');
       }
     } catch (e) {
+      const status = e?.response?.status;
       const msg = e?.response?.data?.detail || 'Could not detect this key';
-      setResult({ ok: false, message: msg });
-      toast.error(msg);
+      // 422 = provider couldn't be auto-detected. Hand the value to the
+      // Custom keys form so the operator can name and save it directly.
+      if (status === 422) {
+        onUnrecognized?.(v);
+        setResult({ ok: false, custom: true, message: msg });
+        setValue('');
+      } else {
+        setResult({ ok: false, message: msg });
+        toast.error(msg);
+      }
     } finally {
       setBusy(false);
     }
@@ -262,7 +287,8 @@ function SmartPaste({ onSaved }) {
           <p className="text-xs text-tbc-200/60">
             Paste any key — Anthropic, OpenAI, Gemini, OpenRouter, Groq, Vercel,
             GitHub, Render or Porkbun (pk1_/sk1_). We figure out what it is and
-            file it in your list automatically.
+            file it automatically. Anything we don&apos;t recognise drops into
+            Custom keys below so you can save it too.
           </p>
         </div>
       </div>
@@ -311,10 +337,16 @@ function SmartPaste({ onSaved }) {
           className={`mt-3 flex items-center gap-2 rounded-md px-2 py-1.5 text-xs ${
             result.ok
               ? 'border border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
-              : 'border border-rose-500/30 bg-rose-500/10 text-rose-200'
+              : result.custom
+                ? 'border border-amber-500/30 bg-amber-500/10 text-amber-200'
+                : 'border border-rose-500/30 bg-rose-500/10 text-rose-200'
           }`}
         >
-          {result.ok ? <CheckCircle2 className="h-3.5 w-3.5 shrink-0" /> : <XCircle className="h-3.5 w-3.5 shrink-0" />}
+          {result.ok
+            ? <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+            : result.custom
+              ? <ArrowDown className="h-3.5 w-3.5 shrink-0" />
+              : <XCircle className="h-3.5 w-3.5 shrink-0" />}
           <span className="leading-tight">
             {result.ok
               ? <>Saved as <span className="font-bold">{PRETTY[result.kind] || result.kind}</span> key.</>

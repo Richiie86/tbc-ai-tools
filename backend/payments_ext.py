@@ -2,6 +2,7 @@
 import os
 import io
 import base64
+import uuid
 import logging
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List
@@ -18,6 +19,7 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_LEFT, TA_RIGHT, TA_CENTER
 
 from auth_utils import get_current_operator, get_current_user
+from secret_crypto import encrypt_secret, decrypt_secret
 from models import (
     PlanModel, PlanUpsertRequest,
     TreasuryDestination, TreasuryUpsertRequest,
@@ -1116,8 +1118,9 @@ async def op_auto_detect_key(
         else:
             raise HTTPException(
                 422,
-                "Couldn't recognise this key automatically. Use the specific "
-                "field for it (Vercel/GitHub/Anthropic/OpenAI/Gemini/OpenRouter/Render/Groq).",
+                "Couldn't auto-detect the provider for this key. Add it as a "
+                "Custom key instead — just give it a name and it'll be saved "
+                "and encrypted like the rest.",
             )
 
     # Porkbun keys can't be validated in isolation — save straight away and
@@ -1149,6 +1152,129 @@ async def op_auto_detect_key(
         'identity': (verdict or {}).get('identity'),
         'message': f"Detected {_pretty} key and saved it.",
     }
+
+
+# ===================================================================
+# Operator: Custom keys — add ANY key for ANY system, no per-provider
+# code required. Stored as a list of {id, name, env_key, value(encrypted),
+# created_at, rotated_at} inside the settings doc. Values are encrypted at
+# rest with the same envelope as the built-in secrets and never returned in
+# plaintext — only a masked preview.
+# ===================================================================
+def _slug_env_key(name: str, provided: str = '') -> str:
+    """Normalise an env-var-style key name (UPPER_SNAKE, alnum + underscore)."""
+    raw = (provided or name or '').strip().upper()
+    out = ''.join(ch if (ch.isalnum() or ch == '_') else '_' for ch in raw)
+    # Collapse repeated underscores and trim leading/trailing ones.
+    while '__' in out:
+        out = out.replace('__', '_')
+    return out.strip('_')
+
+
+def _custom_public(entry: dict) -> dict:
+    """Public (safe) view of a custom key — masked value, never plaintext."""
+    val = decrypt_secret(entry.get('value'))
+    return {
+        'id': entry.get('id'),
+        'name': entry.get('name'),
+        'env_key': entry.get('env_key'),
+        'masked': _mask_key(val),
+        'created_at': entry.get('created_at'),
+        'rotated_at': entry.get('rotated_at'),
+    }
+
+
+async def get_custom_key(name_or_env: str) -> Optional[str]:
+    """Return the decrypted value of a custom key by name or env_key (or None).
+
+    Exposed so other backend features (e.g. deploy env injection) can read a
+    custom key the operator added without any provider-specific code.
+    """
+    doc = await get_settings_doc()
+    needle = (name_or_env or '').strip().lower()
+    for e in (doc.get('custom_keys') or []):
+        if (e.get('name') or '').lower() == needle or (e.get('env_key') or '').lower() == needle:
+            return decrypt_secret(e.get('value'))
+    return None
+
+
+@router.get('/operator/keys/custom')
+async def op_list_custom_keys(_: dict = Depends(get_current_operator)):
+    doc = await get_settings_doc()
+    items = doc.get('custom_keys') or []
+    # Newest first so a freshly added key is easy to spot.
+    items = sorted(items, key=lambda e: e.get('created_at') or '', reverse=True)
+    return {'keys': [_custom_public(e) for e in items]}
+
+
+@router.post('/operator/keys/custom')
+async def op_add_custom_key(payload: dict = Body(...), _: dict = Depends(get_current_operator)):
+    """Add (or update by name) a custom key. Body: {name, value, env_key?}."""
+    name = (payload.get('name') or '').strip()
+    value = (payload.get('value') or '').strip()
+    if not name:
+        raise HTTPException(400, 'Give this key a name (e.g. "Porkbun API").')
+    if not value:
+        raise HTTPException(400, 'Paste the key value.')
+    env_key = _slug_env_key(name, payload.get('env_key', ''))
+
+    db = await get_db()
+    doc = await get_settings_doc()
+    items = list(doc.get('custom_keys') or [])
+    now = datetime.now(timezone.utc).isoformat()
+
+    # Same name (case-insensitive) → update in place instead of duplicating.
+    existing = next((e for e in items if (e.get('name') or '').lower() == name.lower()), None)
+    if existing:
+        existing['value'] = encrypt_secret(value)
+        existing['env_key'] = env_key
+        existing['rotated_at'] = now
+        entry = existing
+    else:
+        entry = {
+            'id': uuid.uuid4().hex,
+            'name': name,
+            'env_key': env_key,
+            'value': encrypt_secret(value),
+            'created_at': now,
+            'rotated_at': None,
+        }
+        items.append(entry)
+
+    await db.settings.update_one(
+        {'_id': 'payment_settings'}, {'$set': {'custom_keys': items}}, upsert=True,
+    )
+    return {'saved': True, 'updated': existing is not None, 'key': _custom_public(entry)}
+
+
+@router.post('/operator/keys/custom/{key_id}/rotate')
+async def op_rotate_custom_key(key_id: str, payload: dict = Body(...), _: dict = Depends(get_current_operator)):
+    """Replace the value of an existing custom key. Body: {value}."""
+    value = (payload.get('value') or '').strip()
+    if not value:
+        raise HTTPException(400, 'Paste the new key value.')
+    db = await get_db()
+    doc = await get_settings_doc()
+    items = list(doc.get('custom_keys') or [])
+    entry = next((e for e in items if e.get('id') == key_id), None)
+    if not entry:
+        raise HTTPException(404, 'Key not found.')
+    entry['value'] = encrypt_secret(value)
+    entry['rotated_at'] = datetime.now(timezone.utc).isoformat()
+    await db.settings.update_one({'_id': 'payment_settings'}, {'$set': {'custom_keys': items}})
+    return {'saved': True, 'key': _custom_public(entry)}
+
+
+@router.delete('/operator/keys/custom/{key_id}')
+async def op_delete_custom_key(key_id: str, _: dict = Depends(get_current_operator)):
+    db = await get_db()
+    doc = await get_settings_doc()
+    items = list(doc.get('custom_keys') or [])
+    remaining = [e for e in items if e.get('id') != key_id]
+    if len(remaining) == len(items):
+        raise HTTPException(404, 'Key not found.')
+    await db.settings.update_one({'_id': 'payment_settings'}, {'$set': {'custom_keys': remaining}})
+    return {'deleted': True}
 
 
 # ===================================================================
