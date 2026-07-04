@@ -821,9 +821,10 @@ async def op_get_settings(_: dict = Depends(get_current_operator)):
         # and proactively nag the operator before tokens expire.
         'vercel_token_rotated_at': doc.get('vercel_token_rotated_at'),
         'github_token_rotated_at': doc.get('github_token_rotated_at'),
-        # Deploy ship-gate: when False, a do_not_ship review verdict is
-        # advisory and the operator's production deploy is never hard-blocked.
-        'enforce_ship_gate': bool(doc.get('enforce_ship_gate', True)),
+        # Deploy ship-gate: defaults to False (advisory). A do_not_ship review
+        # verdict is shown but never hard-blocks the operator's production
+        # deploy unless they explicitly opt back in.
+        'enforce_ship_gate': bool(doc.get('enforce_ship_gate', False)),
     }
 
 

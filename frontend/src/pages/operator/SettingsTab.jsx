@@ -466,15 +466,16 @@ export default function SettingsTab() {
                 Enforce AI ship-gate
               </div>
               <p className="mt-1 text-[11px] text-tbc-200/50">
-                When on, a <code>do_not_ship</code> code-review verdict hard-blocks
-                production deploys (you can still override per-deploy with
-                &ldquo;Deploy anyway&rdquo;). Turn this <strong>off</strong> to make the
-                verdict advisory so your Deploy button always ships in one click.
+                <strong>Off by default</strong> — the AI code review still runs and
+                shows its verdict, but a <code>do_not_ship</code> result never blocks
+                your Deploy button. Turn this <strong>on</strong> only if you want a
+                <code>do_not_ship</code> verdict to hard-block production deploys
+                (e.g. for fully autonomous, unattended deploys).
               </p>
             </div>
             <Switch
               data-testid="settings-enforce-ship-gate"
-              checked={settings.enforce_ship_gate !== false}
+              checked={settings.enforce_ship_gate === true}
               onCheckedChange={(v) => save({ enforce_ship_gate: v })}
             />
           </div>

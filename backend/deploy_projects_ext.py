@@ -936,13 +936,13 @@ async def _trigger_deploy(
                     'can_auto_push': True,
                 },
             )
-        # Operator kill-switch: when `enforce_ship_gate` is turned off in
-        # Operator Settings, a `do_not_ship` verdict becomes advisory — the
-        # human operator has explicitly opted out of the hard block, so we
-        # let the deploy proceed (the verdict is still recorded/visible).
-        # Defaults to True so existing behaviour and the autonomous-AI safety
-        # net are preserved unless the operator deliberately disables it.
-        gate_enforced = bool((settings or {}).get('enforce_ship_gate', True))
+        # Operator ship-gate. DEFAULTS TO ADVISORY (False): the AI code review
+        # still runs and its do_not_ship verdict is recorded and shown to the
+        # operator, but it does NOT hard-block a manual production deploy. The
+        # human operator is the final authority over their own deploys. Set
+        # `enforce_ship_gate: true` in Operator Settings to restore a hard
+        # block (e.g. for fully autonomous, unattended deploys).
+        gate_enforced = bool((settings or {}).get('enforce_ship_gate', False))
         if last_review.get('verdict') == 'do_not_ship' and gate_enforced:
             fix_session_id = await _create_fix_review_chat(project, last_review, user_id)
             raise HTTPException(
