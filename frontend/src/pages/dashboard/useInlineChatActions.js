@@ -49,8 +49,31 @@ export function useInlineChatActions({ navigate, messages, currentId, showResult
     // when the operator overrides the AI code review gate without
     // duplicating the success/failure handling.
     const runDeploy = async (bypass) => {
-      const { data } = await api.post(`/operator/deploy/${projectId}/deploy`, bypass ? { bypass_review: true } : {});
-      toast.success(`Deploy queued — ${data?.url || data?.deployment_id || 'OK'}`);
+      try {
+        const { data } = await api.post(`/operator/deploy/${projectId}/deploy`, bypass ? { bypass_review: true } : {});
+        toast.success(`Deploy queued — ${data?.url || data?.deployment_id || 'OK'}`);
+        // Surface the outcome in the color-coded modal: green when it shipped
+        // clean, yellow when it shipped by bypassing the AI review.
+        showResult?.({
+          kind: 'deploy',
+          ok: true,
+          bypassed: !!bypass,
+          url: data?.url,
+          deploymentId: data?.deployment_id,
+          summary: bypass
+            ? 'Deployment queued after overriding the AI code review. Review the outstanding findings when you can.'
+            : 'Deployment queued successfully.',
+        });
+      } catch (e) {
+        showResult?.({
+          kind: 'deploy',
+          ok: false,
+          summary: e?.response?.data?.detail?.message
+            || e?.response?.data?.detail
+            || 'The deploy request failed. Check your deploy target and keys, then try again.',
+        });
+        throw e;
+      }
     };
 
     // One-click "push initial code" — when the repo is empty, this uploads

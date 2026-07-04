@@ -135,11 +135,17 @@ export default function ReviewResultModal({ result, onClose, onOpenFixChat }) {
                 ? `Verdict: ${result.verdict || 'n/a'}${
                     result.promotedBySecond ? ' · escalated by cross-AI reviewer' : ''
                   }`
-                : [
-                    result.status && `Status: ${result.status}`,
-                    result.httpStatus && `HTTP ${result.httpStatus}`,
-                    result.latencyMs && `${result.latencyMs}ms`,
-                  ].filter(Boolean).join(' · ')}
+                : isDeploy
+                  ? [
+                      result.ok ? 'Deployment queued' : 'Deploy failed',
+                      result.bypassed && 'AI review bypassed',
+                      result.deploymentId && `id ${result.deploymentId}`,
+                    ].filter(Boolean).join(' · ')
+                  : [
+                      result.status && `Status: ${result.status}`,
+                      result.httpStatus && `HTTP ${result.httpStatus}`,
+                      result.latencyMs && `${result.latencyMs}ms`,
+                    ].filter(Boolean).join(' · ')}
             </p>
           </div>
         </div>
