@@ -17,6 +17,7 @@ import { DashboardGuideTour } from './dashboard/DashboardGuideTour';
 import { PostAiDeploySuggestion } from './dashboard/PostAiDeploySuggestion';
 import { useInlineChatActions } from './dashboard/useInlineChatActions';
 import ReviewResultModal from './dashboard/ReviewResultModal';
+import DnsStatusSidebar from './dashboard/DnsStatusSidebar';
 import { useStickToBottom } from './dashboard/useStickToBottom';
 import { useChatSessionsCrud } from './dashboard/useChatSessionsCrud';
 
@@ -300,6 +301,10 @@ export default function Dashboard({ variant = 'tbc1' }) {
           onDismiss={() => setShowDeploySuggest(false)}
         />
       </main>
+
+      {/* Right rail: live DNS readiness for launched domains (operator, desktop only) */}
+      {user?.role === 'operator' && <DnsStatusSidebar />}
+
       <OutOfCreditsDialog
         open={outOfCreditsOpen}
         onOpenChange={setOutOfCreditsOpen}

@@ -223,6 +223,66 @@ async def vercel_get_deployment(settings: dict, deployment_id: str) -> dict:
     return r.json()
 
 
+async def vercel_domain_config(settings: dict, domain: str) -> dict:
+    """Return whether `domain` is correctly pointed at Vercel.
+
+    Uses `GET /v6/domains/{domain}/config` which reports `misconfigured`
+    (True when the registrar's DNS records don't point at Vercel yet). This
+    is the authoritative "is DNS ready?" signal — far more reliable than a
+    raw resolver check because it's exactly what Vercel itself uses to decide
+    whether to serve the domain.
+
+    Returns a small dict: `{ready, misconfigured, raw}`. Never raises for a
+    "not found"/"still propagating" case — those simply come back as
+    `ready=False` so the caller can render a red dot instead of erroring.
+    """
+    token = vercel_token(settings)
+    if not token:
+        raise HTTPException(503, VERCEL_TOKEN_MISSING_DETAIL)
+    name = (domain or '').strip().rstrip('.')
+    for prefix in ('https://', 'http://'):
+        if name.lower().startswith(prefix):
+            name = name[len(prefix):]
+    name = name.split('/', 1)[0]
+    if not name:
+        raise HTTPException(400, 'Empty domain')
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        r = await client.get(
+            f'{VERCEL_API}/v6/domains/{name}/config',
+            params=vercel_team_qs(settings),
+            headers={'Authorization': f'Bearer {token}'},
+        )
+    # A 4xx here (domain not attached anywhere, still unknown to Vercel, etc.)
+    # is a normal "not ready yet" state, not an operator-facing error.
+    if r.status_code >= 400:
+        return {'ready': False, 'misconfigured': True, 'raw': {'status': r.status_code}}
+    body = r.json()
+    misconfigured = bool(body.get('misconfigured', True))
+    return {'ready': not misconfigured, 'misconfigured': misconfigured, 'raw': body}
+
+
+async def vercel_find_project_id(settings: dict, name: str) -> Optional[str]:
+    """Best-effort resolve a Vercel project id from a project name/slug via
+    `GET /v9/projects/{idOrName}`. Returns None (never raises) when the token
+    is missing or Vercel doesn't know the name — callers treat that as "can't
+    resolve yet" and fall back to other strategies."""
+    token = vercel_token(settings)
+    if not token or not (name or '').strip():
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.get(
+                f'{VERCEL_API}/v9/projects/{name.strip()}',
+                params=vercel_team_qs(settings),
+                headers={'Authorization': f'Bearer {token}'},
+            )
+        if r.status_code >= 400:
+            return None
+        return r.json().get('id')
+    except Exception:
+        return None
+
+
 async def vercel_promote_to_production(
     settings: dict, project_vercel_id: str, deployment_id: str,
 ) -> dict:
