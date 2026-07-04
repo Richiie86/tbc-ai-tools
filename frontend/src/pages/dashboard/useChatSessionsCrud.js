@@ -86,12 +86,18 @@ export function useChatSessionsCrud({
     }
   }, [currentId, basePath, navigate, setCurrentId, setMessages]);
 
-  const renameSession = useCallback(async (id) => {
-    const title = window.prompt('Rename chat:');
+  const renameSession = useCallback(async (id, newTitle) => {
+    // When called with an explicit title (from the in-app rename dialog) we skip
+    // the browser prompt. The prompt fallback keeps older callers working.
+    const raw = (newTitle !== undefined && newTitle !== null)
+      ? newTitle
+      : window.prompt('Rename project:');
+    const title = (raw || '').trim();
     if (!title) return;
     try {
       await api.patch(`/chat/sessions/${id}`, { title });
       setSessions((s) => s.map((x) => x.id === id ? { ...x, title } : x));
+      toast.success('Project renamed');
     } catch (err) {
       console.error('Rename failed', err);
       toast.error('Rename failed');

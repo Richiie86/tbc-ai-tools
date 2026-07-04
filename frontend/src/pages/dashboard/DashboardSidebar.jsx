@@ -7,6 +7,10 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
   AlertDialogTrigger,
 } from '../../components/ui/alert-dialog';
+import {
+  Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
+} from '../../components/ui/dialog';
+import { Input } from '../../components/ui/input';
 import ReferBanner from '../../components/ReferBanner';
 import CreditsBadge from '../../components/CreditsBadge';
 import api from '../../lib/api';
@@ -22,6 +26,19 @@ export function DashboardSidebar({
   user, newChat, renameSession, deleteSession, logout,
 }) {
   const navigate = useNavigate();
+  // In-app rename dialog state (replaces the old browser prompt so rename is a
+  // proper, on-brand pop-up that also works on touch devices).
+  const [renameTarget, setRenameTarget] = React.useState(null);
+  const [renameValue, setRenameValue] = React.useState('');
+
+  const openRename = (s) => { setRenameTarget(s); setRenameValue(s.title || ''); };
+  const submitRename = () => {
+    if (renameTarget && renameValue.trim()) {
+      renameSession(renameTarget.id, renameValue.trim());
+    }
+    setRenameTarget(null);
+  };
+
   return (
     <aside className={`flex shrink-0 flex-col border-r border-slate-800 bg-ink-950/90 transition-[width] duration-200 ${
       sidebarOpen ? 'w-72' : 'w-0'} overflow-hidden`}>
@@ -68,7 +85,7 @@ export function DashboardSidebar({
                         which made them unreachable on touch devices). They dim
                         when the row isn't hovered/focused to stay tidy. */}
                     <button
-                      onClick={(e) => { e.stopPropagation(); renameSession(s.id); }}
+                      onClick={(e) => { e.stopPropagation(); openRename(s); }}
                       title="Rename project"
                       aria-label={`Rename ${s.title}`}
                       className="rounded p-1 text-slate-400 opacity-70 transition hover:bg-slate-700 hover:text-white focus:opacity-100 group-hover:opacity-100"
@@ -161,6 +178,46 @@ export function DashboardSidebar({
           <ShieldCheck className="h-3.5 w-3.5" /> Sign out everywhere
         </button>
       </div>
+
+      {/* Rename project pop-up */}
+      <Dialog open={!!renameTarget} onOpenChange={(open) => { if (!open) setRenameTarget(null); }}>
+        <DialogContent className="border-slate-800 bg-slate-900 text-slate-100 sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Rename project</DialogTitle>
+          </DialogHeader>
+          <Input
+            autoFocus
+            value={renameValue}
+            onChange={(e) => setRenameValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.nativeEvent.isComposing && e.keyCode !== 229) {
+                e.preventDefault();
+                submitRename();
+              }
+            }}
+            placeholder="Project name"
+            maxLength={120}
+            className="border-slate-700 bg-slate-800 text-slate-100 placeholder:text-slate-500"
+            aria-label="New project name"
+          />
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              onClick={() => setRenameTarget(null)}
+              className="text-slate-300 hover:bg-slate-800 hover:text-white"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={submitRename}
+              disabled={!renameValue.trim()}
+              className="bg-tbc-500 font-semibold text-slate-950 hover:bg-tbc-400"
+            >
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </aside>
   );
 }
