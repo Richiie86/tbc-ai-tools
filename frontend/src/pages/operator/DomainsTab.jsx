@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import api from '../../lib/api';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -32,6 +32,15 @@ export default function DomainsTab() {
   // domains attached in db.deploy_projects) — independent of Porkbun.
   const [deployed, setDeployed] = useState(null);
   const [loadingDeployed, setLoadingDeployed] = useState(false);
+
+  // Lets "Use this domain" in the availability/owned lists prefill + scroll to
+  // the Launch panel. {value, nonce} — nonce forces re-apply of the same value.
+  const [prefill, setPrefill] = useState({ value: '', nonce: 0 });
+  const launchRef = useRef(null);
+  const useDomain = useCallback((d) => {
+    setPrefill((p) => ({ value: d, nonce: p.nonce + 1 }));
+    launchRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, []);
 
   const loadDeployed = useCallback(async () => {
     setLoadingDeployed(true);
@@ -133,7 +142,13 @@ export default function DomainsTab() {
           single click. Reuses PATCH /operator/deploy/{id}/domain which attaches
           the domain on Vercel AND (when Porkbun is connected) repoints its DNS
           straight at Vercel so it goes live. */}
-      <LaunchDomainPanel porkbunConnected={!!connected} onLaunched={loadDeployed} />
+      <div ref={launchRef}>
+        <LaunchDomainPanel
+          porkbunConnected={!!connected}
+          onLaunched={loadDeployed}
+          prefill={prefill}
+        />
+      </div>
 
       {connected === null ? (
         <div className="grid place-items-center py-16">
@@ -150,8 +165,9 @@ export default function DomainsTab() {
             domains={domains}
             loading={loadingDomains}
             onRefresh={loadDomains}
+            onUseDomain={useDomain}
           />
-          <AvailabilityCheck />
+          <AvailabilityCheck onUseDomain={useDomain} />
         </>
       ) : (
         <NotConnected />
@@ -168,12 +184,20 @@ export default function DomainsTab() {
   );
 }
 
-function LaunchDomainPanel({ porkbunConnected, onLaunched }) {
+function LaunchDomainPanel({ porkbunConnected, onLaunched, prefill }) {
   const [projects, setProjects] = useState(null); // null = loading
   const [projectId, setProjectId] = useState('');
   const [domain, setDomain] = useState('');
   const [launching, setLaunching] = useState(false);
   const [result, setResult] = useState(null);
+
+  // When "Use this domain" is clicked elsewhere, drop that domain into the box.
+  useEffect(() => {
+    if (prefill?.value) {
+      setDomain(prefill.value);
+      setResult(null);
+    }
+  }, [prefill?.value, prefill?.nonce]);
 
   const loadProjects = useCallback(async () => {
     try {
@@ -511,7 +535,7 @@ function ConnectionBanner({ pinging, pingResult, onPing }) {
   );
 }
 
-function DomainsList({ domains, loading, onRefresh }) {
+function DomainsList({ domains, loading, onRefresh, onUseDomain }) {
   return (
     <div className="rounded-xl border border-tbc-500/30 bg-gradient-to-br from-tbc-500/[0.04] via-ink-900/60 to-ink-900/60 p-5">
       <div className="mb-3 flex items-center justify-between">
@@ -545,7 +569,9 @@ function DomainsList({ domains, loading, onRefresh }) {
         </div>
       ) : domains && domains.length > 0 ? (
         <div className="space-y-2" data-testid="domains-list">
-          {domains.map((d) => <DomainRow key={d.domain} d={d} />)}
+          {domains.map((d) => (
+            <DomainRow key={d.domain} d={d} onUseDomain={onUseDomain} />
+          ))}
         </div>
       ) : (
         <p className="rounded-md border border-dashed border-tbc-500/25 bg-ink-900/40 px-3 py-4 text-center text-sm text-tbc-200/60">
@@ -556,7 +582,7 @@ function DomainsList({ domains, loading, onRefresh }) {
   );
 }
 
-function DomainRow({ d }) {
+function DomainRow({ d, onUseDomain }) {
   const active = String(d.status || '').toUpperCase() === 'ACTIVE';
   return (
     <div
@@ -580,6 +606,16 @@ function DomainRow({ d }) {
           {d.auto_renew ? 'Auto-renew on' : 'Auto-renew off'}
         </span>
         {d.whois_privacy && <span className="text-tbc-300">WHOIS private</span>}
+        {onUseDomain && (
+          <button
+            type="button"
+            onClick={() => onUseDomain(d.domain)}
+            data-testid={`use-domain-${d.domain}`}
+            className="inline-flex items-center gap-1 rounded-md bg-tbc-500 px-2 py-1 text-xs font-semibold text-ink-950 hover:bg-tbc-400"
+          >
+            <Rocket className="h-3 w-3" /> Use this domain
+          </button>
+        )}
         <a
           href={`https://porkbun.com/account/domainsSpeedy/${d.domain}`}
           target="_blank"
@@ -593,7 +629,11 @@ function DomainRow({ d }) {
   );
 }
 
-function AvailabilityCheck() {
+// Session-lived cache of availability results so re-checking a domain you just
+// looked at is instant (Porkbun's live checkDomain call is rate-limited ~10s).
+const _availCache = new Map();
+
+function AvailabilityCheck({ onUseDomain }) {
   const [query, setQuery] = useState('');
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
@@ -606,10 +646,16 @@ function AvailabilityCheck() {
       toast.error('Enter a full domain, e.g. example.com');
       return;
     }
+    // Instant if we've already resolved this domain this session.
+    if (_availCache.has(d)) {
+      setResult(_availCache.get(d));
+      return;
+    }
     setBusy(true);
     setResult(null);
     try {
       const { data } = await api.get('/operator/porkbun/check', { params: { domain: d } });
+      _availCache.set(d, data);
       setResult(data);
     } catch (e) {
       const msg = e?.response?.data?.detail || 'Check failed';
@@ -619,12 +665,19 @@ function AvailabilityCheck() {
     }
   };
 
+  const owned = !!result?.owned;
+  const available = !!result?.available;
+
   return (
     <div className="rounded-xl border border-tbc-500/20 bg-ink-900/40 p-5">
-      <div className="mb-3 flex items-center gap-2">
+      <div className="mb-1 flex items-center gap-2">
         <Search className="h-4 w-4 text-tbc-300" />
-        <h3 className="text-base font-bold text-tbc-100">Check availability</h3>
+        <h3 className="text-base font-bold text-tbc-100">Check if domain is available for use</h3>
       </div>
+      <p className="mb-3 text-sm text-tbc-200/60">
+        See if a domain is free to register — or, if it&apos;s already in your
+        Porkbun account, launch it onto a project in one click.
+      </p>
 
       <div className="flex items-center gap-2">
         <Input
@@ -653,26 +706,44 @@ function AvailabilityCheck() {
         <div
           data-testid="domain-check-result"
           className={`mt-3 flex flex-wrap items-center gap-2 rounded-md px-3 py-2 text-sm ${
-            result.available
+            available
               ? 'border border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
-              : 'border border-rose-500/30 bg-rose-500/10 text-rose-200'
+              : owned
+                ? 'border border-tbc-500/40 bg-tbc-500/10 text-tbc-100'
+                : 'border border-rose-500/30 bg-rose-500/10 text-rose-200'
           }`}
         >
-          {result.available
+          {available || owned
             ? <CheckCircle2 className="h-4 w-4 shrink-0" />
             : <XCircle className="h-4 w-4 shrink-0" />}
           <span className="font-bold">{result.domain}</span>
           <span>
-            {result.available ? 'is available' : 'is taken'}
+            {owned
+              ? 'is in your Porkbun account'
+              : available ? 'is available' : 'is taken'}
             {result.premium ? ' · premium' : ''}
           </span>
-          {result.available && result.price && (
+          {available && result.price && (
             <span className="font-mono text-emerald-300">
               ${result.price}/yr
               {result.first_year_promo ? ' (first-year promo)' : ''}
             </span>
           )}
-          {result.available && (
+
+          {/* Owned by you → launch it straight onto a project. */}
+          {owned && onUseDomain && (
+            <button
+              type="button"
+              onClick={() => onUseDomain(result.domain)}
+              data-testid="use-checked-domain"
+              className="ml-auto inline-flex items-center gap-1 rounded-md bg-tbc-500 px-2 py-1 text-xs font-semibold text-ink-950 hover:bg-tbc-400"
+            >
+              <Rocket className="h-3 w-3" /> Use this domain
+            </button>
+          )}
+
+          {/* Free to register → send them to Porkbun checkout. */}
+          {available && (
             <a
               href={`https://porkbun.com/checkout/search?q=${encodeURIComponent(result.domain)}`}
               target="_blank"
