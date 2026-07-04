@@ -66,13 +66,31 @@ def _master_key() -> bytes:
     """Return the raw master key material (stable across restarts).
 
     Priority:
-      1. SECRETS_KEY  — a dedicated, operator-provided key (recommended).
-      2. MONGO_URL    — always present and stable in production; used as a
-                        fallback so encryption is active out of the box.
+      1. SECRETS_KEY                  — dedicated, operator-provided (recommended).
+      2. MONGO_URL                    — stable in production.
+      3. MONGODB_CONNECTION_STRING_2  — the SAME fallback db.py uses to actually
+                                        connect. This MUST be included: if the
+                                        app connects via this var while MONGO_URL
+                                        is unset, omitting it here would drop the
+                                        key derivation to the ephemeral per-process
+                                        key below — which changes on every restart
+                                        and silently corrupts every saved secret
+                                        (tokens read back as garbage after a
+                                        redeploy). Mirroring db.py keeps the key
+                                        stable no matter which Mongo var is set.
     Either way the key never lives in the settings collection it protects, so
     a data dump alone cannot decrypt the tokens.
     """
-    raw = os.environ.get('SECRETS_KEY') or os.environ.get('MONGO_URL') or ''
+    raw = (
+        os.environ.get('SECRETS_KEY')
+        or os.environ.get('MONGO_URL')
+        or os.environ.get('MONGODB_CONNECTION_STRING_2')
+        or ''
+    )
+    # Guard against a template/placeholder connection string (e.g. one still
+    # containing '<db_password>') producing an unstable-looking key.
+    if raw and ('<' in raw or '>' in raw):
+        raw = os.environ.get('MONGODB_CONNECTION_STRING_2') or raw
     if not raw:
         # Last-resort: a process-local key. Encryption still works for the
         # lifetime of the process; a restart makes older ciphertext
@@ -156,13 +174,22 @@ def decrypt_secret(value):
         enc_key, mac_key = _subkeys()
         expected = hmac.new(mac_key, nonce + ct, hashlib.sha256).digest()
         if not hmac.compare_digest(tag, expected):
-            logger.error('Secret authentication failed (key mismatch or tampering).')
-            return value
+            # Key mismatch (e.g. an old value encrypted under a now-changed
+            # key). Degrade to "not set" — as documented — instead of handing
+            # back undecryptable ciphertext. Returning the ciphertext would
+            # make status readouts show the token as "set" and feed garbage to
+            # provider APIs, which is exactly the "app says it's there but it's
+            # not" failure. Returning None lets the operator simply re-save.
+            logger.error(
+                'Secret authentication failed (key mismatch or tampering); '
+                'treating as not set. Re-save this secret in Operator settings.'
+            )
+            return None
         pt = bytes(b ^ k for b, k in zip(ct, _keystream(enc_key, nonce, len(ct))))
         return pt.decode('utf-8')
     except Exception:
-        logger.exception('Secret decryption failed; returning stored value.')
-        return value
+        logger.exception('Secret decryption failed; treating as not set.')
+        return None
 
 
 def _walk_encrypt(update_fields: dict) -> dict:
