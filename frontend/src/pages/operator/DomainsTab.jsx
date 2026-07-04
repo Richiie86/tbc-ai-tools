@@ -5,7 +5,7 @@ import { Input } from '../../components/ui/input';
 import { toast } from 'sonner';
 import {
   Globe, Loader2, RefreshCw, ShieldCheck, ShieldAlert, Search,
-  CheckCircle2, XCircle, ExternalLink, KeyRound,
+  CheckCircle2, XCircle, ExternalLink, KeyRound, Rocket, AlertTriangle,
 } from 'lucide-react';
 
 /**
@@ -123,11 +123,17 @@ export default function DomainsTab() {
         <div>
           <h2 className="text-xl font-bold text-tbc-100">Domains</h2>
           <p className="text-sm text-tbc-200/60">
-            Manage the domains in your Porkbun account, check availability, and
-            verify your connection — all from here.
+            Launch a domain onto a project, manage the domains in your Porkbun
+            account, check availability, and verify your connection — all here.
           </p>
         </div>
       </div>
+
+      {/* The headline feature: point a real domain at one of your projects in a
+          single click. Reuses PATCH /operator/deploy/{id}/domain which attaches
+          the domain on Vercel AND (when Porkbun is connected) repoints its DNS
+          straight at Vercel so it goes live. */}
+      <LaunchDomainPanel porkbunConnected={!!connected} onLaunched={loadDeployed} />
 
       {connected === null ? (
         <div className="grid place-items-center py-16">
@@ -158,6 +164,204 @@ export default function DomainsTab() {
         loading={loadingDeployed}
         onRefresh={loadDeployed}
       />
+    </div>
+  );
+}
+
+function LaunchDomainPanel({ porkbunConnected, onLaunched }) {
+  const [projects, setProjects] = useState(null); // null = loading
+  const [projectId, setProjectId] = useState('');
+  const [domain, setDomain] = useState('');
+  const [launching, setLaunching] = useState(false);
+  const [result, setResult] = useState(null);
+
+  const loadProjects = useCallback(async () => {
+    try {
+      const { data } = await api.get('/operator/deploy/projects');
+      const list = Array.isArray(data) ? data : (data?.projects || []);
+      setProjects(list);
+      // Default to "this app" if present, else the first project.
+      setProjectId((prev) => {
+        if (prev) return prev;
+        const self = list.find((p) => p.id === 'tbctools-self');
+        return self?.id || list[0]?.id || '';
+      });
+    } catch {
+      setProjects([]);
+    }
+  }, []);
+
+  useEffect(() => { loadProjects(); }, [loadProjects]);
+
+  const canLaunch = domain.trim().includes('.') && projectId && !launching;
+
+  const launch = async () => {
+    const d = domain.trim().toLowerCase();
+    if (!d.includes('.')) {
+      toast.error('Enter a full domain, e.g. www.tbcdomain.com');
+      return;
+    }
+    if (!projectId) {
+      toast.error('Pick which project to launch this domain on');
+      return;
+    }
+    setLaunching(true);
+    setResult(null);
+    try {
+      const { data } = await api.patch(
+        `/operator/deploy/${projectId}/domain`,
+        { domain: d },
+      );
+      setResult({
+        domain: data?.domain || d,
+        vercelAttached: !!data?.vercel_attached,
+        vercelError: data?.vercel_error || null,
+        dnsConfigured: !!data?.dns_configured,
+        dnsError: data?.dns_error || null,
+      });
+      if (data?.vercel_attached && data?.dns_configured) {
+        toast.success('Domain launched — DNS pointed at Vercel');
+      } else if (data?.vercel_attached || data?.dns_configured) {
+        toast.success('Domain saved — see the status below');
+      } else {
+        toast.message('Domain saved — a step needs your attention below');
+      }
+      loadProjects();
+      onLaunched?.();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Launch failed');
+    } finally {
+      setLaunching(false);
+    }
+  };
+
+  return (
+    <div
+      className="rounded-xl border border-tbc-500/30 bg-gradient-to-br from-tbc-500/[0.08] via-ink-900/60 to-ink-900/60 p-5"
+      data-testid="launch-domain-panel"
+    >
+      <div className="mb-1 flex items-center gap-2">
+        <Rocket className="h-4 w-4 text-tbc-300" />
+        <h3 className="text-base font-bold text-tbc-100">Launch a domain</h3>
+      </div>
+      <p className="mb-4 text-sm text-tbc-200/60">
+        Point your domain at a project. We attach it on Vercel and
+        {porkbunConnected
+          ? ' repoint its DNS through your connected Porkbun account so it goes live automatically.'
+          : ' show you the DNS records to set (connect Porkbun in My Keys to automate this).'}
+      </p>
+
+      <div className="grid gap-3 sm:grid-cols-[1fr,minmax(180px,240px),auto] sm:items-end">
+        <div>
+          <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-tbc-200/60">
+            Domain
+          </label>
+          <Input
+            value={domain}
+            onChange={(e) => { setDomain(e.target.value); setResult(null); }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.nativeEvent.isComposing && e.keyCode !== 229 && canLaunch) launch();
+            }}
+            placeholder="www.tbcdomain.com"
+            data-testid="launch-domain-input"
+            spellCheck={false}
+            className="bg-ink-900 border-tbc-900/60 text-tbc-100"
+          />
+        </div>
+
+        <div>
+          <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-tbc-200/60">
+            Project
+          </label>
+          <select
+            value={projectId}
+            onChange={(e) => setProjectId(e.target.value)}
+            data-testid="launch-domain-project"
+            disabled={projects == null || projects.length === 0}
+            className="h-10 w-full rounded-md border border-tbc-900/60 bg-ink-900 px-3 text-sm text-tbc-100 disabled:opacity-60"
+          >
+            {projects == null ? (
+              <option>Loading…</option>
+            ) : projects.length === 0 ? (
+              <option value="">No projects yet</option>
+            ) : (
+              projects.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {(p.id === 'tbctools-self' ? 'This app' : (p.projectName || p.repo || p.id))}
+                  {p.domain ? ` (now: ${p.domain})` : ''}
+                </option>
+              ))
+            )}
+          </select>
+        </div>
+
+        <Button
+          onClick={launch}
+          disabled={!canLaunch}
+          data-testid="launch-domain-submit"
+          className="h-10 bg-tbc-500 font-semibold text-ink-950 hover:bg-tbc-400"
+        >
+          {launching
+            ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+            : <Rocket className="mr-1.5 h-4 w-4" />}
+          Launch domain
+        </Button>
+      </div>
+
+      {result && (
+        <div className="mt-4 space-y-2" data-testid="launch-domain-result">
+          <StatusLine
+            ok={result.vercelAttached}
+            okText={`Attached ${result.domain} on Vercel`}
+            badText={result.vercelError || 'Not attached on Vercel yet'}
+          />
+          <StatusLine
+            ok={result.dnsConfigured}
+            okText="DNS pointed at Vercel (Porkbun)"
+            badText={
+              result.dnsError ||
+              (porkbunConnected
+                ? 'DNS not configured'
+                : 'Connect Porkbun in My Keys to auto-configure DNS')
+            }
+          />
+          {result.vercelAttached && !result.dnsConfigured && (
+            <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/[0.06] px-3 py-2 text-xs text-amber-200">
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>
+                Final step: in your registrar, point{' '}
+                <span className="font-mono text-amber-100">{result.domain}</span>{' '}
+                to Vercel — a CNAME to{' '}
+                <span className="font-mono text-amber-100">cname.vercel-dns.com</span>{' '}
+                (or the nameservers Vercel shows). It goes live once DNS
+                propagates (a few minutes, up to an hour).
+              </span>
+            </div>
+          )}
+          {result.vercelAttached && result.dnsConfigured && (
+            <div className="flex items-center gap-2 rounded-md border border-emerald-500/30 bg-emerald-500/[0.06] px-3 py-2 text-xs text-emerald-200">
+              <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+              <span>
+                All set — {result.domain} will be live once DNS propagates
+                (usually a few minutes).
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StatusLine({ ok, okText, badText }) {
+  return (
+    <div className="flex items-center gap-2 text-sm">
+      {ok
+        ? <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-300" />
+        : <XCircle className="h-4 w-4 shrink-0 text-rose-300" />}
+      <span className={ok ? 'text-emerald-200' : 'text-rose-200'}>
+        {ok ? okText : badText}
+      </span>
     </div>
   );
 }
