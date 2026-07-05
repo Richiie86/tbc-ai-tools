@@ -242,7 +242,9 @@ async def configure_vercel_dns(domain: str) -> dict:
     except HTTPException:
         pass  # retrieve may 400 if none exist — ignore
 
-    await _call('/dns/create', apikey, secret, {
+    # Porkbun's create endpoint needs the domain IN THE PATH (/dns/create/{domain});
+    # sending it only in the body makes Porkbun reply "You need to pass a domain."
+    await _call(f'/dns/create/{root}', apikey, secret, {
         'type': rtype,
         'name': name,
         'content': content,
