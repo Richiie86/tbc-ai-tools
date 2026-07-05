@@ -56,7 +56,33 @@ async def launch_domain(
     user: dict = Depends(get_current_user),
 ):
     """Charge DOMAIN_LAUNCH_COST credits and launch the project on `domain`."""
-    domain = _normalize_domain(payload.domain)
+    return await perform_domain_launch(
+        user,
+        payload.domain,
+        project_id=payload.projectId,
+        project_name=payload.projectName,
+        request=request,
+    )
+
+
+async def perform_domain_launch(
+    user: dict,
+    domain_raw: str,
+    project_id: Optional[str] = None,
+    project_name: Optional[str] = None,
+    request: Optional[Request] = None,
+) -> dict:
+    """Core launch logic, shared by the standalone `/launch-domain` endpoint
+    and the one-click Deploy flow (deploy → auto-connect the chosen domain).
+
+    Behaviour:
+      * Porkbun domains  → DNS is auto-configured (apex + www).
+      * Other registrars → we can't touch their DNS, so we attach the domain
+        in Vercel (so Vercel hosts it the moment DNS resolves) AND return
+        `manual_dns` with the exact records / nameservers to paste. This is
+        how we still host — and earn — on domains bought elsewhere.
+    """
+    domain = _normalize_domain(domain_raw)
     if "." not in domain or " " in domain:
         raise HTTPException(400, "Enter a full domain, e.g. app.example.com")
 
@@ -65,9 +91,15 @@ async def launch_domain(
     if not u:
         raise HTTPException(404, "User not found")
 
-    # 1) Atomic, race-safe deduction. Operators with unlimited/enterprise
-    #    credits ('inf') are not charged. Everyone else must have >= cost.
-    unlimited = str(u.get("credits")) in ("inf", "-1") or u.get("plan") == "enterprise"
+    # 1) Atomic, race-safe deduction. The operator (the app owner) always
+    #    launches for free — they own the Vercel/Porkbun accounts, so charging
+    #    themselves credits is meaningless. Enterprise/unlimited-credit users
+    #    are also free. Everyone else must have >= cost.
+    unlimited = (
+        u.get("role") == "operator"
+        or str(u.get("credits")) in ("inf", "-1")
+        or u.get("plan") == "enterprise"
+    )
     charged = 0
     if not unlimited:
         res = await db.users.update_one(
@@ -89,8 +121,8 @@ async def launch_domain(
         "user_id": uid,
         "user_email": u.get("email"),
         "domain": domain,
-        "project_id": payload.projectId,
-        "project_name": payload.projectName,
+        "project_id": project_id,
+        "project_name": project_name,
         "credits_charged": charged,
         "created_at": now,
         "dns_configured": False,
@@ -102,10 +134,42 @@ async def launch_domain(
     #    Domains tab. But if BOTH fail we refund so the user isn't charged for
     #    a launch that did nothing.
     dns_error = None
+    manual_dns = None  # set for domains we don't hold registrar keys for
+    # When the operator launches the naked root (e.g. `tbcdomain.com`) or its
+    # `www`, point BOTH the apex and the `www` sub-domain at Vercel so the site
+    # resolves either way — a domain that only works on one of the two is the
+    # most common "why isn't it live?" complaint. For a deeper sub-domain
+    # (app.example.com) we only touch that exact host.
     try:
-        from porkbun_ext import configure_vercel_dns
-        dns_res = await configure_vercel_dns(domain)
-        launch_doc["dns_configured"] = bool(dns_res.get("ok"))
+        from porkbun_ext import (
+            configure_vercel_dns, _split_domain,
+            manual_dns_records, domain_in_porkbun,
+        )
+        root, sub = _split_domain(domain)
+        targets = [root, f"www.{root}"] if sub in ("", "www") else [domain]
+        launch_doc["dns_hosts"] = targets
+        # Only Porkbun domains can be auto-pointed. For anything bought
+        # elsewhere we can't rewrite DNS — we hand back manual steps instead
+        # (but still attach in Vercel below so we host it once DNS resolves).
+        if await domain_in_porkbun(root):
+            ok_any = False
+            for host in targets:
+                try:
+                    res = await configure_vercel_dns(host)
+                    ok_any = ok_any or bool(res.get("ok"))
+                except HTTPException as e:
+                    dns_error = e.detail if isinstance(e.detail, str) else str(e.detail)
+                except Exception as e:  # pragma: no cover - network
+                    dns_error = f"DNS setup skipped: {e}"
+                    logger.warning("launch-domain DNS error for %s: %s", host, e)
+            launch_doc["dns_configured"] = ok_any
+        else:
+            manual_dns = manual_dns_records(domain)
+            launch_doc["manual_dns_required"] = True
+            dns_error = (
+                "This domain isn't in the connected Porkbun account, so its DNS "
+                "must be set at your registrar — follow the steps shown."
+            )
     except HTTPException as e:
         dns_error = e.detail if isinstance(e.detail, str) else str(e.detail)
     except Exception as e:  # pragma: no cover - network
@@ -118,25 +182,65 @@ async def launch_domain(
     # actually served the app. We now call the real Vercel API so the domain
     # goes live on the project (mirrors the operator "set domain" flow).
     vercel_error = None
-    if payload.projectId:
+    if project_id:
         try:
-            proj = await db.deploy_projects.find_one({"id": payload.projectId})
+            proj = await db.deploy_projects.find_one({"id": project_id})
             if proj:
                 await db.deploy_projects.update_one(
-                    {"id": payload.projectId},
+                    {"id": project_id},
                     {"$set": {"domain": domain, "updated_at": now}},
                 )
                 vercel_project_id = proj.get("vercel_project_id")
+                from payments_ext import get_settings_doc
+                from vercel_api_ext import vercel_attach_domain
+                settings = await get_settings_doc()
+
+                # Self-provision: if the project has never been deployed it has
+                # no Vercel project id yet — instead of forcing the user to hit
+                # Deploy first, create the Vercel project up-front (linked to
+                # the repo so Vercel auto-builds the production branch). This is
+                # what makes "Connect domain" work on a brand-new project.
+                if not vercel_project_id and (proj.get("repo") or "").strip():
+                    try:
+                        from vercel_api_ext import vercel_ensure_project
+                        from deploy_projects_ext import _slugify
+                        ensured = await vercel_ensure_project(
+                            settings,
+                            _slugify(proj.get("projectName") or "project"),
+                            proj["repo"],
+                            proj.get("repoType", "github"),
+                            proj.get("gitRef"),
+                        )
+                        vercel_project_id = ensured.get("id")
+                        if vercel_project_id:
+                            await db.deploy_projects.update_one(
+                                {"id": project_id},
+                                {"$set": {"vercel_project_id": vercel_project_id,
+                                          "updated_at": now}},
+                            )
+                    except HTTPException as e:
+                        vercel_error = e.detail if isinstance(e.detail, str) else str(e.detail)
+                    except Exception as e:  # pragma: no cover - network
+                        vercel_error = f"Vercel project create failed: {e}"
+
                 if vercel_project_id:
-                    from payments_ext import get_settings_doc
-                    from vercel_api_ext import vercel_attach_domain
-                    settings = await get_settings_doc()
-                    await vercel_attach_domain(settings, vercel_project_id, domain)
-                    launch_doc["vercel_attached"] = True
-                else:
+                    # Attach every host we pointed DNS for (apex + www, or the
+                    # single sub-domain) so Vercel serves the app on all of
+                    # them. Attaching is idempotent, so re-launching is safe.
+                    hosts = launch_doc.get("dns_hosts") or [domain]
+                    attached_any = False
+                    for host in hosts:
+                        try:
+                            await vercel_attach_domain(settings, vercel_project_id, host)
+                            attached_any = True
+                        except HTTPException as e:
+                            vercel_error = e.detail if isinstance(e.detail, str) else str(e.detail)
+                    launch_doc["vercel_attached"] = attached_any
+                elif not vercel_error:
                     vercel_error = (
-                        "Project has no Vercel deployment yet — run Deploy once "
-                        "to create it, then relaunch the domain to attach it."
+                        "Project has no repo set, so a Vercel project can't be "
+                        "created automatically. Add the owner/name repo to the "
+                        "project, then connect the domain again."
                     )
         except HTTPException as e:
             vercel_error = e.detail if isinstance(e.detail, str) else str(e.detail)
@@ -180,7 +284,7 @@ async def launch_domain(
         from audit_ext import record_audit
         await record_audit(
             u, "domain.launch", target=domain,
-            details={"credits_charged": charged, "project_id": payload.projectId},
+            details={"credits_charged": charged, "project_id": project_id},
             request=request,
         )
     except Exception:
@@ -199,6 +303,12 @@ async def launch_domain(
             f"{domain} is launching. DNS is pointed at Vercel and the domain is "
             "attached to your project — it goes live once DNS propagates "
             "(usually a few minutes, up to an hour)."
+        )
+    elif manual_dns and launch_doc["vercel_attached"]:
+        message = (
+            f"{domain} is attached to your project and hosted on Vercel. "
+            "Because this domain isn't registered with us, add the DNS records "
+            "shown at your current registrar — it goes live once they propagate."
         )
     elif refunded:
         message = (
@@ -222,6 +332,7 @@ async def launch_domain(
         "credits_remaining": fresh.get("credits"),
         "dns_configured": launch_doc["dns_configured"],
         "dns_error": dns_error,
+        "manual_dns": manual_dns,
         "vercel_attached": launch_doc["vercel_attached"],
         "vercel_error": vercel_error,
         "refunded": refunded,

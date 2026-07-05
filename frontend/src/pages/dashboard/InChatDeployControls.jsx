@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Rocket, ShieldCheck, Activity, ChevronDown, Loader2, Trash2 } from 'lucide-react';
+import { Rocket, ShieldCheck, Activity, ChevronDown, Loader2, Trash2, Pencil, Eye } from 'lucide-react';
 import { toast } from 'sonner';
 import api from '../../lib/api';
 import {
@@ -8,6 +8,15 @@ import {
 } from '../../components/ui/dropdown-menu';
 
 const STORAGE_KEY = 'tbc.inChat.selectedProjectId';
+const PREVIEW_KEY = 'tbc.inChat.lastPreviewUrl';
+// Domain the operator wants this project launched onto. Shared with the
+// ShipItPill domain field so the Deploy button can connect it in one click.
+const LAUNCH_DOMAIN_KEY = 'tbc.inChat.launchDomain';
+// The console deploys ITSELF under this id — never treat it as a preview
+// target (that would send the operator back to this app).
+const SELF_PROJECT_ID = 'tbctools-self';
+
+const withHttps = (u) => (u && !/^https?:\/\//i.test(u) ? `https://${u}` : u);
 
 /**
  * Contextual deploy controls that sit inside every chat session.
@@ -26,6 +35,9 @@ export function InChatDeployControls({ user }) {
   const [access, setAccess] = useState(null); // {can_deploy, pending_request}
   const [requesting, setRequesting] = useState(false);
   const [deleting, setDeleting] = useState(null); // project id currently being deleted
+  // When a launched domain isn't one we hold registrar keys for, the backend
+  // returns manual DNS steps — we render them in a panel under the controls.
+  const [manualDns, setManualDns] = useState(null); // { domain, records[], nameservers[] }
 
   const isOperator = user?.role === 'operator';
 
@@ -147,6 +159,56 @@ export function InChatDeployControls({ user }) {
     }
   };
 
+  // Rename a deploy project in place. Hits PATCH /operator/deploy/:id with a
+  // new projectName — the same endpoint the Ops row uses — so the name updates
+  // everywhere the picker is shown.
+  const rename = async (e, p) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const current = p.projectName || p.name || '';
+    const next = window.prompt('Rename project', current);
+    if (next == null) return; // cancelled
+    const trimmed = next.trim();
+    if (!trimmed || trimmed === current) return;
+    try {
+      await api.patch(`/operator/deploy/${p.id}`, { projectName: trimmed });
+      toast.success(`Renamed to “${trimmed}”`);
+      setProjects((prev) => prev.map((x) => (x.id === p.id ? { ...x, projectName: trimmed } : x)));
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Rename failed');
+    }
+  };
+
+  // Surface the domain auto-connect result from a deploy. When the domain
+  // isn't one we can auto-configure (bought elsewhere), stash the manual DNS
+  // steps so the panel below the controls can walk the operator through it.
+  const showDomainLaunch = (dl) => {
+    if (!dl) return;
+    if (dl.manual_dns) {
+      setManualDns({ domain: dl.domain, ...dl.manual_dns });
+      toast.message(dl.message || `${dl.domain}: add the DNS records shown to finish.`, {
+        duration: 10000,
+      });
+    } else if (dl.ok === false) {
+      toast.error(dl.message || 'Could not connect the domain');
+    } else {
+      setManualDns(null);
+      toast.success(dl.message || `${dl.domain} connected`);
+    }
+  };
+
+  // Live preview target for the header button: the freshest in-chat preview
+  // URL, else the selected project's URL/domain (never the self app).
+  let previewUrl = '';
+  try {
+    const stored = localStorage.getItem(PREVIEW_KEY);
+    if (stored) previewUrl = withHttps(stored);
+  } catch { /* ignore */ }
+  if (!previewUrl && selected && selected.id !== SELF_PROJECT_ID) {
+    const u = selected.url || selected.domain;
+    if (u) previewUrl = withHttps(u);
+  }
+
   const run = async (kind) => {
     if (!selectedId) {
       toast.error('Pick a project first');
@@ -155,8 +217,22 @@ export function InChatDeployControls({ user }) {
     setBusy(kind);
     try {
       if (kind === 'deploy') {
-        const { data } = await api.post(`/operator/deploy/${selectedId}/deploy`, {});
-        toast.success(`Deploy queued — ${data?.url || data?.id || 'OK'}`);
+        // One-click deploy + connect domain: pick up the domain the operator
+        // set for this chat (shared with the ShipItPill field).
+        let domain = '';
+        try { domain = (localStorage.getItem(LAUNCH_DOMAIN_KEY) || '').trim(); } catch { /* ignore */ }
+        const { data } = await api.post(
+          `/operator/deploy/${selectedId}/deploy`,
+          domain ? { domain } : {},
+        );
+        // Light up the header Preview button with the fresh deploy URL.
+        const freshUrl = data?.url || data?.deployment_url;
+        if (freshUrl) {
+          try { localStorage.setItem(PREVIEW_KEY, freshUrl); } catch { /* ignore */ }
+        }
+        toast.success(`Deploy queued — ${freshUrl || data?.id || 'OK'}`);
+        // Surface the auto-connect outcome (incl. manual DNS steps).
+        if (data?.domain_launch) showDomainLaunch(data.domain_launch);
       } else if (kind === 'review') {
         const { data } = await api.post(`/operator/deploy/${selectedId}/code-review`, {});
         const verdict = data?.verdict || data?.summary || 'completed';
@@ -247,6 +323,8 @@ export function InChatDeployControls({ user }) {
   };
 
   return (
+    <>
+    {manualDns && <ManualDnsPanel data={manualDns} onClose={() => setManualDns(null)} />}
     <div
       className="flex items-center gap-1.5 rounded-lg border border-tbc-900/60 bg-ink-900/60 px-1.5 py-1"
       data-testid="in-chat-deploy-controls"
@@ -300,25 +378,40 @@ export function InChatDeployControls({ user }) {
                 data-testid={`in-chat-project-option-${p.id}`}
               >
                 <span className="truncate">{label}</span>
-                {primary ? (
-                  <span className="shrink-0 rounded bg-tbc-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-tbc-300">
-                    this app
-                  </span>
-                ) : (
+                <span className="flex shrink-0 items-center gap-0.5">
+                  {primary && (
+                    <span className="rounded bg-tbc-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-tbc-300">
+                      this app
+                    </span>
+                  )}
+                  {/* Rename is available on every project (including this app). */}
                   <button
                     type="button"
-                    onClick={(e) => del(e, p)}
-                    disabled={deleting === p.id}
-                    title={`Delete ${label}`}
-                    aria-label={`Delete ${label}`}
-                    className="shrink-0 rounded p-1 text-tbc-200/50 hover:bg-rose-500/15 hover:text-rose-300 disabled:opacity-50"
-                    data-testid={`in-chat-project-delete-${p.id}`}
+                    onClick={(e) => rename(e, p)}
+                    title={`Rename ${label}`}
+                    aria-label={`Rename ${label}`}
+                    className="rounded p-1 text-tbc-200/50 hover:bg-tbc-500/15 hover:text-tbc-200"
+                    data-testid={`in-chat-project-rename-${p.id}`}
                   >
-                    {deleting === p.id
-                      ? <Loader2 className="h-3 w-3 animate-spin" />
-                      : <Trash2 className="h-3 w-3" />}
+                    <Pencil className="h-3 w-3" />
                   </button>
-                )}
+                  {/* Delete stays off the primary app so it can't be removed. */}
+                  {!primary && (
+                    <button
+                      type="button"
+                      onClick={(e) => del(e, p)}
+                      disabled={deleting === p.id}
+                      title={`Delete ${label}`}
+                      aria-label={`Delete ${label}`}
+                      className="rounded p-1 text-tbc-200/50 hover:bg-rose-500/15 hover:text-rose-300 disabled:opacity-50"
+                      data-testid={`in-chat-project-delete-${p.id}`}
+                    >
+                      {deleting === p.id
+                        ? <Loader2 className="h-3 w-3 animate-spin" />
+                        : <Trash2 className="h-3 w-3" />}
+                    </button>
+                  )}
+                </span>
               </DropdownMenuItem>
             );
           })}
@@ -352,6 +445,110 @@ export function InChatDeployControls({ user }) {
         tone="ghost"
         testid="in-chat-health-btn"
       />
+      {/* Always-visible Preview — opens the live site the operator is building
+          (last in-chat preview, else the selected project's URL). Disabled
+          until there's a real URL, with a hint on why. */}
+      {previewUrl ? (
+        <a
+          href={previewUrl}
+          target="_blank"
+          rel="noreferrer"
+          title={`Open ${previewUrl}`}
+          data-testid="in-chat-preview-btn"
+          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold text-tbc-100 transition hover:bg-ink-950"
+        >
+          <Eye className="h-3 w-3" />
+          <span className="hidden sm:inline">Preview</span>
+        </a>
+      ) : (
+        <span
+          title="Deploy once to get a live preview link"
+          data-testid="in-chat-preview-btn-disabled"
+          className="inline-flex cursor-not-allowed items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold text-tbc-100/40"
+        >
+          <Eye className="h-3 w-3" />
+          <span className="hidden sm:inline">Preview</span>
+        </span>
+      )}
+    </div>
+    </>
+  );
+}
+
+/**
+ * Step-by-step DNS panel for a launched domain we DON'T hold registrar keys
+ * for. The site is already attached to Vercel (we host it) — the operator
+ * just needs to paste these records at whichever registrar owns the domain,
+ * then it goes live. Fixed, dismissible, and copy-friendly.
+ */
+function ManualDnsPanel({ data, onClose }) {
+  const copy = (text) => {
+    try { navigator.clipboard?.writeText(text); toast.success('Copied'); } catch { /* ignore */ }
+  };
+  return (
+    <div
+      className="fixed bottom-24 right-5 z-40 w-[22rem] max-w-[92vw] rounded-xl border border-tbc-900/70 bg-ink-900 p-4 shadow-2xl shadow-black/40"
+      data-testid="manual-dns-panel"
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="text-sm font-semibold text-tbc-100">
+          Point {data.domain} at us
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded p-1 text-tbc-200/60 hover:bg-ink-950 hover:text-tbc-100"
+          aria-label="Close"
+        >
+          <span aria-hidden>×</span>
+        </button>
+      </div>
+      <p className="mt-1 text-xs leading-relaxed text-tbc-200/70">
+        This domain is registered elsewhere, so we can&apos;t change its DNS for
+        you. Your site is already hosted on our platform — add the records below
+        at your current registrar and it goes live in a few minutes.
+      </p>
+
+      <div className="mt-3 text-[10px] font-semibold uppercase tracking-wider text-tbc-200/50">
+        Option A — DNS records
+      </div>
+      <div className="mt-1 space-y-1.5">
+        {(data.records || []).map((r, i) => (
+          <button
+            key={i}
+            type="button"
+            onClick={() => copy(r.value)}
+            title="Click to copy the value"
+            className="flex w-full items-center justify-between gap-2 rounded-md border border-tbc-900/60 bg-ink-950 px-2 py-1.5 text-left text-xs text-tbc-100 hover:border-tbc-500/50"
+          >
+            <span className="font-mono">
+              <span className="text-tbc-300">{r.type}</span>{' '}
+              <span className="text-tbc-200/60">{r.host}</span>
+            </span>
+            <span className="truncate font-mono text-tbc-200/80">{r.value}</span>
+          </button>
+        ))}
+      </div>
+
+      {Array.isArray(data.nameservers) && data.nameservers.length > 0 && (
+        <>
+          <div className="mt-3 text-[10px] font-semibold uppercase tracking-wider text-tbc-200/50">
+            Option B — or switch nameservers
+          </div>
+          <div className="mt-1 flex flex-wrap gap-1.5">
+            {data.nameservers.map((ns) => (
+              <button
+                key={ns}
+                type="button"
+                onClick={() => copy(ns)}
+                className="rounded-md border border-tbc-900/60 bg-ink-950 px-2 py-1 font-mono text-xs text-tbc-100 hover:border-tbc-500/50"
+              >
+                {ns}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }

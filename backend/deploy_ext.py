@@ -27,7 +27,9 @@ Trust model
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
 
 import httpx
@@ -38,6 +40,56 @@ from auth_utils import get_current_operator
 from db import db
 
 logger = logging.getLogger('tbc')
+
+# --- Deploy preflight: catch a bad Python pin BEFORE Render rejects it --------
+# render.yaml lives at the repo root, two levels up from this file
+# (<repo>/backend/deploy_ext.py -> <repo>/render.yaml).
+_RENDER_YAML = Path(__file__).resolve().parents[1] / 'render.yaml'
+
+# Python versions we KNOW Render currently provides. A pin outside this set is
+# not necessarily wrong, but Render has historically failed the build instantly
+# on versions it does not ship (e.g. the non-existent "3.13.4"). We warn rather
+# than hard-block so a manual deploy is never prevented.
+_KNOWN_GOOD_PYTHON = {
+    '3.11.9', '3.11.10', '3.11.11',
+    '3.12.6', '3.12.7', '3.12.8',
+    '3.13.1', '3.13.2',
+}
+
+
+def check_python_version() -> Optional[dict]:
+    """Read the pinned PYTHON_VERSION from render.yaml and flag it if it is not
+    a version we know Render ships. Returns None when everything looks fine, or
+    a dict describing the problem. Never raises — a preflight must not itself
+    break the deploy path."""
+    try:
+        if not _RENDER_YAML.exists():
+            return None
+        text = _RENDER_YAML.read_text(encoding='utf-8', errors='replace')
+    except Exception as e:  # pragma: no cover - defensive
+        logger.warning('Could not read render.yaml for preflight: %s', e)
+        return None
+
+    m = re.search(r'PYTHON_VERSION[\'"]?\s*\n?\s*value:\s*[\'"]?([\d.]+)', text)
+    if not m:
+        m = re.search(r'PYTHON_VERSION["\']?\s*[:=]\s*["\']?([\d.]+)', text)
+    if not m:
+        return None
+
+    pinned = m.group(1).strip().rstrip('.')
+    if pinned in _KNOWN_GOOD_PYTHON:
+        return None
+
+    return {
+        'pinned': pinned,
+        'message': (
+            f'render.yaml pins Python {pinned}, which is not a version Render is '
+            'known to ship. Render only offers select 3.11.x / 3.12.x / 3.13.x '
+            'builds, so the deploy may fail instantly on the build step. '
+            f'Recommended: use one of {sorted(_KNOWN_GOOD_PYTHON)}.'
+        ),
+        'recommended': sorted(_KNOWN_GOOD_PYTHON),
+    }
 
 # NOTE: the existing deploy system (deploy_projects_ext.py) owns
 # `/api/operator/deploy/{project_id}` with a catch-all GET, which would swallow
@@ -170,15 +222,31 @@ async def list_render_services(op: dict = Depends(get_current_operator)):
     return {'services': [s for s in services if s.get('id')]}
 
 
+@router.get('/preflight')
+async def deploy_preflight(op: dict = Depends(get_current_operator)):
+    """Non-blocking pre-deploy check. Currently validates the pinned Python
+    version in render.yaml so the operator sees a clear warning before a build
+    that Render would reject."""
+    warning = check_python_version()
+    return {'ok': warning is None, 'python_warning': warning}
+
+
 @router.post('/trigger')
 async def trigger_deploy(op: dict = Depends(get_current_operator)):
     """Trigger a redeploy on Render.
 
     Prefers the API (key + service id) so we can report a deploy id/status;
     falls back to the deploy hook URL if that's all that's configured.
+
+    A bad Python pin in render.yaml is surfaced as a non-blocking `warning`
+    in the response — the deploy still proceeds so a manual deploy is never
+    prevented, but the operator is told exactly what will likely fail.
     """
     cfg = await _get_config()
     api_key = await _get_render_api_key()
+    py_warning = check_python_version()
+    if py_warning:
+        logger.warning('Deploy preflight: %s', py_warning['message'])
 
     # Preferred: REST API with key + service id.
     if api_key and cfg.get('service_id'):
@@ -206,7 +274,8 @@ async def trigger_deploy(op: dict = Depends(get_current_operator)):
                           'last_deploy_status': status}},
                 upsert=True,
             )
-            return {'ok': True, 'method': 'api', 'deploy_id': deploy_id, 'status': status}
+            return {'ok': True, 'method': 'api', 'deploy_id': deploy_id,
+                    'status': status, 'warning': py_warning}
         except HTTPException:
             raise
         except Exception as e:
@@ -225,7 +294,8 @@ async def trigger_deploy(op: dict = Depends(get_current_operator)):
                           'last_deploy_status': 'triggered (hook)'}},
                 upsert=True,
             )
-            return {'ok': True, 'method': 'hook', 'status': 'triggered'}
+            return {'ok': True, 'method': 'hook', 'status': 'triggered',
+                    'warning': py_warning}
         except Exception as e:
             logger.warning('Render hook deploy failed: %s', e)
             raise HTTPException(502, 'Deploy hook call failed. Check the URL.')

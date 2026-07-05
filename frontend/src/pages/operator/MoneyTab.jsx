@@ -10,6 +10,7 @@ import { RevenueSparkline } from './money/RevenueSparkline';
 import { RecentTransactions } from './money/RecentTransactions';
 import { WithdrawSettings } from './money/WithdrawSettings';
 import { WithdrawHistory } from './money/WithdrawHistory';
+import HostingIncomePanel from './money/HostingIncomePanel';
 
 export default function MoneyTab() {
   const [data, setData] = useState(null);
@@ -129,6 +130,9 @@ export default function MoneyTab() {
 
       <MoneyTiles internal={i} />
       <DomainsStat stat={domainsStat} />
+      {/* NEW: recurring "keep it live" hosting revenue (credits), tracked
+          separately from one-off launches + USD revenue. Additive. */}
+      <HostingIncomePanel />
       <ProviderBalances providers={p} />
       <RevenueSparkline series={i.series_30d} />
       <RecentTransactions transactions={i.recent_transactions} />

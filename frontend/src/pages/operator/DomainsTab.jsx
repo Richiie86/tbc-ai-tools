@@ -7,6 +7,7 @@ import {
   Globe, Loader2, RefreshCw, ShieldCheck, ShieldAlert, Search,
   CheckCircle2, XCircle, ExternalLink, KeyRound, Rocket, AlertTriangle,
 } from 'lucide-react';
+import DeployDiagnosticsPanel from './DeployDiagnosticsPanel';
 
 /**
  * Operator → Domains
@@ -180,6 +181,11 @@ export default function DomainsTab() {
         loading={loadingDeployed}
         onRefresh={loadDeployed}
       />
+
+      {/* NEW: one-click diagnostics for the Deploy button + domain connect
+          flow, plus the automated *.tbctools.org wildcard / instant-subdomain
+          setup. Additive — appended below the existing panels. */}
+      <DeployDiagnosticsPanel />
     </div>
   );
 }

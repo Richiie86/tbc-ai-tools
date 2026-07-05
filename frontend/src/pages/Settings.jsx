@@ -9,7 +9,8 @@ import { Label } from '../components/ui/label';
 import {
   User as UserIcon, Lock, ShieldCheck, Share2, Sparkles, Calculator,
   LogOut, Loader2, Cpu, ChevronLeft, Check, Copy, Coins, Users, MousePointerClick,
-  BadgeDollarSign, Crown, Zap, KeyRound, Trash2, Plug,
+  BadgeDollarSign, Crown, Zap, KeyRound, Trash2, Plug, Server, Globe, RefreshCw,
+  AlertTriangle,
 } from 'lucide-react';
 
 /**
@@ -24,6 +25,7 @@ const SECTIONS = [
   { id: 'security', label: 'Security', icon: ShieldCheck },
   { id: 'referrals', label: 'Referrals & Rewards', icon: Share2 },
   { id: 'plan', label: 'Plan & Pricing', icon: Sparkles },
+  { id: 'hosting', label: 'Hosting & Domains', icon: Server },
   { id: 'byok', label: 'Bring your own keys', icon: KeyRound },
   { id: 'calculator', label: 'Credits calculator', icon: Calculator },
 ];
@@ -91,11 +93,12 @@ export default function Settings() {
           {/* Section content */}
           <main className="min-w-0 flex-1">
             {active === 'account' && <AccountSection user={user} refresh={refresh} />}
-            {active === 'password' && <PasswordSection />}
+            {active === 'password' && <PasswordSection user={user} refresh={refresh} />}
             {active === 'security' && <SecuritySection user={user} refresh={refresh} />}
             {active === 'referrals' && <ReferralsSection />}
-            {active === 'plan' && <PlanSection user={user} />}
-            {active === 'byok' && <ByokSection refresh={refresh} />}
+          {active === 'plan' && <PlanSection user={user} />}
+          {active === 'hosting' && <HostingSection user={user} refresh={refresh} />}
+          {active === 'byok' && <ByokSection refresh={refresh} />}
             {active === 'calculator' && <CalculatorSection user={user} />}
 
             {/* Sign out on mobile (nav bottom is hidden on small screens) */}
@@ -204,11 +207,14 @@ function AccountSection({ user, refresh }) {
 /* ------------------------------------------------------------------ */
 /* Password                                                            */
 /* ------------------------------------------------------------------ */
-function PasswordSection() {
+function PasswordSection({ user, refresh }) {
   const [cur, setCur] = useState('');
   const [next, setNext] = useState('');
   const [confirm, setConfirm] = useState('');
   const [saving, setSaving] = useState(false);
+  // When the operator is still on the seeded bootstrap password the backend
+  // locks operator features until they rotate it. Show a hard prompt here.
+  const mustRotate = !!user?.must_change_password;
 
   const submit = async (e) => {
     e.preventDefault();
@@ -219,6 +225,9 @@ function PasswordSection() {
       await api.post('/auth/change-password', { current_password: cur, new_password: next });
       toast.success('Password changed');
       setCur(''); setNext(''); setConfirm('');
+      // Refresh the session user so must_change_password flips to false and
+      // the route gate / banner lift immediately.
+      if (refresh) await refresh();
     } catch (err) {
       toast.error(err?.response?.data?.detail || 'Could not change password');
     } finally { setSaving(false); }
@@ -226,6 +235,15 @@ function PasswordSection() {
 
   return (
     <Card title="Password" desc="Use at least 10 characters. You will stay signed in on this device.">
+      {mustRotate && (
+        <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-200">
+          <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
+          <p>
+            You&apos;re signed in with the temporary bootstrap password. Operator
+            features stay locked until you set your own password below.
+          </p>
+        </div>
+      )}
       <form onSubmit={submit} className="space-y-4">
         <div>
           <Label htmlFor="cur-pw" className="text-tbc-200/80">Current password</Label>
@@ -754,6 +772,134 @@ function CalculatorSection({ user }) {
       )}
       {isOperator && <p className="mt-4 text-sm text-tbc-200/70">As the operator you have unlimited credits.</p>}
       <Link to="/pricing" className="mt-4 inline-block text-sm font-medium text-tbc-300 hover:text-tbc-200">Need more? See plans →</Link>
+    </Card>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Hosting & Domains — user-facing recurring hosting status            */
+/* ------------------------------------------------------------------ */
+function HostingSection({ user, refresh }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState('');
+  const navigate = useNavigate();
+
+  const load = () => {
+    setLoading(true);
+    api.get('/hosting/status')
+      .then((r) => setData(r.data))
+      .catch(() => setData(null))
+      .finally(() => setLoading(false));
+  };
+  useEffect(load, []);
+
+  const resume = async (domain) => {
+    setBusy(domain);
+    try {
+      await api.post(`/hosting/resume?domain=${encodeURIComponent(domain)}`);
+      load();
+      refresh?.();
+    } catch (e) {
+      alert(e?.response?.data?.detail || 'Could not resume hosting. Top up credits and try again.');
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const fmtDate = (iso) => {
+    if (!iso) return '—';
+    try { return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }); }
+    catch { return '—'; }
+  };
+
+  const fee = data?.fee_credits ?? 0;
+  const periodDays = data?.period_days ?? 30;
+  const domains = data?.domains || [];
+
+  return (
+    <Card
+      title="Hosting & Domains"
+      desc={`Keeping an app live on your own domain costs ${fee} credits every ${periodDays} days. If your balance runs out the domain is paused until you top up.`}
+    >
+      {loading ? (
+        <div className="flex items-center gap-2 text-sm text-tbc-200/70">
+          <Loader2 className="h-4 w-4 animate-spin" /> Loading your hosted domains…
+        </div>
+      ) : domains.length === 0 ? (
+        <div className="rounded-xl border border-tbc-900/60 bg-ink-950/60 p-5 text-center">
+          <Globe className="mx-auto h-8 w-8 text-tbc-300" />
+          <p className="mt-2 text-sm font-medium text-tbc-100">No hosted domains yet</p>
+          <p className="mt-1 text-xs text-tbc-200/60">
+            Connect a custom domain to one of your apps to host it here. Domains bought elsewhere
+            just need one DNS record — we&apos;ll show you exactly what to add and detect it automatically.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {domains.map((d) => {
+            const suspended = d.status === 'suspended';
+            return (
+              <div
+                key={d.domain}
+                className={`rounded-xl border p-4 ${suspended ? 'border-amber-500/50 bg-amber-500/5' : 'border-tbc-900/60 bg-ink-950/60'}`}
+              >
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <Globe className="h-4 w-4 text-tbc-300" />
+                    <span className="text-sm font-bold text-tbc-50">{d.domain}</span>
+                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${suspended ? 'bg-amber-500/20 text-amber-300' : 'bg-tbc-500/15 text-tbc-300'}`}>
+                      {d.status}
+                    </span>
+                  </div>
+                  {suspended && (
+                    <Button
+                      onClick={() => resume(d.domain)}
+                      disabled={busy === d.domain}
+                      className="bg-tbc-500 font-semibold text-ink-950 hover:bg-tbc-400"
+                    >
+                      {busy === d.domain ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                      <span className="ml-1.5">Resume hosting</span>
+                    </Button>
+                  )}
+                </div>
+                <div className="mt-3 grid gap-2 text-xs sm:grid-cols-3">
+                  <div>
+                    <div className="text-tbc-200/50">Fee</div>
+                    <div className="font-medium text-tbc-100">{d.fee_credits} credits / {periodDays}d</div>
+                  </div>
+                  <div>
+                    <div className="text-tbc-200/50">{suspended ? 'Paused since' : 'Next charge'}</div>
+                    <div className="font-medium text-tbc-100">{fmtDate(suspended ? d.last_charged_at : d.next_charge_at)}</div>
+                  </div>
+                  <div>
+                    <div className="text-tbc-200/50">Last charged</div>
+                    <div className="font-medium text-tbc-100">{fmtDate(d.last_charged_at)}</div>
+                  </div>
+                </div>
+                {suspended && d.suspend_reason && (
+                  <p className="mt-3 flex items-start gap-1.5 text-xs text-amber-300">
+                    <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                    {d.suspend_reason}
+                  </p>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="mt-5 flex items-center justify-between rounded-xl border border-tbc-900/60 bg-ink-950/60 p-4">
+        <div>
+          <div className="text-[10px] uppercase tracking-wider text-tbc-200/60">Credits remaining</div>
+          <div className="mt-1 text-2xl font-bold text-tbc-100">
+            {user?.role === 'operator' ? '∞' : (data?.credits ?? user?.credits ?? 0).toLocaleString()}
+          </div>
+        </div>
+        <Button onClick={() => navigate('/pricing')} className="bg-tbc-500 font-semibold text-ink-950 hover:bg-tbc-400">
+          Top up credits
+        </Button>
+      </div>
     </Card>
   );
 }

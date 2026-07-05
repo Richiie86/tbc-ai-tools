@@ -182,15 +182,29 @@ async def vercel_attach_domain(
     return {'attached': True, 'name': name, 'verified': body.get('verified', False), 'raw': body}
 
 
-async def vercel_redeploy(settings: dict, deployment_id: str) -> dict:
+async def vercel_redeploy(
+    settings: dict, deployment_id: str, name_slug: str = 'project',
+) -> dict:
+    """Redeploy an existing deployment by replaying it.
+
+    Vercel has NO `POST /v13/deployments/{id}/redeploy` route — calling it
+    404s with "The requested API endpoint was not found." The correct way to
+    redeploy is `POST /v13/deployments` with the previous deployment's id in
+    the body as `deploymentId`; Vercel then rebuilds it, inheriting the
+    project's settings and env. `name` is required even for an existing
+    project, so callers pass the project's slug.
+    """
     token = vercel_token(settings)
     if not token:
         raise HTTPException(503, VERCEL_TOKEN_MISSING_DETAIL)
+    qs = dict(vercel_team_qs(settings) or {})
+    qs['skipAutoDetectionConfirmation'] = '1'
     async with httpx.AsyncClient(timeout=20.0) as client:
         r = await client.post(
-            f'{VERCEL_API}/v13/deployments/{deployment_id}/redeploy',
-            params=vercel_team_qs(settings),
-            headers={'Authorization': f'Bearer {token}'},
+            f'{VERCEL_API}/v13/deployments',
+            params=qs,
+            headers={'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'},
+            json={'name': name_slug, 'deploymentId': deployment_id, 'target': 'production'},
         )
     if r.status_code >= 400:
         try:
@@ -330,6 +344,63 @@ async def vercel_promote_to_production(
         return r.json() if r.content else {}
     except Exception:
         return {}
+
+
+async def vercel_ensure_project(
+    settings: dict, name_slug: str, repo: str, repo_type: str = 'github',
+    git_ref: Optional[str] = None,
+) -> dict:
+    """Create (or resolve) a Vercel project WITHOUT waiting for a deploy.
+
+    This is what lets "Connect domain" work before the first Deploy: we
+    provision the Vercel project up-front (linking the git repo so Vercel then
+    auto-builds the production branch), then the caller can attach the domain
+    immediately.
+
+    Idempotent-ish: if a project with `name_slug` already exists Vercel returns
+    a 409 `conflict`; we fall back to resolving the existing id via
+    `vercel_find_project_id` so callers always get an id back.
+
+    Returns `{id, name, created}`.
+    """
+    token = vercel_token(settings)
+    if not token:
+        raise HTTPException(503, VERCEL_TOKEN_MISSING_DETAIL)
+    if not (repo or '').strip():
+        raise HTTPException(
+            400,
+            'Cannot create the Vercel project without a git repo. Add the '
+            'owner/name repo to the project first, then connect the domain.',
+        )
+    payload = {
+        'name': name_slug,
+        'framework': None,
+        'gitRepository': {'type': repo_type or 'github', 'repo': repo},
+    }
+    if git_ref:
+        payload['gitRepository']['sourceless'] = False
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        r = await client.post(
+            f'{VERCEL_API}/v10/projects',
+            params=vercel_team_qs(settings),
+            headers={'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'},
+            json=payload,
+        )
+    if r.status_code < 400:
+        body = r.json()
+        return {'id': body.get('id'), 'name': body.get('name'), 'created': True}
+    # Already exists (or a name clash) → resolve the existing id.
+    try:
+        err = r.json().get('error', {})
+    except Exception:
+        err = {'message': r.text[:300]}
+    code = err.get('code') or ''
+    if code in {'conflict', 'project_name_already_exists'} or r.status_code == 409:
+        existing = await vercel_find_project_id(settings, name_slug)
+        if existing:
+            return {'id': existing, 'name': name_slug, 'created': False}
+    msg = err.get('message') or code or 'failed'
+    raise HTTPException(502, f'Vercel create project: {msg}')
 
 
 async def vercel_list_deployments(

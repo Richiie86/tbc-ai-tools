@@ -332,7 +332,16 @@ _SYSTEM_PROMPT = (
     "3. Files under test/, tests/, or named *_test.py / test_*.py are TEST "
     "code, not production runtime. Do not treat literals there as production "
     "secrets when they are read from environment variables or are obvious "
-    "placeholders."
+    "placeholders.\n\n"
+    "DO flag these REAL deploy blockers (they are NOT false positives):\n"
+    "A. A pinned language/runtime version in deploy config (e.g. "
+    "PYTHON_VERSION in render.yaml, the `runtime` field, .python-version, or "
+    "engines in package.json) that the target host does not ship. Render only "
+    "provides select 3.11.x / 3.12.x / 3.13.x Python builds; a pin like "
+    "'3.13.4' does not exist there and fails the build instantly. Report it as "
+    "HIGH with the exact working version to use. This is about the RUNTIME "
+    "PIN, which is verifiable — it is different from rule 2, which is about "
+    "AI/LLM model identifier strings that you cannot verify."
 )
 
 

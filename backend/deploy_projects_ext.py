@@ -120,6 +120,10 @@ class DeployRequest(BaseModel):
     # last AI code review says the project shouldn't ship. Defaults to false
     # so an autonomous AI agent can't bypass its own safety net by accident.
     bypass_review: bool = False
+    # Optional: when set, the Deploy button also connects this domain to the
+    # project in the same click (deploy → auto-attach domain). Porkbun domains
+    # get their DNS auto-pointed; others come back with manual DNS steps.
+    domain: Optional[str] = None
 
 
 # ===================================================================
@@ -152,6 +156,8 @@ def _project_to_out(doc: dict) -> dict:
         'repoType': doc.get('repoType', 'github'),
         'gitRef': doc.get('gitRef'),
         'vercel_project_id': doc.get('vercel_project_id'),
+        'subdomain': doc.get('subdomain'),
+        'subdomain_attached': bool(doc.get('subdomain_attached', False)),
         'auto_promote': bool(doc.get('auto_promote', False)),
         'auto_heal': bool(doc.get('auto_heal', False)),
         'auto_rollback': bool(doc.get('auto_rollback', False)),
@@ -668,6 +674,16 @@ async def op_create_project(
         )
     except Exception:
         pass
+    # NEW (additive, best-effort): give every project an instant
+    # `<slug>.tbctools.org` subdomain. Never blocks or alters creation — if
+    # anything fails the project is created exactly as before and the
+    # subdomain can be assigned later from the Ops tab.
+    try:
+        from wildcard_bootstrap_ext import assign_subdomain
+        sub_res = await assign_subdomain(doc, attach=True)
+        doc['subdomain'] = sub_res.get('subdomain')
+    except Exception as e:  # pragma: no cover - best-effort
+        logger.warning('auto-subdomain assign skipped for %s: %s', pid, e)
     logger.info('Operator created deploy project %s (%s → %s)', pid, doc['repo'], domain or '—')
     return _project_to_out(doc)
 
@@ -1052,7 +1068,9 @@ async def _trigger_redeploy(project_id: str, settings: dict) -> dict:
             400,
             'No prior deployment to redeploy. Run a regular Deploy first.',
         )
-    res = await _vercel_redeploy(settings, last_id)
+    res = await _vercel_redeploy(
+        settings, last_id, name_slug=_slugify(project.get('projectName') or 'project'),
+    )
     await _record_deployment(project_id, res)
     return {
         'deployment_id': res.get('id') or res.get('uid'),
@@ -1080,11 +1098,43 @@ async def op_deploy_project(
     """
     settings = await get_settings_doc()
     try:
-        return await _trigger_deploy(
+        result = await _trigger_deploy(
             project_id, settings, req.target, req.git_ref,
             bypass_review=req.bypass_review,
             user_id=user.get('sub'),
         )
+        # One-click "deploy AND connect the domain": when the operator has a
+        # domain set for this chat, attach it in the same action so there's no
+        # separate Launch step. Best-effort — a domain hiccup never fails the
+        # deploy itself; the outcome (incl. any manual DNS steps) rides back on
+        # the response under `domain_launch`.
+        wanted = (req.domain or '').strip()
+        if wanted:
+            try:
+                from domain_launch_ext import perform_domain_launch
+                project = await db.deploy_projects.find_one({'id': project_id}) or {}
+                launch = await perform_domain_launch(
+                    user, wanted,
+                    project_id=project_id,
+                    project_name=project.get('projectName'),
+                )
+                if isinstance(result, dict):
+                    result['domain_launch'] = launch
+            except HTTPException as de:
+                if isinstance(result, dict):
+                    result['domain_launch'] = {
+                        'ok': False,
+                        'domain': wanted,
+                        'message': de.detail if isinstance(de.detail, str) else str(de.detail),
+                    }
+            except Exception as de:  # pragma: no cover - network
+                logger.warning('deploy domain auto-connect failed for %s: %s', project_id, de)
+                if isinstance(result, dict):
+                    result['domain_launch'] = {
+                        'ok': False, 'domain': wanted,
+                        'message': f'Domain connect skipped: {de}',
+                    }
+        return result
     except HTTPException:
         # Re-raise FastAPI-level errors verbatim — already JSON-encodable.
         raise
@@ -1767,6 +1817,25 @@ async def _resolve_vercel_project_id(doc: dict, settings: dict) -> Optional[str]
         name = _slugify((doc or {}).get('projectName') or '')
         resolved = await _vercel_find_project_id(settings, name)
 
+    # Strategy 4 (NEW) — nothing exists on Vercel yet, so CREATE the project
+    # from the doc's repo. This is what lets "Connect domain" work on a
+    # never-deployed project: we provision the Vercel project up-front (linked
+    # to the repo so Vercel auto-builds production) instead of forcing a manual
+    # Deploy first. Only attempted when a repo is set.
+    if not resolved and (doc or {}).get('repo'):
+        try:
+            from vercel_api_ext import vercel_ensure_project
+            ensured = await vercel_ensure_project(
+                settings,
+                _slugify((doc or {}).get('projectName') or 'project'),
+                doc['repo'],
+                (doc or {}).get('repoType', 'github'),
+                (doc or {}).get('gitRef'),
+            )
+            resolved = ensured.get('id')
+        except Exception as e:
+            logger.info('Auto-create Vercel project failed: %s', str(e)[:160])
+
     if resolved:
         await db.deploy_projects.update_one(
             {'id': (doc or {}).get('id')},
@@ -1842,11 +1911,13 @@ async def op_update_domain(
             vercel_error = f'Vercel attach failed: {e}'
             logger.warning('Vercel attach unexpected error: %s', e)
     else:
-        # Couldn't resolve a Vercel project id by any strategy — tell the
-        # operator exactly what unblocks it instead of silently no-opping.
+        # We now self-provision the Vercel project from the repo, so the only
+        # way to land here is a project with NO repo set. Tell the operator
+        # exactly what unblocks it instead of silently no-opping.
         vercel_error = (
-            'Deploy this project once (hit Deploy) so Vercel creates the '
-            'project, then Launch the domain — it will attach automatically.'
+            'This project has no git repo set, so a Vercel project can\'t be '
+            'created automatically. Add the owner/name repo to the project, '
+            'then Launch the domain — it will attach automatically.'
         )
 
     # Auto-point the domain's DNS at Vercel via the connected Porkbun account

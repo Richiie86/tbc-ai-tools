@@ -15,6 +15,13 @@ export default function ProtectedRoute({ children, operatorOnly = false }) {
     );
   }
   if (!user) return <Navigate to="/login" state={{ from: loc.pathname }} replace />;
+  // Bootstrap-password rotation gate: the operator is seeded with a shared
+  // one-time password. Until they set their own, funnel every protected route
+  // to the password settings so they can't use the app with the shared
+  // credential still live. Allow /settings itself so they can actually rotate.
+  if (user.must_change_password && !loc.pathname.startsWith('/settings')) {
+    return <Navigate to="/settings?section=password" replace />;
+  }
   if (operatorOnly && user.role !== 'operator') return <Navigate to="/dashboard" replace />;
   return children;
 }

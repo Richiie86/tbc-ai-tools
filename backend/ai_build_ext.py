@@ -466,7 +466,10 @@ async def plan(req: PlanRequest, user: dict = Depends(get_current_operator)):
         'blocked': blocked,
         'refusal_reason': refusal_reason,
         'status': 'planned' if safe else 'refused',
-        'model': 'claude-sonnet-4-5',
+        # Record the model actually used (resolved from the operator's
+        # configured provider), not a hardcoded guess — the old fixed string
+        # mislabelled the audit trail whenever a non-Anthropic key was active.
+        'model': f'{plan_provider}/{plan_model}',
         'review': review,
         'source': req.source or 'manual',
         'created_at': datetime.now(timezone.utc),
@@ -480,7 +483,7 @@ async def plan(req: PlanRequest, user: dict = Depends(get_current_operator)):
         files=[{k: v for k, v in f.items() if k != 'content'} | {'content': f['content']} for f in safe],
         blocked=blocked,
         refusal_reason=refusal_reason,
-        model='claude-sonnet-4-5',
+        model=f'{plan_provider}/{plan_model}',
         review=review,
         created_at=_now_iso(),
     )
