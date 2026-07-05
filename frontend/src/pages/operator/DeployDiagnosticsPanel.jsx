@@ -3,7 +3,7 @@ import api from '../../lib/api';
 import { Button } from '../../components/ui/button';
 import { toast } from 'sonner';
 import {
-  Stethoscope, Loader2, CheckCircle2, XCircle, RefreshCw, Wand2, Zap,
+  Stethoscope, Loader2, CheckCircle2, XCircle, RefreshCw, Wand2, Zap, ClipboardCopy,
 } from 'lucide-react';
 
 /**
@@ -55,7 +55,16 @@ export default function DeployDiagnosticsPanel() {
         toast.success('Wildcard *.tbctools.org DNS is set — every new project '
           + 'gets an instant subdomain.');
       } else if (data?.manual) {
-        toast.message('Manual step needed — see the record shown below.');
+        const rec = data.record
+          ? `${data.record.type} ${data.record.host} → ${data.record.value}`
+          : 'See the record shown below.';
+        // Persistent (duration: Infinity) so the operator can actually read
+        // the DNS record instead of it flashing by with the default timeout.
+        toast.message('Manual step needed — add this DNS record', {
+          description: rec,
+          duration: Infinity,
+          closeButton: true,
+        });
       } else {
         toast.error(data?.reason || 'Could not set the wildcard DNS.');
       }
@@ -154,11 +163,31 @@ export default function DeployDiagnosticsPanel() {
           )}
         </p>
         {wildcard?.last?.manual && (
-          <div className="mt-2 rounded-md border border-amber-500/30 bg-amber-500/[0.06] px-3 py-2 text-xs text-amber-200">
-            Add this DNS record at the registrar holding the root:{' '}
-            <span className="font-mono">
-              {wildcard.last.record?.type} {wildcard.last.record?.host} → {wildcard.last.record?.value}
-            </span>
+          <div className="mt-2 rounded-md border border-amber-500/40 bg-amber-500/[0.1] px-3 py-3 text-xs text-amber-100">
+            <p className="mb-2 font-semibold">
+              Manual step needed — add this DNS record at the registrar holding the root:
+            </p>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 break-all rounded bg-ink-950/70 px-2 py-1.5 font-mono text-[13px] text-amber-200">
+                {wildcard.last.record?.type} {wildcard.last.record?.host} → {wildcard.last.record?.value}
+              </code>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  const rec = wildcard.last.record;
+                  navigator.clipboard?.writeText(
+                    `${rec?.type} ${rec?.host} → ${rec?.value}`,
+                  );
+                  toast.success('DNS record copied to clipboard.');
+                }}
+                className="h-8 shrink-0 border-amber-500/40 bg-transparent text-amber-100 hover:bg-amber-500/15"
+              >
+                <ClipboardCopy className="mr-1 h-3.5 w-3.5" />
+                Copy
+              </Button>
+            </div>
           </div>
         )}
         <Button
