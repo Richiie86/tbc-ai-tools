@@ -59,11 +59,22 @@ export default function DeployDiagnosticsPanel() {
           ? `${data.record.type} ${data.record.host} → ${data.record.value}`
           : 'See the record shown below.';
         // Persistent (duration: Infinity) so the operator can actually read
-        // the DNS record instead of it flashing by with the default timeout.
+        // the DNS record instead of it flashing by. Includes a Copy action
+        // so the record can be grabbed straight from the toast, and stays
+        // until dismissed with the close button.
         toast.message('Manual step needed — add this DNS record', {
           description: rec,
           duration: Infinity,
           closeButton: true,
+          action: data.record
+            ? {
+                label: 'Copy',
+                onClick: () => {
+                  navigator.clipboard?.writeText(rec);
+                  toast.success('DNS record copied to clipboard.');
+                },
+              }
+            : undefined,
         });
       } else {
         toast.error(data?.reason || 'Could not set the wildcard DNS.');
