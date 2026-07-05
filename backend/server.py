@@ -802,6 +802,7 @@ def _public_user(u: dict) -> dict:
         'plan': u.get('plan', 'free'),
         'credits': u.get('credits', 0),
         'totp_enabled': u.get('totp_enabled', False),
+        'must_change_password': bool(u.get('must_change_password', False)),
         'plan_started_at': started_at.isoformat() if isinstance(started_at, datetime) else started_at,
         'plan_expires_at': expires_at.isoformat() if isinstance(expires_at, datetime) else expires_at,
         'plan_days_remaining': days_remaining,
@@ -1192,7 +1193,10 @@ async def change_password(req: ChangePasswordRequest, user: dict = Depends(get_c
         raise HTTPException(400, 'New password must be different from the current one')
     await db.users.update_one(
         {'id': user['sub']},
-        {'$set': {'password_hash': hash_password(req.new_password)}},
+        # Clearing must_change_password lifts the rotation gate: once the
+        # operator picks their own password the shared bootstrap credential is
+        # no longer live, so normal access is restored.
+        {'$set': {'password_hash': hash_password(req.new_password), 'must_change_password': False}},
     )
     logger.info('Password changed (self-serve) for %s', db_user['email'])
     return {'success': True}

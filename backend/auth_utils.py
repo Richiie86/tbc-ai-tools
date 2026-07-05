@@ -186,6 +186,19 @@ async def get_current_user(
 async def get_current_operator(user: dict = Depends(get_current_user)) -> dict:
     if user.get('role') != 'operator':
         raise HTTPException(status_code=403, detail='Operator access required')
+    # Rotation gate: the operator is seeded with a shared/one-time bootstrap
+    # password (must_change_password=true). Refuse every operator action until
+    # they set their own password. Login, /auth/me and /auth/change-password
+    # only depend on get_current_user, so the operator can still sign in and
+    # rotate the credential — they just can't *use* operator powers until they
+    # do. The flag is cleared by /auth/change-password.
+    from db import db  # local import avoids circular at module load
+    stored = await db.users.find_one({'id': user['sub']}, {'must_change_password': 1})
+    if stored and stored.get('must_change_password'):
+        raise HTTPException(
+            status_code=403,
+            detail='You must change your bootstrap password before using operator features.',
+        )
     return user
 
 

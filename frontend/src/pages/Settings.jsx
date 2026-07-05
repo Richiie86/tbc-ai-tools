@@ -91,7 +91,7 @@ export default function Settings() {
           {/* Section content */}
           <main className="min-w-0 flex-1">
             {active === 'account' && <AccountSection user={user} refresh={refresh} />}
-            {active === 'password' && <PasswordSection />}
+            {active === 'password' && <PasswordSection user={user} refresh={refresh} />}
             {active === 'security' && <SecuritySection user={user} refresh={refresh} />}
             {active === 'referrals' && <ReferralsSection />}
             {active === 'plan' && <PlanSection user={user} />}
@@ -204,11 +204,14 @@ function AccountSection({ user, refresh }) {
 /* ------------------------------------------------------------------ */
 /* Password                                                            */
 /* ------------------------------------------------------------------ */
-function PasswordSection() {
+function PasswordSection({ user, refresh }) {
   const [cur, setCur] = useState('');
   const [next, setNext] = useState('');
   const [confirm, setConfirm] = useState('');
   const [saving, setSaving] = useState(false);
+  // When the operator is still on the seeded bootstrap password the backend
+  // locks operator features until they rotate it. Show a hard prompt here.
+  const mustRotate = !!user?.must_change_password;
 
   const submit = async (e) => {
     e.preventDefault();
@@ -219,6 +222,9 @@ function PasswordSection() {
       await api.post('/auth/change-password', { current_password: cur, new_password: next });
       toast.success('Password changed');
       setCur(''); setNext(''); setConfirm('');
+      // Refresh the session user so must_change_password flips to false and
+      // the route gate / banner lift immediately.
+      if (refresh) await refresh();
     } catch (err) {
       toast.error(err?.response?.data?.detail || 'Could not change password');
     } finally { setSaving(false); }
@@ -226,6 +232,15 @@ function PasswordSection() {
 
   return (
     <Card title="Password" desc="Use at least 10 characters. You will stay signed in on this device.">
+      {mustRotate && (
+        <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-200">
+          <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
+          <p>
+            You&apos;re signed in with the temporary bootstrap password. Operator
+            features stay locked until you set your own password below.
+          </p>
+        </div>
+      )}
       <form onSubmit={submit} className="space-y-4">
         <div>
           <Label htmlFor="cur-pw" className="text-tbc-200/80">Current password</Label>
