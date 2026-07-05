@@ -2,7 +2,7 @@ import React from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { Button } from './ui/button';
 import { useAuth } from '../context/AuthContext';
-import SessionStatusDot from './SessionStatusDot';
+import AppUpdateDot from './AppUpdateDot';
 import { LayoutDashboard, LogOut, ShieldCheck, Sparkles, Bot, Coins, Receipt, Loader2 } from 'lucide-react';
 import Logo from './Logo';
 import CreditsBadge from './CreditsBadge';
@@ -102,11 +102,10 @@ export default function Navbar({ minimal = false }) {
                 <button className="flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-1.5 text-sm font-medium text-slate-200 hover:bg-slate-800 transition-colors">
                   <div className="relative grid h-6 w-6 place-items-center rounded-full bg-tbc-500/20 text-tbc-300 text-[11px] font-bold">
                     {(user.name?.[0] || user.email[0]).toUpperCase()}
-                    {/* Sign-in status dot — anchored bottom-right of the
-                        avatar bubble. Pulls live state from the auth
-                        context so it flips amber/red the moment the JWT
-                        nears expiry / token-version mismatch is detected. */}
-                    <SessionStatusDot />
+                    {/* App-update dot — anchored bottom-right of the avatar
+                        bubble. Green = latest build, amber = checking, blue =
+                        a newer build shipped (click to refresh). */}
+                    <AppUpdateDot />
                   </div>
                   <span className="hidden sm:inline">{user.name || user.email.split('@')[0]}</span>
                 </button>

@@ -81,16 +81,17 @@ export function DashboardSidebar({
                   >
                     <MessageSquare className={`h-3.5 w-3.5 shrink-0 ${currentId === s.id ? 'text-tbc-400' : 'text-slate-500'}`} />
                     <span className="flex-1 truncate">{s.title}</span>
-                    {/* Rename + delete are always visible (previously hover-only,
-                        which made them unreachable on touch devices). They dim
-                        when the row isn't hovered/focused to stay tidy. */}
+                    {/* Rename + delete are ALWAYS fully visible as tappable
+                        chips (previously tiny + dimmed, so users couldn't find
+                        them). Bigger hit area + solid backgrounds make them
+                        obvious on both desktop and touch. */}
                     <button
                       onClick={(e) => { e.stopPropagation(); openRename(s); }}
                       title="Rename project"
                       aria-label={`Rename ${s.title}`}
-                      className="rounded p-1 text-slate-400 opacity-70 transition hover:bg-slate-700 hover:text-white focus:opacity-100 group-hover:opacity-100"
+                      className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-slate-800/80 text-slate-300 transition hover:bg-slate-700 hover:text-white"
                     >
-                      <Edit3 className="h-3 w-3" />
+                      <Edit3 className="h-3.5 w-3.5" />
                     </button>
                     <AlertDialog>
                       <AlertDialogTrigger asChild>
@@ -98,9 +99,9 @@ export function DashboardSidebar({
                           onClick={(e) => e.stopPropagation()}
                           title="Delete project"
                           aria-label={`Delete ${s.title}`}
-                          className="rounded p-1 text-slate-400 opacity-70 transition hover:bg-rose-500/20 hover:text-rose-300 focus:opacity-100 group-hover:opacity-100"
+                          className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-slate-800/80 text-slate-300 transition hover:bg-rose-500/20 hover:text-rose-300"
                         >
-                          <Trash2 className="h-3 w-3" />
+                          <Trash2 className="h-3.5 w-3.5" />
                         </button>
                       </AlertDialogTrigger>
                       <AlertDialogContent className="border-slate-800 bg-slate-900 text-slate-100">

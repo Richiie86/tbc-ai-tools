@@ -10,7 +10,7 @@ import { DashboardHeader } from './dashboard/DashboardHeader';
 import { TrialBanner } from './dashboard/TrialBanner';
 import { EmptyState, MessageBubble } from './dashboard/ChatMessages';
 import EndOfSessionActions from './dashboard/EndOfSessionActions';
-import ViewPreviewButton from '../components/ViewPreviewButton';
+import PreviewPane from '../components/PreviewPane';
 import { ChatComposer } from './dashboard/ChatComposer';
 import { OutOfCreditsDialog } from './dashboard/OutOfCreditsDialog';
 import { DashboardGuideTour } from './dashboard/DashboardGuideTour';
@@ -316,10 +316,11 @@ export default function Dashboard({ variant = 'tbc1' }) {
         onOpenFixChat={(sid) => navigate(`${basePath}/${sid}`)}
       />
       <DashboardGuideTour key={guideKey} forceOpen={guideKey > 0} />
-      {/* Floating preview link — silently hides if no deploy project URL
-          is configured. Operator can jump from chat → live Vercel preview
-          without leaving the dashboard. */}
-      {user?.role === 'operator' && <ViewPreviewButton />}
+      {/* Embedded live preview — a docked panel with an iframe of the web
+          the operator is building. Silently hides if no deploy URL is
+          configured. Falls back to "open in new tab" for sites that block
+          being framed. */}
+      {user?.role === 'operator' && <PreviewPane />}
     </div>
   );
 }
