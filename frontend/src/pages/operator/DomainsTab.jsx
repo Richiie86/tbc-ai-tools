@@ -5,7 +5,7 @@ import { Input } from '../../components/ui/input';
 import { toast } from 'sonner';
 import {
   Globe, Loader2, RefreshCw, ShieldCheck, ShieldAlert, Search,
-  CheckCircle2, XCircle, ExternalLink, KeyRound, Rocket, AlertTriangle,
+  CheckCircle2, XCircle, ExternalLink, KeyRound, Rocket, AlertTriangle, Wrench,
 } from 'lucide-react';
 import DeployDiagnosticsPanel from './DeployDiagnosticsPanel';
 
@@ -277,8 +277,11 @@ function LaunchDomainPanel({ porkbunConnected, onLaunched, prefill }) {
       <p className="mb-4 text-sm text-tbc-200/60">
         Point your domain at a project. We attach it on Vercel and
         {porkbunConnected
-          ? ' repoint its DNS through your connected Porkbun account so it goes live automatically.'
+          ? ' repoint its DNS through your connected Porkbun account — automatically removing Porkbun’s default parking page (the “A Brand New Domain!” screen) so your site goes live.'
           : ' show you the DNS records to set (connect Porkbun in My Keys to automate this).'}
+        {' '}Already launched but stuck on the parking page? Use{' '}
+        <span className="font-semibold text-tbc-200/80">Fix DNS</span> on the
+        domain below to re-point it.
       </p>
 
       <div className="grid gap-3 sm:grid-cols-[1fr,minmax(180px,240px),auto] sm:items-end">
@@ -396,6 +399,55 @@ function StatusLine({ ok, okText, badText }) {
   );
 }
 
+/**
+ * One-click "Fix DNS" — re-points a Porkbun domain at Vercel via
+ * POST /operator/porkbun/point-to-vercel, which now also strips Porkbun's
+ * default parking records (ALIAS/CNAME → *.porkbun.com) + URL forwarding that
+ * otherwise keep serving the "A Brand New Domain!" page. Use this on a domain
+ * that was already launched but is stuck on the parking page.
+ */
+function FixDnsButton({ domain, testid, onDone }) {
+  const [busy, setBusy] = useState(false);
+  const fix = async () => {
+    setBusy(true);
+    try {
+      const { data } = await api.post(
+        '/operator/porkbun/point-to-vercel',
+        null,
+        { params: { domain } },
+      );
+      const cleared = data?.parking_cleared || [];
+      if (cleared.length) {
+        toast.success(
+          `DNS re-pointed at Vercel — cleared ${cleared.length} parking record${cleared.length === 1 ? '' : 's'}. Live in a few minutes.`,
+        );
+      } else {
+        toast.success(`DNS re-pointed at Vercel (${data?.record || domain}). Live in a few minutes.`);
+      }
+      onDone?.();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Could not re-point DNS');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <button
+      type="button"
+      onClick={fix}
+      disabled={busy}
+      data-testid={testid}
+      title="Re-point this domain at Vercel and remove Porkbun's parking page"
+      className="inline-flex items-center gap-1 rounded-md border border-tbc-500/40 bg-tbc-500/10 px-2 py-1 text-xs font-semibold text-tbc-200 hover:bg-tbc-500/20 disabled:opacity-60"
+    >
+      {busy
+        ? <Loader2 className="h-3 w-3 animate-spin" />
+        : <Wrench className="h-3 w-3" />}
+      Fix DNS
+    </button>
+  );
+}
+
 function DeployedDomains({ rows, loading, onRefresh }) {
   return (
     <div className="rounded-xl border border-sky-500/25 bg-gradient-to-br from-sky-500/[0.04] via-ink-900/60 to-ink-900/60 p-5">
@@ -447,6 +499,15 @@ function DeployedDomains({ rows, loading, onRefresh }) {
               </div>
               <div className="flex flex-wrap items-center gap-3 text-xs text-tbc-200/60">
                 <span className="font-mono text-tbc-200/70">{r.host}</span>
+                {/* Fix DNS only makes sense for custom domains — a *.vercel.app
+                    host is served by Vercel directly and has no Porkbun DNS. */}
+                {!/\.vercel\.app$/i.test(r.host) && (
+                  <FixDnsButton
+                    domain={r.host}
+                    testid={`fix-dns-${r.id}`}
+                    onDone={onRefresh}
+                  />
+                )}
                 <a
                   href={r.url}
                   target="_blank"
@@ -622,6 +683,9 @@ function DomainRow({ d, onUseDomain }) {
             <Rocket className="h-3 w-3" /> Use this domain
           </button>
         )}
+        {/* Re-point an already-owned domain at Vercel + clear its parking page
+            without having to pick a project again. */}
+        <FixDnsButton domain={d.domain} testid={`fix-dns-domain-${d.domain}`} />
         <a
           href={`https://porkbun.com/account/domainsSpeedy/${d.domain}`}
           target="_blank"
