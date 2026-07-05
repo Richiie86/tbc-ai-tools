@@ -6,6 +6,10 @@ services:
     rootDir: backend
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT
+    # Deploy automatically on every push to the connected branch, so merged
+    # fixes go live without a manual deploy. Committed here (not just set in the
+    # dashboard) so the intent survives any blueprint re-sync.
+    autoDeploy: true
     healthCheckPath: /api/
     envVars:
       # Render only offers 3.11.x / 3.12.x — 3.13.4 does not exist there and
