@@ -483,10 +483,17 @@ function ModelCard({ m, defaultModel }) {
           )}
         </div>
       </div>
+      {/* Headline = EFFECTIVE knowledge (own learnings + the shared pool that
+          every AI inherits). Falls back to `total` for older API responses. */}
       <div className="mt-2 text-2xl font-bold text-tbc-100">
-        {m.total}
+        {m.effective_total ?? m.total}
         <span className="ml-1 text-[10px] font-normal text-tbc-200/50">active</span>
       </div>
+      {m.inherits_shared && m.shared_total > 0 && (
+        <div className="mt-0.5 text-[10px] text-tbc-200/50">
+          {m.total} taught directly · {m.shared_total} shared with all AIs
+        </div>
+      )}
       {m.pending > 0 && (
         <div className="mt-0.5 text-[10px] text-amber-300">
           {m.pending} pending auto-proposal{m.pending === 1 ? '' : 's'}

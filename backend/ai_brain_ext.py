@@ -193,6 +193,12 @@ async def maturity(_op: dict = Depends(get_current_operator)):
         rows.sort(key=lambda r: (-r['total'], r['model']))
         return rows
 
+    # The shared pool is injected into EVERY AI's system prompt, so each
+    # provider effectively "knows" its own directly-taught learnings PLUS the
+    # whole shared pool. Surfacing this as `effective_total` is what makes the
+    # cards honest: GPT / Gemini / OpenRouter no longer read a misleading "0".
+    shared_total = buckets['shared']['total']
+
     out = []
     # Stable ordering — headline first, then every provider we support plus the
     # shared pool. We ALWAYS emit each bucket (even at zero) so the view is
@@ -200,11 +206,22 @@ async def maturity(_op: dict = Depends(get_current_operator)):
     for key in ('all', *AI_BUCKETS):
         b = buckets[key]  # defaultdict → zero-filled if the bucket was empty
         approval_rate = (b['approved'] / b['auto_proposed_total']) if b['auto_proposed_total'] else None
+        # A specific provider inherits the shared pool on top of its own
+        # directly-taught learnings. 'all' already counts everything and
+        # 'shared' is the pool itself, so neither double-counts.
+        is_provider = key not in ('all', 'shared')
+        effective_total = b['total'] + shared_total if is_provider else b['total']
         out.append({
             'model': key,
             'label': BUCKET_LABEL.get(key, key.title()),
             'total': b['total'],
             'pending': b['pending'],
+            # How much this AI actually knows once the shared pool is applied.
+            'effective_total': effective_total,
+            # Of `effective_total`, how much came from the shared pool vs.
+            # being taught directly to this AI. Lets the UI say "N direct + M shared".
+            'shared_total': shared_total if is_provider else 0,
+            'inherits_shared': is_provider,
             'last_7d_added': b['last_7d'],
             'approval_rate': round(approval_rate, 3) if approval_rate is not None else None,
             'auto_proposed_total': b['auto_proposed_total'],

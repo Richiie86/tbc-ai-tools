@@ -6,7 +6,7 @@ import {
 } from '../../components/ui/select';
 import { Input } from '../../components/ui/input';
 import CreditsBadge from '../../components/CreditsBadge';
-import SessionStatusDot from '../../components/SessionStatusDot';
+import AppUpdateDot from '../../components/AppUpdateDot';
 import { InChatDeployControls } from './InChatDeployControls';
 import { NotificationsBell } from './NotificationsBell';
 import { DashboardGuideButton } from './DashboardGuideTour';
@@ -51,15 +51,16 @@ export function DashboardHeader({
           <ViewModeToggle />
           <NotificationsBell />
           <DashboardGuideButton onOpen={onOpenGuide} />
-          <ModelPicker models={models} model={model} setModel={setModel} />
         </div>
-        {/* Always-visible cluster: credits (so users never lose sight of their
-            budget) + live session status. Pinned outside the scroll strip. */}
+        {/* Always-visible cluster: the model picker (so the operator can ALWAYS
+            switch AI / pick Auto without scrolling), credits, and the live
+            app-update status. Pinned outside the scroll strip. */}
         <div className="flex shrink-0 items-center gap-2">
+          <ModelPicker models={models} model={model} setModel={setModel} />
           <CreditsBadge user={user} testid="dashboard-credits-badge" />
-          {/* Live "am I signed in?" status — green = OK, amber = network
-              issue, red = session expired. */}
-          <SessionStatusDot position="inline" />
+          {/* Live app-update status — green = latest, amber = checking,
+              blue = new build available (click to refresh). */}
+          <AppUpdateDot position="inline" />
         </div>
       </div>
     </div>
