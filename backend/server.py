@@ -751,6 +751,26 @@ async def startup():
             _backup_snapshot_job, 'interval', hours=24,
             next_run_time=datetime.now(timezone.utc) + timedelta(minutes=7),
         )
+
+        # Recurring hosting billing — charges the "keep it live" fee in credits
+        # for every active domain subscription whose period has elapsed, and
+        # suspends any whose owner has run out of credits. Runs hourly; the
+        # per-subscription due-date gate means a domain is only charged once
+        # per period regardless of how often the sweep runs.
+        async def _hosting_billing_job():
+            try:
+                from hosting_billing_ext import run_hosting_billing_tick
+                counts = await run_hosting_billing_tick()
+                if any(counts.values()):
+                    logger.info('hosting billing tick: %s', counts)
+            except Exception:
+                logger.exception('hosting billing tick failed')
+
+        scheduler.add_job(
+            _hosting_billing_job, 'interval', hours=1,
+            next_run_time=datetime.now(timezone.utc) + timedelta(minutes=3),
+        )
+
         scheduler.start()
         app.state.scheduler = scheduler
         logger.info('Trial-email scheduler started (hourly).')
@@ -2508,6 +2528,18 @@ app.include_router(user_projects_router)
 from domain_launch_ext import launch_router, money_domains_router
 app.include_router(launch_router)
 app.include_router(money_domains_router)
+# NEW (additive): deploy/domain preflight diagnostics, auto-subdomain +
+# wildcard bootstrap, and recurring "keep it live" hosting billing.
+from deploy_preflight_ext import router as deploy_preflight_router
+app.include_router(deploy_preflight_router)
+from wildcard_bootstrap_ext import router as wildcard_router
+app.include_router(wildcard_router)
+from hosting_billing_ext import (
+    user_router as hosting_user_router,
+    op_router as hosting_op_router,
+)
+app.include_router(hosting_user_router)
+app.include_router(hosting_op_router)
 app.include_router(amai_router)
 app.include_router(context7_router)
 app.include_router(tools_router)

@@ -156,6 +156,8 @@ def _project_to_out(doc: dict) -> dict:
         'repoType': doc.get('repoType', 'github'),
         'gitRef': doc.get('gitRef'),
         'vercel_project_id': doc.get('vercel_project_id'),
+        'subdomain': doc.get('subdomain'),
+        'subdomain_attached': bool(doc.get('subdomain_attached', False)),
         'auto_promote': bool(doc.get('auto_promote', False)),
         'auto_heal': bool(doc.get('auto_heal', False)),
         'auto_rollback': bool(doc.get('auto_rollback', False)),
@@ -672,6 +674,16 @@ async def op_create_project(
         )
     except Exception:
         pass
+    # NEW (additive, best-effort): give every project an instant
+    # `<slug>.tbctools.org` subdomain. Never blocks or alters creation — if
+    # anything fails the project is created exactly as before and the
+    # subdomain can be assigned later from the Ops tab.
+    try:
+        from wildcard_bootstrap_ext import assign_subdomain
+        sub_res = await assign_subdomain(doc, attach=True)
+        doc['subdomain'] = sub_res.get('subdomain')
+    except Exception as e:  # pragma: no cover - best-effort
+        logger.warning('auto-subdomain assign skipped for %s: %s', pid, e)
     logger.info('Operator created deploy project %s (%s → %s)', pid, doc['repo'], domain or '—')
     return _project_to_out(doc)
 
@@ -1805,6 +1817,25 @@ async def _resolve_vercel_project_id(doc: dict, settings: dict) -> Optional[str]
         name = _slugify((doc or {}).get('projectName') or '')
         resolved = await _vercel_find_project_id(settings, name)
 
+    # Strategy 4 (NEW) — nothing exists on Vercel yet, so CREATE the project
+    # from the doc's repo. This is what lets "Connect domain" work on a
+    # never-deployed project: we provision the Vercel project up-front (linked
+    # to the repo so Vercel auto-builds production) instead of forcing a manual
+    # Deploy first. Only attempted when a repo is set.
+    if not resolved and (doc or {}).get('repo'):
+        try:
+            from vercel_api_ext import vercel_ensure_project
+            ensured = await vercel_ensure_project(
+                settings,
+                _slugify((doc or {}).get('projectName') or 'project'),
+                doc['repo'],
+                (doc or {}).get('repoType', 'github'),
+                (doc or {}).get('gitRef'),
+            )
+            resolved = ensured.get('id')
+        except Exception as e:
+            logger.info('Auto-create Vercel project failed: %s', str(e)[:160])
+
     if resolved:
         await db.deploy_projects.update_one(
             {'id': (doc or {}).get('id')},
@@ -1880,11 +1911,13 @@ async def op_update_domain(
             vercel_error = f'Vercel attach failed: {e}'
             logger.warning('Vercel attach unexpected error: %s', e)
     else:
-        # Couldn't resolve a Vercel project id by any strategy — tell the
-        # operator exactly what unblocks it instead of silently no-opping.
+        # We now self-provision the Vercel project from the repo, so the only
+        # way to land here is a project with NO repo set. Tell the operator
+        # exactly what unblocks it instead of silently no-opping.
         vercel_error = (
-            'Deploy this project once (hit Deploy) so Vercel creates the '
-            'project, then Launch the domain — it will attach automatically.'
+            'This project has no git repo set, so a Vercel project can\'t be '
+            'created automatically. Add the owner/name repo to the project, '
+            'then Launch the domain — it will attach automatically.'
         )
 
     # Auto-point the domain's DNS at Vercel via the connected Porkbun account

@@ -191,10 +191,39 @@ async def perform_domain_launch(
                     {"$set": {"domain": domain, "updated_at": now}},
                 )
                 vercel_project_id = proj.get("vercel_project_id")
+                from payments_ext import get_settings_doc
+                from vercel_api_ext import vercel_attach_domain
+                settings = await get_settings_doc()
+
+                # Self-provision: if the project has never been deployed it has
+                # no Vercel project id yet — instead of forcing the user to hit
+                # Deploy first, create the Vercel project up-front (linked to
+                # the repo so Vercel auto-builds the production branch). This is
+                # what makes "Connect domain" work on a brand-new project.
+                if not vercel_project_id and (proj.get("repo") or "").strip():
+                    try:
+                        from vercel_api_ext import vercel_ensure_project
+                        from deploy_projects_ext import _slugify
+                        ensured = await vercel_ensure_project(
+                            settings,
+                            _slugify(proj.get("projectName") or "project"),
+                            proj["repo"],
+                            proj.get("repoType", "github"),
+                            proj.get("gitRef"),
+                        )
+                        vercel_project_id = ensured.get("id")
+                        if vercel_project_id:
+                            await db.deploy_projects.update_one(
+                                {"id": project_id},
+                                {"$set": {"vercel_project_id": vercel_project_id,
+                                          "updated_at": now}},
+                            )
+                    except HTTPException as e:
+                        vercel_error = e.detail if isinstance(e.detail, str) else str(e.detail)
+                    except Exception as e:  # pragma: no cover - network
+                        vercel_error = f"Vercel project create failed: {e}"
+
                 if vercel_project_id:
-                    from payments_ext import get_settings_doc
-                    from vercel_api_ext import vercel_attach_domain
-                    settings = await get_settings_doc()
                     # Attach every host we pointed DNS for (apex + www, or the
                     # single sub-domain) so Vercel serves the app on all of
                     # them. Attaching is idempotent, so re-launching is safe.
@@ -207,10 +236,11 @@ async def perform_domain_launch(
                         except HTTPException as e:
                             vercel_error = e.detail if isinstance(e.detail, str) else str(e.detail)
                     launch_doc["vercel_attached"] = attached_any
-                else:
+                elif not vercel_error:
                     vercel_error = (
-                        "Project has no Vercel deployment yet — run Deploy once "
-                        "to create it, then relaunch the domain to attach it."
+                        "Project has no repo set, so a Vercel project can't be "
+                        "created automatically. Add the owner/name repo to the "
+                        "project, then connect the domain again."
                     )
         except HTTPException as e:
             vercel_error = e.detail if isinstance(e.detail, str) else str(e.detail)

@@ -9,7 +9,8 @@ import { Label } from '../components/ui/label';
 import {
   User as UserIcon, Lock, ShieldCheck, Share2, Sparkles, Calculator,
   LogOut, Loader2, Cpu, ChevronLeft, Check, Copy, Coins, Users, MousePointerClick,
-  BadgeDollarSign, Crown, Zap, KeyRound, Trash2, Plug,
+  BadgeDollarSign, Crown, Zap, KeyRound, Trash2, Plug, Server, Globe, RefreshCw,
+  AlertTriangle,
 } from 'lucide-react';
 
 /**
