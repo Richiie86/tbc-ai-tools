@@ -158,16 +158,21 @@ def encrypt_secret(plain) -> str:
     return _PREFIX + blob
 
 
-def decrypt_secret(value):
+def decrypt_secret(value, field: str | None = None):
     """Decrypt an `enc::v1::` value; pass through anything else unchanged.
 
     Legacy plaintext (no prefix) is returned as-is so existing tokens keep
     working. On tampering/verification failure we log and return the stored
     value rather than raising, so a key mismatch degrades gracefully instead
     of taking down the request path.
+
+    `field` is an optional field name included in the failure log so the
+    operator can see EXACTLY which secret is stale instead of a generic
+    "a secret failed" message.
     """
     if not is_encrypted(value):
         return value
+    label = f"'{field}' " if field else ''
     try:
         raw = base64.urlsafe_b64decode(value[len(_PREFIX):].encode('ascii'))
         nonce, tag, ct = raw[:16], raw[16:48], raw[48:]
@@ -181,15 +186,37 @@ def decrypt_secret(value):
             # provider APIs, which is exactly the "app says it's there but it's
             # not" failure. Returning None lets the operator simply re-save.
             logger.error(
-                'Secret authentication failed (key mismatch or tampering); '
-                'treating as not set. Re-save this secret in Operator settings.'
+                'Secret %sauthentication failed (key mismatch or tampering); '
+                'treating as not set. Re-save this secret in Operator settings.',
+                label,
             )
             return None
         pt = bytes(b ^ k for b, k in zip(ct, _keystream(enc_key, nonce, len(ct))))
         return pt.decode('utf-8')
     except Exception:
-        logger.exception('Secret decryption failed; treating as not set.')
+        logger.exception('Secret %sdecryption failed; treating as not set.', label)
         return None
+
+
+def can_decrypt(value) -> bool:
+    """True if `value` is safe to read back: either not encrypted (legacy
+    plaintext / empty) or an `enc::v1::` blob that authenticates under the
+    CURRENT key. False only when an encrypted value fails authentication —
+    i.e. it was encrypted under a now-lost key and is irrecoverable.
+
+    Used by the startup self-heal to identify dead secrets without spamming
+    the error log (this path is intentionally silent).
+    """
+    if not is_encrypted(value):
+        return True
+    try:
+        raw = base64.urlsafe_b64decode(value[len(_PREFIX):].encode('ascii'))
+        nonce, tag, ct = raw[:16], raw[16:48], raw[48:]
+        _enc_key, mac_key = _subkeys()
+        expected = hmac.new(mac_key, nonce + ct, hashlib.sha256).digest()
+        return hmac.compare_digest(tag, expected)
+    except Exception:
+        return False
 
 
 def _walk_encrypt(update_fields: dict) -> dict:
@@ -227,5 +254,5 @@ def decrypt_doc_from_read(doc):
         return doc
     for k in list(doc.keys()):
         if k in SECRET_FIELDS:
-            doc[k] = decrypt_secret(doc[k])
+            doc[k] = decrypt_secret(doc[k], field=k)
     return doc

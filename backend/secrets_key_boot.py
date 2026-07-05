@@ -32,6 +32,7 @@ import logging
 import os
 
 from db import db
+from secret_crypto import SECRET_FIELDS, is_encrypted, can_decrypt
 
 logger = logging.getLogger('tbc.secrets_key')
 
@@ -95,3 +96,54 @@ async def ensure_persistent_secret_key() -> str:
     except Exception as e:  # pragma: no cover - db degraded
         logger.error('[secrets] failed to persist pinned key: %s', e)
         return 'unavailable'
+
+
+async def scrub_undecryptable_secrets() -> list[str]:
+    """Clear secret fields that can no longer be decrypted under the current
+    (now-pinned) key. Returns the list of field names that were cleared.
+
+    Why this exists
+    ---------------
+    Secrets saved under an OLD key (before the key was pinned — e.g. tokens
+    from before the Emergent -> Render migration) are cryptographically
+    unrecoverable. Left in place they:
+      • spam a red ERROR on every single settings read, and
+      • make status readouts ambiguous ("is my Porkbun key actually saved?").
+
+    Because the value is irretrievable anyway, the only correct action is to
+    remove it so the field honestly reads as "not set" and the operator can
+    re-enter it once. Fields that decrypt fine (including the Porkbun/Vercel
+    keys just re-saved under the current key) are left untouched.
+
+    Runs against the RAW settings collection (bypassing the encrypt/decrypt
+    wrapper) so we inspect ciphertext directly and unset without re-encrypting.
+    """
+    cleared: list[str] = []
+    try:
+        raw_settings = db._db.settings  # underlying Motor collection (no wrapper)
+        cursor = raw_settings.find({})
+        async for doc in cursor:
+            dead = {
+                k for k in SECRET_FIELDS
+                if is_encrypted(doc.get(k)) and not can_decrypt(doc.get(k))
+            }
+            if not dead:
+                continue
+            await raw_settings.update_one(
+                {'_id': doc['_id']},
+                {'$unset': {k: '' for k in dead}},
+            )
+            cleared.extend(sorted(dead))
+    except Exception as e:  # pragma: no cover - db degraded
+        logger.error('[secrets] self-heal scan failed: %s', e)
+        return cleared
+
+    if cleared:
+        logger.warning(
+            '[secrets] cleared %d undecryptable secret field(s) (encrypted under '
+            'a lost key): %s. Re-enter these in Operator settings if you use them.',
+            len(cleared), ', '.join(cleared),
+        )
+    else:
+        logger.info('[secrets] self-heal: all stored secrets decrypt cleanly.')
+    return cleared

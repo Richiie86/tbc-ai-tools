@@ -349,8 +349,14 @@ async def startup():
     # FIRST: pin a stable secret-encryption key so saved secrets (Porkbun,
     # Vercel, Stripe, ...) survive MONGO_URL rotations / migrations. Must run
     # before anything reads or writes encrypted settings.
-    from secrets_key_boot import ensure_persistent_secret_key
+    from secrets_key_boot import ensure_persistent_secret_key, scrub_undecryptable_secrets
     await ensure_persistent_secret_key()
+    # Then: one-time cleanup of any secret that was encrypted under a now-lost
+    # key (pre-migration tokens). This stops the recurring "Secret
+    # authentication failed" error spam and makes the UI honestly report which
+    # secrets are actually set. Safe: only clears values that are already
+    # unrecoverable; anything that decrypts (incl. freshly re-saved keys) stays.
+    await scrub_undecryptable_secrets()
 
     # Validate the environment BEFORE we touch the DB or serve traffic so a
     # misconfigured deploy fails loudly instead of leaking insecure defaults.
