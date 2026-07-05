@@ -11,8 +11,8 @@ It writes nothing and changes no existing behaviour — it only *observes* the
 same settings + Vercel/Porkbun surfaces the real flow uses, so the operator can
 see exactly which box is red and fix that one thing.
 
-    GET /api/operator/deploy/preflight            → full platform readiness
-    GET /api/operator/deploy/preflight/{proj_id}  → + that project's specifics
+    GET /api/operator/diagnostics/preflight            → full platform readiness
+    GET /api/operator/diagnostics/preflight/{proj_id}  → + that project's specifics
 
 Every check is wrapped so a single failing probe never breaks the report.
 """
@@ -30,7 +30,11 @@ from db import db
 
 logger = logging.getLogger("tbc.preflight")
 
-router = APIRouter(prefix="/api/operator/deploy", tags=["deploy"])
+# NOTE: this router lives under its OWN prefix (not /api/operator/deploy) on
+# purpose. The deploy router has a single-segment param route `/{project_id}`
+# (PATCH/DELETE) which would otherwise capture `/preflight` and return
+# 405 Method Not Allowed for our GET. A dedicated prefix avoids that collision.
+router = APIRouter(prefix="/api/operator/diagnostics", tags=["deploy"])
 
 VERCEL_API = "https://api.vercel.com"
 
