@@ -13,7 +13,7 @@ import {
  * subdomain.
  *
  * Purely additive: it renders inside the Domains tab underneath the existing
- * panels and calls the new /operator/deploy/preflight + /wildcard endpoints.
+ * panels and calls the new /operator/diagnostics/preflight + /wildcard endpoints.
  */
 export default function DeployDiagnosticsPanel() {
   const [report, setReport] = useState(null);
@@ -24,7 +24,7 @@ export default function DeployDiagnosticsPanel() {
   const runPreflight = useCallback(async () => {
     setLoading(true);
     try {
-      const { data } = await api.get('/operator/deploy/preflight');
+      const { data } = await api.get('/operator/diagnostics/preflight');
       setReport(data);
     } catch (e) {
       toast.error(e?.response?.data?.detail || 'Diagnostics failed');
