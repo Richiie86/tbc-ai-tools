@@ -1052,7 +1052,9 @@ async def _trigger_redeploy(project_id: str, settings: dict) -> dict:
             400,
             'No prior deployment to redeploy. Run a regular Deploy first.',
         )
-    res = await _vercel_redeploy(settings, last_id)
+    res = await _vercel_redeploy(
+        settings, last_id, name_slug=_slugify(project.get('projectName') or 'project'),
+    )
     await _record_deployment(project_id, res)
     return {
         'deployment_id': res.get('id') or res.get('uid'),

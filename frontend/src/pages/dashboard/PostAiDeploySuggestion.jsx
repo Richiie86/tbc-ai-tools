@@ -3,9 +3,6 @@ import { toast } from 'sonner';
 import { Rocket, Loader2, X, Activity, ShieldCheck, Eye, ExternalLink, BadgeCheck, Globe } from 'lucide-react';
 import api from '../../lib/api';
 
-// Flat credit cost to launch onto a custom domain (mirrors the backend).
-const DOMAIN_LAUNCH_COST = 50;
-
 const STORAGE_KEY = 'tbc.inChat.selectedProjectId';
 const PREVIEW_KEY = 'tbc.inChat.lastPreviewUrl';
 
@@ -97,19 +94,21 @@ function ShipItPill({ projectId, busy, setBusy, setPreviewUrl, onDismiss }) {
   const launchDomain = async () => {
     const d = domain.trim();
     if (!d || !d.includes('.')) { toast.error('Enter a full domain, e.g. app.example.com'); return; }
+    // Operators launch for free (this pill is operator-only), so don't
+    // threaten a credit charge in the confirm.
     if (!window.confirm(
-      `Launch this project on ${d}?\nThis costs ${DOMAIN_LAUNCH_COST} credits and points the domain's DNS at your deployment.`
+      `Launch this project on ${d}?\nThis points the domain's DNS at your deployment and attaches it in Vercel — free for the operator.`
     )) return;
     setLaunching(true);
     try {
       const { data } = await api.post('/deploy/launch-domain', { domain: d, projectId });
-      const remaining = data?.credits_remaining;
-      toast.success(
-        `Launched on ${data.domain} — ${data.credits_charged} credits charged` +
-        (remaining != null && remaining !== 'inf' ? ` (${remaining} left)` : ''),
-      );
-      if (data?.dns_error) {
-        toast.message(`DNS auto-setup skipped — ${data.dns_error}`, { duration: 5000 });
+      // The backend returns a single human-readable summary that already
+      // distinguishes full success / DNS-only / attach-pending — surface it
+      // as-is instead of guessing.
+      if (data?.dns_configured && data?.vercel_attached) {
+        toast.success(data.message || `Launched on ${data.domain}`);
+      } else {
+        toast.message(data?.message || `Launch recorded for ${data.domain}`, { duration: 7000 });
       }
       setDomain('');
     } catch (e) {
@@ -226,11 +225,11 @@ function ShipItPill({ projectId, busy, setBusy, setPreviewUrl, onDismiss }) {
           onClick={launchDomain}
           disabled={launching || !domain.trim()}
           data-testid="session-launch-domain-btn"
-          title={`Launch on this domain (${DOMAIN_LAUNCH_COST} credits)`}
+          title="Launch this project on this domain (free for the operator)"
           className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-tbc-500 px-3 py-1.5 text-[11px] font-bold text-ink-950 transition hover:bg-tbc-400 disabled:opacity-50"
         >
           {launching ? <Loader2 className="h-3 w-3 animate-spin" /> : <Rocket className="h-3 w-3" />}
-          {launching ? 'Launching…' : `Launch · ${DOMAIN_LAUNCH_COST} cr`}
+          {launching ? 'Launching…' : 'Launch domain'}
         </button>
       </div>
     </div>

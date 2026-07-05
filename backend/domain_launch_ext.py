@@ -65,9 +65,15 @@ async def launch_domain(
     if not u:
         raise HTTPException(404, "User not found")
 
-    # 1) Atomic, race-safe deduction. Operators with unlimited/enterprise
-    #    credits ('inf') are not charged. Everyone else must have >= cost.
-    unlimited = str(u.get("credits")) in ("inf", "-1") or u.get("plan") == "enterprise"
+    # 1) Atomic, race-safe deduction. The operator (the app owner) always
+    #    launches for free — they own the Vercel/Porkbun accounts, so charging
+    #    themselves credits is meaningless. Enterprise/unlimited-credit users
+    #    are also free. Everyone else must have >= cost.
+    unlimited = (
+        u.get("role") == "operator"
+        or str(u.get("credits")) in ("inf", "-1")
+        or u.get("plan") == "enterprise"
+    )
     charged = 0
     if not unlimited:
         res = await db.users.update_one(
@@ -102,10 +108,27 @@ async def launch_domain(
     #    Domains tab. But if BOTH fail we refund so the user isn't charged for
     #    a launch that did nothing.
     dns_error = None
+    # When the operator launches the naked root (e.g. `tbcdomain.com`) or its
+    # `www`, point BOTH the apex and the `www` sub-domain at Vercel so the site
+    # resolves either way — a domain that only works on one of the two is the
+    # most common "why isn't it live?" complaint. For a deeper sub-domain
+    # (app.example.com) we only touch that exact host.
     try:
-        from porkbun_ext import configure_vercel_dns
-        dns_res = await configure_vercel_dns(domain)
-        launch_doc["dns_configured"] = bool(dns_res.get("ok"))
+        from porkbun_ext import configure_vercel_dns, _split_domain
+        root, sub = _split_domain(domain)
+        targets = [root, f"www.{root}"] if sub in ("", "www") else [domain]
+        ok_any = False
+        for host in targets:
+            try:
+                res = await configure_vercel_dns(host)
+                ok_any = ok_any or bool(res.get("ok"))
+            except HTTPException as e:
+                dns_error = e.detail if isinstance(e.detail, str) else str(e.detail)
+            except Exception as e:  # pragma: no cover - network
+                dns_error = f"DNS setup skipped: {e}"
+                logger.warning("launch-domain DNS error for %s: %s", host, e)
+        launch_doc["dns_configured"] = ok_any
+        launch_doc["dns_hosts"] = targets
     except HTTPException as e:
         dns_error = e.detail if isinstance(e.detail, str) else str(e.detail)
     except Exception as e:  # pragma: no cover - network
@@ -131,8 +154,18 @@ async def launch_domain(
                     from payments_ext import get_settings_doc
                     from vercel_api_ext import vercel_attach_domain
                     settings = await get_settings_doc()
-                    await vercel_attach_domain(settings, vercel_project_id, domain)
-                    launch_doc["vercel_attached"] = True
+                    # Attach every host we pointed DNS for (apex + www, or the
+                    # single sub-domain) so Vercel serves the app on all of
+                    # them. Attaching is idempotent, so re-launching is safe.
+                    hosts = launch_doc.get("dns_hosts") or [domain]
+                    attached_any = False
+                    for host in hosts:
+                        try:
+                            await vercel_attach_domain(settings, vercel_project_id, host)
+                            attached_any = True
+                        except HTTPException as e:
+                            vercel_error = e.detail if isinstance(e.detail, str) else str(e.detail)
+                    launch_doc["vercel_attached"] = attached_any
                 else:
                     vercel_error = (
                         "Project has no Vercel deployment yet — run Deploy once "

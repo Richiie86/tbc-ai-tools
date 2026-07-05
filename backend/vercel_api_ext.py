@@ -182,15 +182,29 @@ async def vercel_attach_domain(
     return {'attached': True, 'name': name, 'verified': body.get('verified', False), 'raw': body}
 
 
-async def vercel_redeploy(settings: dict, deployment_id: str) -> dict:
+async def vercel_redeploy(
+    settings: dict, deployment_id: str, name_slug: str = 'project',
+) -> dict:
+    """Redeploy an existing deployment by replaying it.
+
+    Vercel has NO `POST /v13/deployments/{id}/redeploy` route — calling it
+    404s with "The requested API endpoint was not found." The correct way to
+    redeploy is `POST /v13/deployments` with the previous deployment's id in
+    the body as `deploymentId`; Vercel then rebuilds it, inheriting the
+    project's settings and env. `name` is required even for an existing
+    project, so callers pass the project's slug.
+    """
     token = vercel_token(settings)
     if not token:
         raise HTTPException(503, VERCEL_TOKEN_MISSING_DETAIL)
+    qs = dict(vercel_team_qs(settings) or {})
+    qs['skipAutoDetectionConfirmation'] = '1'
     async with httpx.AsyncClient(timeout=20.0) as client:
         r = await client.post(
-            f'{VERCEL_API}/v13/deployments/{deployment_id}/redeploy',
-            params=vercel_team_qs(settings),
-            headers={'Authorization': f'Bearer {token}'},
+            f'{VERCEL_API}/v13/deployments',
+            params=qs,
+            headers={'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'},
+            json={'name': name_slug, 'deploymentId': deployment_id, 'target': 'production'},
         )
     if r.status_code >= 400:
         try:
