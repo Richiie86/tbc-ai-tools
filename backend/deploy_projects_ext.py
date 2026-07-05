@@ -120,6 +120,10 @@ class DeployRequest(BaseModel):
     # last AI code review says the project shouldn't ship. Defaults to false
     # so an autonomous AI agent can't bypass its own safety net by accident.
     bypass_review: bool = False
+    # Optional: when set, the Deploy button also connects this domain to the
+    # project in the same click (deploy → auto-attach domain). Porkbun domains
+    # get their DNS auto-pointed; others come back with manual DNS steps.
+    domain: Optional[str] = None
 
 
 # ===================================================================
@@ -1082,11 +1086,43 @@ async def op_deploy_project(
     """
     settings = await get_settings_doc()
     try:
-        return await _trigger_deploy(
+        result = await _trigger_deploy(
             project_id, settings, req.target, req.git_ref,
             bypass_review=req.bypass_review,
             user_id=user.get('sub'),
         )
+        # One-click "deploy AND connect the domain": when the operator has a
+        # domain set for this chat, attach it in the same action so there's no
+        # separate Launch step. Best-effort — a domain hiccup never fails the
+        # deploy itself; the outcome (incl. any manual DNS steps) rides back on
+        # the response under `domain_launch`.
+        wanted = (req.domain or '').strip()
+        if wanted:
+            try:
+                from domain_launch_ext import perform_domain_launch
+                project = await db.deploy_projects.find_one({'id': project_id}) or {}
+                launch = await perform_domain_launch(
+                    user, wanted,
+                    project_id=project_id,
+                    project_name=project.get('projectName'),
+                )
+                if isinstance(result, dict):
+                    result['domain_launch'] = launch
+            except HTTPException as de:
+                if isinstance(result, dict):
+                    result['domain_launch'] = {
+                        'ok': False,
+                        'domain': wanted,
+                        'message': de.detail if isinstance(de.detail, str) else str(de.detail),
+                    }
+            except Exception as de:  # pragma: no cover - network
+                logger.warning('deploy domain auto-connect failed for %s: %s', project_id, de)
+                if isinstance(result, dict):
+                    result['domain_launch'] = {
+                        'ok': False, 'domain': wanted,
+                        'message': f'Domain connect skipped: {de}',
+                    }
+        return result
     except HTTPException:
         # Re-raise FastAPI-level errors verbatim — already JSON-encodable.
         raise

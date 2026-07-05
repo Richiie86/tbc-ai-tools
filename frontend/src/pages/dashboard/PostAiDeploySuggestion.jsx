@@ -5,6 +5,19 @@ import api from '../../lib/api';
 
 const STORAGE_KEY = 'tbc.inChat.selectedProjectId';
 const PREVIEW_KEY = 'tbc.inChat.lastPreviewUrl';
+// Shared with InChatDeployControls: the domain typed here is what the header
+// Deploy button auto-connects in one click.
+const LAUNCH_DOMAIN_KEY = 'tbc.inChat.launchDomain';
+
+const readLaunchDomain = () => {
+  try { return localStorage.getItem(LAUNCH_DOMAIN_KEY) || ''; } catch { return ''; }
+};
+const writeLaunchDomain = (d) => {
+  try {
+    if (d) localStorage.setItem(LAUNCH_DOMAIN_KEY, d);
+    else localStorage.removeItem(LAUNCH_DOMAIN_KEY);
+  } catch { /* ignore */ }
+};
 
 const readPreview = () => {
   try { return localStorage.getItem(PREVIEW_KEY) || ''; } catch { return ''; }
@@ -88,8 +101,15 @@ export function PostAiDeploySuggestion({ user, visible, onDismiss }) {
  * points the domain's DNS at the deployment.
  */
 function ShipItPill({ projectId, busy, setBusy, setPreviewUrl, onDismiss }) {
-  const [domain, setDomain] = useState('');
+  const [domain, setDomain] = useState(readLaunchDomain);
   const [launching, setLaunching] = useState(false);
+
+  // Keep the shared key in sync so the header Deploy button connects the same
+  // domain the operator typed here.
+  const updateDomain = (v) => {
+    setDomain(v);
+    writeLaunchDomain(v.trim());
+  };
 
   const launchDomain = async () => {
     const d = domain.trim();
@@ -110,7 +130,7 @@ function ShipItPill({ projectId, busy, setBusy, setPreviewUrl, onDismiss }) {
       } else {
         toast.message(data?.message || `Launch recorded for ${data.domain}`, { duration: 7000 });
       }
-      setDomain('');
+      updateDomain('');
     } catch (e) {
       toast.error(e?.response?.data?.detail || 'Launch failed');
     } finally {
@@ -213,7 +233,7 @@ function ShipItPill({ projectId, busy, setBusy, setPreviewUrl, onDismiss }) {
         <input
           type="text"
           value={domain}
-          onChange={(e) => setDomain(e.target.value)}
+          onChange={(e) => updateDomain(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) launchDomain(); }}
           placeholder="yourdomain.com — launch this project directly on it"
           data-testid="session-domain-input"

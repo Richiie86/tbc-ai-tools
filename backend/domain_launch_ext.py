@@ -56,7 +56,33 @@ async def launch_domain(
     user: dict = Depends(get_current_user),
 ):
     """Charge DOMAIN_LAUNCH_COST credits and launch the project on `domain`."""
-    domain = _normalize_domain(payload.domain)
+    return await perform_domain_launch(
+        user,
+        payload.domain,
+        project_id=payload.projectId,
+        project_name=payload.projectName,
+        request=request,
+    )
+
+
+async def perform_domain_launch(
+    user: dict,
+    domain_raw: str,
+    project_id: Optional[str] = None,
+    project_name: Optional[str] = None,
+    request: Optional[Request] = None,
+) -> dict:
+    """Core launch logic, shared by the standalone `/launch-domain` endpoint
+    and the one-click Deploy flow (deploy → auto-connect the chosen domain).
+
+    Behaviour:
+      * Porkbun domains  → DNS is auto-configured (apex + www).
+      * Other registrars → we can't touch their DNS, so we attach the domain
+        in Vercel (so Vercel hosts it the moment DNS resolves) AND return
+        `manual_dns` with the exact records / nameservers to paste. This is
+        how we still host — and earn — on domains bought elsewhere.
+    """
+    domain = _normalize_domain(domain_raw)
     if "." not in domain or " " in domain:
         raise HTTPException(400, "Enter a full domain, e.g. app.example.com")
 
@@ -95,8 +121,8 @@ async def launch_domain(
         "user_id": uid,
         "user_email": u.get("email"),
         "domain": domain,
-        "project_id": payload.projectId,
-        "project_name": payload.projectName,
+        "project_id": project_id,
+        "project_name": project_name,
         "credits_charged": charged,
         "created_at": now,
         "dns_configured": False,
@@ -108,27 +134,42 @@ async def launch_domain(
     #    Domains tab. But if BOTH fail we refund so the user isn't charged for
     #    a launch that did nothing.
     dns_error = None
+    manual_dns = None  # set for domains we don't hold registrar keys for
     # When the operator launches the naked root (e.g. `tbcdomain.com`) or its
     # `www`, point BOTH the apex and the `www` sub-domain at Vercel so the site
     # resolves either way — a domain that only works on one of the two is the
     # most common "why isn't it live?" complaint. For a deeper sub-domain
     # (app.example.com) we only touch that exact host.
     try:
-        from porkbun_ext import configure_vercel_dns, _split_domain
+        from porkbun_ext import (
+            configure_vercel_dns, _split_domain,
+            manual_dns_records, domain_in_porkbun,
+        )
         root, sub = _split_domain(domain)
         targets = [root, f"www.{root}"] if sub in ("", "www") else [domain]
-        ok_any = False
-        for host in targets:
-            try:
-                res = await configure_vercel_dns(host)
-                ok_any = ok_any or bool(res.get("ok"))
-            except HTTPException as e:
-                dns_error = e.detail if isinstance(e.detail, str) else str(e.detail)
-            except Exception as e:  # pragma: no cover - network
-                dns_error = f"DNS setup skipped: {e}"
-                logger.warning("launch-domain DNS error for %s: %s", host, e)
-        launch_doc["dns_configured"] = ok_any
         launch_doc["dns_hosts"] = targets
+        # Only Porkbun domains can be auto-pointed. For anything bought
+        # elsewhere we can't rewrite DNS — we hand back manual steps instead
+        # (but still attach in Vercel below so we host it once DNS resolves).
+        if await domain_in_porkbun(root):
+            ok_any = False
+            for host in targets:
+                try:
+                    res = await configure_vercel_dns(host)
+                    ok_any = ok_any or bool(res.get("ok"))
+                except HTTPException as e:
+                    dns_error = e.detail if isinstance(e.detail, str) else str(e.detail)
+                except Exception as e:  # pragma: no cover - network
+                    dns_error = f"DNS setup skipped: {e}"
+                    logger.warning("launch-domain DNS error for %s: %s", host, e)
+            launch_doc["dns_configured"] = ok_any
+        else:
+            manual_dns = manual_dns_records(domain)
+            launch_doc["manual_dns_required"] = True
+            dns_error = (
+                "This domain isn't in the connected Porkbun account, so its DNS "
+                "must be set at your registrar — follow the steps shown."
+            )
     except HTTPException as e:
         dns_error = e.detail if isinstance(e.detail, str) else str(e.detail)
     except Exception as e:  # pragma: no cover - network
@@ -141,12 +182,12 @@ async def launch_domain(
     # actually served the app. We now call the real Vercel API so the domain
     # goes live on the project (mirrors the operator "set domain" flow).
     vercel_error = None
-    if payload.projectId:
+    if project_id:
         try:
-            proj = await db.deploy_projects.find_one({"id": payload.projectId})
+            proj = await db.deploy_projects.find_one({"id": project_id})
             if proj:
                 await db.deploy_projects.update_one(
-                    {"id": payload.projectId},
+                    {"id": project_id},
                     {"$set": {"domain": domain, "updated_at": now}},
                 )
                 vercel_project_id = proj.get("vercel_project_id")
@@ -213,7 +254,7 @@ async def launch_domain(
         from audit_ext import record_audit
         await record_audit(
             u, "domain.launch", target=domain,
-            details={"credits_charged": charged, "project_id": payload.projectId},
+            details={"credits_charged": charged, "project_id": project_id},
             request=request,
         )
     except Exception:
@@ -232,6 +273,12 @@ async def launch_domain(
             f"{domain} is launching. DNS is pointed at Vercel and the domain is "
             "attached to your project — it goes live once DNS propagates "
             "(usually a few minutes, up to an hour)."
+        )
+    elif manual_dns and launch_doc["vercel_attached"]:
+        message = (
+            f"{domain} is attached to your project and hosted on Vercel. "
+            "Because this domain isn't registered with us, add the DNS records "
+            "shown at your current registrar — it goes live once they propagate."
         )
     elif refunded:
         message = (
@@ -255,6 +302,7 @@ async def launch_domain(
         "credits_remaining": fresh.get("credits"),
         "dns_configured": launch_doc["dns_configured"],
         "dns_error": dns_error,
+        "manual_dns": manual_dns,
         "vercel_attached": launch_doc["vercel_attached"],
         "vercel_error": vercel_error,
         "refunded": refunded,

@@ -182,6 +182,48 @@ async def configure_vercel_dns(domain: str) -> dict:
     return {'ok': True, 'root': root, 'record': f'{rtype} {name or "@"} → {content}'}
 
 
+# Nameserver-swap option (Vercel takes over DNS entirely) — the simplest
+# path for a domain bought at another registrar.
+VERCEL_NAMESERVERS = ['ns1.vercel-dns.com', 'ns2.vercel-dns.com']
+
+
+def manual_dns_records(domain: str) -> dict:
+    """Deterministic DNS the user must paste at THEIR registrar when we don't
+    hold API keys for it (i.e. it isn't a Porkbun domain). Covers both the
+    apex + www hosts (for a root launch) and offers the nameserver-swap
+    alternative. Vercel still hosts the site — this just points the name at us.
+    """
+    root, sub = _split_domain(domain)
+    hosts = [root, f'www.{root}'] if sub in ('', 'www') else [domain]
+    records = []
+    for host in hosts:
+        _, s = _split_domain(host)
+        if s:
+            records.append({'type': 'CNAME', 'host': s, 'name': host, 'value': _VERCEL_CNAME})
+        else:
+            records.append({'type': 'A', 'host': '@', 'name': host, 'value': _VERCEL_APEX_A})
+    return {'records': records, 'nameservers': VERCEL_NAMESERVERS, 'root': root}
+
+
+async def domain_in_porkbun(root: str) -> bool:
+    """True when `root` is a domain inside the connected Porkbun account, i.e.
+    we can auto-configure its DNS. Any credential/API failure returns False so
+    the caller falls back to manual instructions instead of hard-erroring.
+    """
+    try:
+        apikey, secret = await _creds()
+        data = await _call('/domain/listAll', apikey, secret)
+    except HTTPException:
+        return False
+    except Exception:  # pragma: no cover - network
+        return False
+    target = (root or '').lower()
+    for d in (data.get('domains') or []):
+        if (d.get('domain') or '').lower() == target:
+            return True
+    return False
+
+
 @router.post('/point-to-vercel')
 async def porkbun_point_to_vercel(
     domain: str = Query(..., min_length=3),
