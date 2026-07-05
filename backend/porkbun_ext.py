@@ -138,12 +138,77 @@ def _split_domain(host: str) -> tuple[str, str]:
     return root, sub
 
 
+# Porkbun serves its "A Brand New Domain!" parking page through default records
+# it auto-creates on every domain: an ALIAS at the apex + wildcard/www CNAMEs,
+# all pointing at a Porkbun-owned parking host. The exact host VARIES per domain
+# (`pixie.porkbun.com`, `uixie.porkbun.com`, …), so we must match ANY
+# *.porkbun.com target rather than one hard-coded host. Optional URL forwarding
+# does the same thing at the HTTP layer. Unless these are removed, the domain
+# keeps showing the parking page — AND Porkbun blocks adding an apex A record
+# with "Conflict: a conflicting record already exists" because the ALIAS sits on
+# the same host. This is the #1 "why isn't my site live / why can't I add the A
+# record?" cause.
+_PORKBUN_PARK_SUFFIX = '.porkbun.com'
+
+
+def _is_parking_target(content: str) -> bool:
+    """True if a DNS record's content points at a Porkbun parking host."""
+    c = (content or '').strip().lower().rstrip('.')
+    return c == 'porkbun.com' or c.endswith(_PORKBUN_PARK_SUFFIX)
+
+
+async def _clear_porkbun_parking(root: str, apikey: str, secret: str) -> list[str]:
+    """Remove Porkbun's default parking records + URL forwarding for `root`.
+
+    Best-effort and idempotent: deletes every DNS record whose content points at
+    a *.porkbun.com parking host (ALIAS/CNAME/wildcard) and every URL-forwarding
+    rule. Never raises — a cleanup hiccup must not block the Vercel record we're
+    about to create. Returns a short list of what it removed (for logging)."""
+    removed: list[str] = []
+
+    # 1) Parking DNS records (ALIAS @, www/wildcard CNAME → *.porkbun.com).
+    try:
+        allrecs = await _call(f'/dns/retrieve/{root}', apikey, secret)
+        for rec in (allrecs.get('records') or []):
+            rid = rec.get('id')
+            if rid and _is_parking_target(rec.get('content', '')):
+                try:
+                    await _call(f'/dns/delete/{root}/{rid}', apikey, secret)
+                    removed.append(f"{rec.get('type')} {rec.get('name') or '@'} → {rec.get('content')}")
+                except HTTPException:
+                    pass  # best-effort
+    except HTTPException:
+        pass  # retrieve may fail transiently — ignore
+
+    # 2) URL forwarding (a forward rule beats DNS entirely, so it must go too).
+    try:
+        fwds = await _call(f'/domain/getUrlForwarding/{root}', apikey, secret)
+        for fwd in (fwds.get('forwards') or []):
+            fid = fwd.get('id')
+            if fid:
+                try:
+                    await _call(f'/domain/deleteUrlForward/{root}/{fid}', apikey, secret)
+                    removed.append(f"url-forward → {fwd.get('location')}")
+                except HTTPException:
+                    pass  # best-effort
+    except HTTPException:
+        pass  # no forwarding configured — ignore
+
+    if removed:
+        logger.info('Cleared Porkbun parking for %s: %s', root, ', '.join(removed))
+    return removed
+
+
 async def configure_vercel_dns(domain: str) -> dict:
     """Best-effort: point `domain` at Vercel via the connected Porkbun account.
 
     Creates (or refreshes) the correct DNS record so the pasted domain serves
     the Vercel deployment directly — an apex gets an A record to Vercel's
     anycast IP, a sub-domain gets a CNAME to cname.vercel-dns.com.
+
+    Crucially, it FIRST removes Porkbun's default parking records + URL
+    forwarding (which point at a *.porkbun.com host and otherwise keep serving
+    the "A Brand New Domain!" page and block the apex A record with a conflict).
 
     Returns a small status dict; never raises for "not connected" so the deploy
     flow can call it opportunistically. Raises only on hard Porkbun API errors
@@ -153,6 +218,10 @@ async def configure_vercel_dns(domain: str) -> dict:
     root, sub = _split_domain(domain)
     if not root:
         raise HTTPException(400, 'Could not parse a root domain to configure DNS')
+
+    # Kill parking records / URL forwarding first — otherwise Porkbun keeps
+    # serving its parking page and rejects the apex A record with a conflict.
+    cleared = await _clear_porkbun_parking(root, apikey, secret)
 
     if sub:
         rtype, name, content = 'CNAME', sub, _VERCEL_CNAME
@@ -179,7 +248,12 @@ async def configure_vercel_dns(domain: str) -> dict:
         'content': content,
         'ttl': '600',
     })
-    return {'ok': True, 'root': root, 'record': f'{rtype} {name or "@"} → {content}'}
+    return {
+        'ok': True,
+        'root': root,
+        'record': f'{rtype} {name or "@"} → {content}',
+        'parking_cleared': cleared,
+    }
 
 
 # Nameserver-swap option (Vercel takes over DNS entirely) — the simplest
