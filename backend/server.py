@@ -1734,6 +1734,32 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
         # not already equal to the primary (de-duped, order preserved).
         primary = routed_model
         attempts = [primary] + [m for m in CHAT_FALLBACK_CHAIN if m != primary]
+        # Which providers can we actually reach? App keys + this user's BYOK
+        # keys. Used to (a) refuse an explicit pick on an unconfigured provider
+        # with a clear message instead of silently answering as Claude, and
+        # (b) drop dead fallbacks so we never claim to use a model we can't run.
+        try:
+            from llm_router import available_providers as _avail_provs
+            avail = await _avail_provs()
+        except Exception:  # noqa: BLE001
+            avail = set()
+        avail = set(avail) | set(byok_overrides.keys())
+        if avail:
+            primary_provider = resolve_model(primary)[0]
+            # Explicit pick (not Automatic) on a provider with no key → stop and
+            # tell the operator exactly which key to add, rather than falling
+            # back to Claude and looking like the model switch did nothing.
+            if auto_kind is None and primary_provider not in avail:
+                yield 'data: ' + json.dumps({
+                    'type': 'error',
+                    'message': (
+                        f'The model you selected runs on "{primary_provider}", which has no '
+                        f'API key configured. Add a {primary_provider} key in Operator → '
+                        'Security (or pick a model from a provider you have set up).'
+                    ),
+                }) + '\n\n'
+                return
+            attempts = [m for m in attempts if resolve_model(m)[0] in avail] or attempts
         last_error: Optional[str] = None
         used_model = primary
         ok = False
@@ -1902,6 +1928,23 @@ async def list_models():
             {'id': 'gemini-2.5-flash', 'label': 'Gemini 2.5 Flash'},
         ],
     }
+
+    # Only offer models whose provider actually has a key configured. Showing
+    # Gemini/OpenAI when only an Anthropic key is set is exactly why switching
+    # models "did nothing" — the pick silently fell back to Claude. If NO key
+    # is configured at all we leave the full list so the picker isn't empty and
+    # the per-message error can guide the operator to add a key.
+    try:
+        from llm_router import available_providers
+        avail = await available_providers()
+        if avail:
+            _group_provider = {'OpenAI': 'openai', 'Anthropic': 'anthropic', 'Gemini': 'gemini'}
+            providers = {
+                name: items for name, items in providers.items()
+                if _group_provider.get(name) in avail
+            }
+    except Exception as e:  # noqa: BLE001 — never let the picker fail on this
+        logger.warning('Provider availability filter failed: %s', e)
 
     # OpenRouter: one key → hundreds of models. Fetched live + cached.
     try:

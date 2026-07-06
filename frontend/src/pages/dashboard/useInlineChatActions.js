@@ -19,7 +19,7 @@ import api from '../../lib/api';
  * version — no behaviour change, only a relocation.
  */
 export function useInlineChatActions({ navigate, messages, currentId, showResult }) {
-  return useCallback(async (kind) => {
+  return useCallback(async (kind, payload = {}) => {
     // `fix-errors` deep-links to AI Build (which has its own project
     // picker) — no need to enforce projectId here. The other actions
     // hit `/operator/deploy/{id}/*` and DO need a project selected.
