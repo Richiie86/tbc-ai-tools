@@ -217,7 +217,7 @@ async def _redeploy_linked(project: dict) -> dict:
     poll to READY so we can return the live URL. Reuses the deploy trigger's
     self-heal for stale Vercel project ids."""
     from payments_ext import get_settings_doc
-    from deploy_projects_ext import _trigger_deploy, _slugify
+    from deploy_projects_ext import _trigger_deploy
     from app_builder_ext import _poll_deployment_ready
 
     settings = await get_settings_doc()
