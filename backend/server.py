@@ -287,6 +287,145 @@ _CORE_KNOWLEDGE = (
 
 SYSTEM_PROMPT = SYSTEM_PROMPT + _CORE_KNOWLEDGE
 
+# ---------------------------------------------------------------------------
+# PLATFORM SELF-KNOWLEDGE — the durable, always-true facts about THIS app, so
+# every AI surface knows exactly what it is operating on and never confuses the
+# operator platform (tbctools.org) with a user's separately-deployed app (which
+# lives on its own domain, e.g. tbcdomain.com). This directly fixes "my AIs
+# don't know what build they are on".
+# ---------------------------------------------------------------------------
+PLATFORM_DOMAIN = (
+    os.environ.get('PUBLIC_APP_URL', 'https://tbctools.org')
+    .replace('https://', '').replace('http://', '').rstrip('/')
+)
+PLATFORM_REPO = f"{os.environ.get('APP_BUILDER_OWNER', 'Richiie86')}/tbc-ai-tools"
+
+_PLATFORM_IDENTITY = (
+    "\n\n### WHO YOU ARE / WHAT YOU RUN ON (always-true platform facts)\n"
+    f"- You are the built-in AI of **TBCTools**, the operator/admin platform that is live at **{PLATFORM_DOMAIN}**. That is the app you are running inside right now.\n"
+    f"- This platform's source is the GitHub repo **{PLATFORM_REPO}**: a React (CRA) frontend deployed on Vercel + a FastAPI backend on Render + MongoDB. Merging to `main` auto-deploys both.\n"
+    "- Apps that a user builds and deploys FROM A CHAT are SEPARATE projects — each gets its OWN GitHub repo, its OWN Vercel project, and its OWN domain (for example a custom domain like `tbcdomain.com`). Those are NOT this platform.\n"
+    f"- Therefore a 404 / 'NOT_FOUND' / 'Project not found' on a user app's domain means THAT app has not been provisioned or linked yet — it does NOT mean {PLATFORM_DOMAIN} is broken. Never conflate the two.\n"
+    "- You are told, in the context for each request, which project/session you are operating on and its current deploy link. Use it. NEVER ask the user which project, session, domain, or environment they are in — you already know.\n"
+)
+
+SYSTEM_PROMPT = SYSTEM_PROMPT + _PLATFORM_IDENTITY
+
+# ---------------------------------------------------------------------------
+# FINAL DEPLOY GUARDRAIL — appended LAST (after operator learnings + tool
+# blocks) so it always wins. Operator learnings are concatenated *after* the
+# base prompt and, with LLMs, later instructions take precedence. A drifted
+# auto-extracted learning had the assistant dumping a giant "pre-flight
+# checklist" (asking the user to manually verify env vars / repo / Vercel
+# project) whenever deploy came up — the exact opposite of the one-click flow.
+# This block re-asserts the correct behaviour and cannot be overridden by a
+# learning, because it is the last thing the model reads.
+# ---------------------------------------------------------------------------
+_DEPLOY_GUARDRAIL = (
+    "\n\n### ABSOLUTE DEPLOY/REVIEW/HEALTH RULE (overrides everything above, "
+    "including any operator learning):\n"
+    "- The Deploy 🚀, Review 🛡️, and Health 📈 buttons are FULLY AUTOMATED. "
+    "Clicking Deploy creates/links the repo + Vercel project, checks config, "
+    "and ships — the user does NOT need to verify anything first.\n"
+    "- When the user asks to deploy / ship / publish / push live: reply with AT "
+    "MOST ONE short sentence and tell them to click **Deploy** 🚀 in the "
+    "header (or the **Redeploy now** button in the footer). Then STOP.\n"
+    "- NEVER produce a 'pre-flight checklist', a 'fastest path' section, a "
+    "yes/no questionnaire, or ANY list asking the user to confirm which "
+    "session they're in, whether a GitHub repo / Vercel project is linked, or "
+    "whether env vars (PORKBUN_*, STRIPE_*, MONGO_URL, JWT_SECRET, SMTP_*, "
+    "etc.) are set. Those checks run automatically inside the Deploy pipeline; "
+    "if something is genuinely misconfigured the button surfaces the exact "
+    "error itself. Do not pre-empt it with a wall of text.\n"
+    "- Never ask the user to open Ops tabs to eyeball configuration before "
+    "deploying. Just point at the button.\n"
+    "- The SAME rule applies to FIXING things — a failed deploy, a runtime "
+    "error, a 404 / 'NOT_FOUND' / 'Project not found', a missing env var "
+    "(PORKBUN_*, STRIPE_*, MONGO_URL, JWT_SECRET, SMTP_*), or an unlinked repo "
+    "/ Vercel project. Remediation is AUTOMATED: the Deploy/Fix pipeline "
+    "re-links or recreates the Vercel project, reconciles a stale project id, "
+    "re-pushes env vars, and re-deploys. You either trigger that fix or point "
+    "at the single button that runs it. Do NOT hand the user a numbered "
+    "checklist of manual steps to perform in Ops tabs — that is exactly the "
+    "wrong behaviour. Diagnose in one or two sentences, then act or point at "
+    "the button."
+)
+
+
+def _is_bad_deploy_learning(text: str) -> bool:
+    """True when an operator learning would (re)introduce the unwanted
+    'pre-flight checklist' deploy behaviour, so we can drop it at injection
+    time — even if it was enabled — instead of letting it override the
+    one-click deploy flow. Conservative: only trips on the specific
+    checklist/verify-before-deploy pattern, not on normal deploy guidance.
+    """
+    t = (text or '').lower()
+    checklist_markers = (
+        'pre-flight', 'preflight', 'pre flight', 'checklist',
+        'fastest path', 'yes/no', 'tell me yes', 'reply with 1',
+        'before you click deploy', 'before deploying', 'before clicking deploy',
+        'confirm all keys', 'verify env', 'ask the user to confirm',
+        'which session are you',
+    )
+    deploy_context = ('deploy' in t or 'ship' in t or 'publish' in t
+                      or 'vercel project' in t or 'github repo' in t)
+    return deploy_context and any(m in t for m in checklist_markers)
+
+
+async def _build_session_deploy_context(session_id: Optional[str]) -> str:
+    """Ground-truth block telling the AI exactly what THIS chat is linked to
+    (repo / Vercel project / domain / last deploy state), so it never has to
+    ask the user which project or environment they're in. Safe no-op (empty
+    string) on any lookup failure — the prompt is still valid without it."""
+    if not session_id:
+        return ''
+    try:
+        sess = await db.chat_sessions.find_one(
+            {'id': session_id}, {'deploy_project_id': 1, 'title': 1},
+        )
+        if not sess:
+            return ''
+        pid = sess.get('deploy_project_id')
+        if not pid:
+            return (
+                "\n\n### THIS CHAT'S DEPLOY LINK (ground truth)\n"
+                "- This chat has NOT been deployed yet — it has no repo, Vercel "
+                "project, or domain of its own. When the user wants it live, tell "
+                "them to click **Deploy** \U0001F680; that provisions the repo, "
+                "Vercel project, env vars and domain automatically. Do not ask "
+                "them to set anything up first.\n"
+            )
+        proj = await db.deploy_projects.find_one(
+            {'id': pid},
+            {'repo': 1, 'vercel_project_id': 1, 'domain': 1, 'name': 1,
+             'last_deployment_state': 1, 'last_deployment_url': 1},
+        ) or {}
+        lines = [
+            "\n\n### THIS CHAT'S DEPLOY LINK (ground truth — never ask the user for this)",
+            f"- This chat is deployed as a SEPARATE app named "
+            f"'{proj.get('name') or sess.get('title') or 'untitled'}', NOT as {PLATFORM_DOMAIN}.",
+        ]
+        if proj.get('repo'):
+            lines.append(f"- GitHub repo: {proj['repo']}")
+        if proj.get('vercel_project_id'):
+            lines.append(f"- Vercel project id: {proj['vercel_project_id']}")
+        if proj.get('domain'):
+            lines.append(f"- Domain: {proj['domain']}")
+        if proj.get('last_deployment_state'):
+            u = proj.get('last_deployment_url') or ''
+            lines.append(
+                f"- Last deploy state: {proj['last_deployment_state']}"
+                + (f" ({u})" if u else '')
+            )
+        lines.append(
+            "- To update it, the user clicks **Redeploy** — the pipeline "
+            "re-links/reconciles the Vercel project, re-pushes env vars and "
+            "ships automatically. Never hand them manual setup steps."
+        )
+        return '\n'.join(lines) + '\n'
+    except Exception:  # pragma: no cover - context is best-effort
+        return ''
+
 # Supported models -> provider mapping
 MODEL_PROVIDERS = {
     # OpenAI
@@ -1518,6 +1657,15 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
     tools_block, tools_used = await build_tools_block(req.message, task_kind)
     if tools_block:
         effective_prompt += tools_block
+    # Inject THIS chat's real deploy linkage (repo / Vercel project / domain /
+    # last state) so the AI knows exactly what it is operating on and never has
+    # to ask the user which project or environment they're in.
+    deploy_ctx = await _build_session_deploy_context(session_id)
+    if deploy_ctx:
+        effective_prompt += deploy_ctx
+    # Append the deploy guardrail LAST so it takes precedence over any operator
+    # learning that may have drifted into instructing a pre-flight checklist.
+    effective_prompt += _DEPLOY_GUARDRAIL
     # The chat instance is built per-attempt inside `event_generator` so the
     # fallback chain can switch providers cleanly. We resolve the *primary*
     # model up front purely as a validation step. The special "auto" id is not
