@@ -287,6 +287,56 @@ _CORE_KNOWLEDGE = (
 
 SYSTEM_PROMPT = SYSTEM_PROMPT + _CORE_KNOWLEDGE
 
+# ---------------------------------------------------------------------------
+# FINAL DEPLOY GUARDRAIL — appended LAST (after operator learnings + tool
+# blocks) so it always wins. Operator learnings are concatenated *after* the
+# base prompt and, with LLMs, later instructions take precedence. A drifted
+# auto-extracted learning had the assistant dumping a giant "pre-flight
+# checklist" (asking the user to manually verify env vars / repo / Vercel
+# project) whenever deploy came up — the exact opposite of the one-click flow.
+# This block re-asserts the correct behaviour and cannot be overridden by a
+# learning, because it is the last thing the model reads.
+# ---------------------------------------------------------------------------
+_DEPLOY_GUARDRAIL = (
+    "\n\n### ABSOLUTE DEPLOY/REVIEW/HEALTH RULE (overrides everything above, "
+    "including any operator learning):\n"
+    "- The Deploy 🚀, Review 🛡️, and Health 📈 buttons are FULLY AUTOMATED. "
+    "Clicking Deploy creates/links the repo + Vercel project, checks config, "
+    "and ships — the user does NOT need to verify anything first.\n"
+    "- When the user asks to deploy / ship / publish / push live: reply with AT "
+    "MOST ONE short sentence and tell them to click **Deploy** 🚀 in the "
+    "header (or the **Redeploy now** button in the footer). Then STOP.\n"
+    "- NEVER produce a 'pre-flight checklist', a 'fastest path' section, a "
+    "yes/no questionnaire, or ANY list asking the user to confirm which "
+    "session they're in, whether a GitHub repo / Vercel project is linked, or "
+    "whether env vars (PORKBUN_*, STRIPE_*, MONGO_URL, JWT_SECRET, SMTP_*, "
+    "etc.) are set. Those checks run automatically inside the Deploy pipeline; "
+    "if something is genuinely misconfigured the button surfaces the exact "
+    "error itself. Do not pre-empt it with a wall of text.\n"
+    "- Never ask the user to open Ops tabs to eyeball configuration before "
+    "deploying. Just point at the button."
+)
+
+
+def _is_bad_deploy_learning(text: str) -> bool:
+    """True when an operator learning would (re)introduce the unwanted
+    'pre-flight checklist' deploy behaviour, so we can drop it at injection
+    time — even if it was enabled — instead of letting it override the
+    one-click deploy flow. Conservative: only trips on the specific
+    checklist/verify-before-deploy pattern, not on normal deploy guidance.
+    """
+    t = (text or '').lower()
+    checklist_markers = (
+        'pre-flight', 'preflight', 'pre flight', 'checklist',
+        'fastest path', 'yes/no', 'tell me yes', 'reply with 1',
+        'before you click deploy', 'before deploying', 'before clicking deploy',
+        'confirm all keys', 'verify env', 'ask the user to confirm',
+        'which session are you',
+    )
+    deploy_context = ('deploy' in t or 'ship' in t or 'publish' in t
+                      or 'vercel project' in t or 'github repo' in t)
+    return deploy_context and any(m in t for m in checklist_markers)
+
 # Supported models -> provider mapping
 MODEL_PROVIDERS = {
     # OpenAI
@@ -1493,7 +1543,10 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
     learnings_cursor = db.ai_learnings.find(
         {'enabled': {'$ne': False}}, {'text': 1},
     ).sort('created_at', 1).limit(50)
-    learnings = [d['text'] async for d in learnings_cursor if d.get('text')]
+    learnings = [
+        d['text'] async for d in learnings_cursor
+        if d.get('text') and not _is_bad_deploy_learning(d['text'])
+    ]
     if learnings:
         learnings_block = (
             '\n\n### OPERATOR LEARNINGS (shared across all your AI models):\n'
@@ -1518,6 +1571,9 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
     tools_block, tools_used = await build_tools_block(req.message, task_kind)
     if tools_block:
         effective_prompt += tools_block
+    # Append the deploy guardrail LAST so it takes precedence over any operator
+    # learning that may have drifted into instructing a pre-flight checklist.
+    effective_prompt += _DEPLOY_GUARDRAIL
     # The chat instance is built per-attempt inside `event_generator` so the
     # fallback chain can switch providers cleanly. We resolve the *primary*
     # model up front purely as a validation step. The special "auto" id is not
