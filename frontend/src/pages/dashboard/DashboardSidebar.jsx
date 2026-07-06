@@ -93,7 +93,12 @@ export function DashboardSidebar({
                     }`}
                   >
                     <MessageSquare className={`h-3.5 w-3.5 shrink-0 ${currentId === s.id ? 'text-tbc-400' : 'text-slate-500'}`} />
-                    <span className="flex-1 truncate">{s.title}</span>
+                    {/* min-w-0 is REQUIRED for a flex child to truncate: without
+                        it the item's min-width defaults to `auto`, so a long
+                        title refuses to shrink and pushes the shrink-0 rename /
+                        delete chips off the right edge of the overflow-hidden
+                        sidebar — making them look "missing". */}
+                    <span className="min-w-0 flex-1 truncate">{s.title}</span>
                     {/* Rename + delete are ALWAYS fully visible as tappable
                         chips (previously tiny + dimmed, so users couldn't find
                         them). Bigger hit area + solid backgrounds make them
