@@ -8,6 +8,7 @@ import { Input } from '../../components/ui/input';
 import CreditsBadge from '../../components/CreditsBadge';
 import AppUpdateDot from '../../components/AppUpdateDot';
 import { InChatDeployControls } from './InChatDeployControls';
+import { ChatDeployButton } from './ChatDeployButton';
 import { NotificationsBell } from './NotificationsBell';
 import { DashboardGuideButton } from './DashboardGuideTour';
 import ViewModeToggle from '../../components/ViewModeToggle';
@@ -26,6 +27,8 @@ export function DashboardHeader({
   model,
   setModel,
   onOpenGuide,
+  currentId,
+  messages,
 }) {
   return (
     <div className="flex items-center justify-between gap-3 border-b border-slate-800 bg-ink-950/80 px-5 py-3 backdrop-blur">
@@ -44,7 +47,11 @@ export function DashboardHeader({
         {/* Lower-priority controls live in a horizontal scroll strip so they
             never push the always-visible credits pill off screen on phones. */}
         <div className="flex min-w-0 items-center gap-2 overflow-x-auto scrollbar-none sm:gap-3 [&>*]:shrink-0">
-          {/* Operator-only deploy controls so we can ship code from inside chat. */}
+          {/* Emergent-style per-chat deploy: turn THIS chat into a live app,
+              then redeploy / push edits from the same session. */}
+          <ChatDeployButton user={user} sessionId={currentId} messages={messages} />
+          {/* Operator-only deploy controls (project picker) so we can ship the
+              platform's own code / pick a specific project from inside chat. */}
           <InChatDeployControls user={user} />
           {/* Auto / Mobile / Computer layout switch — inline here (instead of a
               floating pill) so it never overlaps content on phones. */}

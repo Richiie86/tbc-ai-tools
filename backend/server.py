@@ -1340,7 +1340,8 @@ async def list_sessions(user: dict = Depends(get_current_user), variant: Optiona
     if variant in ('tbc1', 'tbc2'):
         q['variant'] = variant
     cursor = db.chat_sessions.find(
-        q, {'id': 1, 'title': 1, 'model': 1, 'variant': 1, 'created_at': 1, 'updated_at': 1}
+        q, {'id': 1, 'title': 1, 'model': 1, 'variant': 1, 'created_at': 1,
+            'updated_at': 1, 'deploy_project_id': 1}
     ).sort('updated_at', -1).limit(200)
     sessions = [_serialize(s) async for s in cursor]
     return sessions
@@ -2551,6 +2552,8 @@ app.include_router(user_projects_router)
 from domain_launch_ext import launch_router, money_domains_router
 app.include_router(launch_router)
 app.include_router(money_domains_router)
+from chat_deploy_ext import router as chat_deploy_router
+app.include_router(chat_deploy_router)
 # NEW (additive): deploy/domain preflight diagnostics, auto-subdomain +
 # wildcard bootstrap, and recurring "keep it live" hosting billing.
 from deploy_preflight_ext import router as deploy_preflight_router

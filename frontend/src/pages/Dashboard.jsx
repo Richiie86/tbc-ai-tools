@@ -238,6 +238,8 @@ export default function Dashboard({ variant = 'tbc1' }) {
           model={model}
           setModel={setModel}
           onOpenGuide={() => setGuideKey((k) => k + 1)}
+          currentId={currentId}
+          messages={messages}
         />
 
         <TrialBanner user={user} />
