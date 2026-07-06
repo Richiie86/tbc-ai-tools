@@ -321,9 +321,8 @@ async def chat_apply(
 
         parts = [
             f'INSTRUCTION:\n{body.instruction.strip()}\n',
-            f'EDIT MODE: multi — you may modify ANY of the {len(files)} files below, '
-            'and you may also return NEW files (paths that are not listed) when the '
-            'change needs them.',
+            f'EDIT MODE: multi — you may modify ANY of the {len(files)} files below. '
+            'Return the COMPLETE new content for every file you change.',
         ]
         for path, content in files.items():
             parts.append(f'\n--- FILE: {path} ---\n{content}')
