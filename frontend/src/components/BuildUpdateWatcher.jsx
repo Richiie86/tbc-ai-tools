@@ -77,10 +77,17 @@ export default function BuildUpdateWatcher() {
     // user is most likely coming back after a deploy).
     const interval = setInterval(checkForUpdate, 120000);
     const onFocus = () => checkForUpdate();
-    window.addEventListener('focus', onFocus);
-    document.addEventListener('visibilitychange', () => {
+    const onVisibility = () => {
       if (document.visibilityState === 'visible') checkForUpdate();
-    });
+    };
+    // pageshow with persisted=true fires when the tab is restored from the
+    // back/forward cache (bfcache). Mobile Chrome freezes background tabs this
+    // way, so a user with many open tabs restores a stale page WITHOUT any
+    // network fetch — this is the main reason shipped features stayed invisible.
+    const onPageShow = (e) => { if (e.persisted) checkForUpdate(); };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('pageshow', onPageShow);
     // First check shortly after mount so a long-open stale tab updates fast.
     const initial = setTimeout(checkForUpdate, 5000);
 
@@ -89,6 +96,8 @@ export default function BuildUpdateWatcher() {
       clearInterval(interval);
       clearTimeout(initial);
       window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('pageshow', onPageShow);
     };
   }, []);
 
