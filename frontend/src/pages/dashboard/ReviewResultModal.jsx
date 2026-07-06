@@ -77,6 +77,76 @@ const TONES = {
   },
 };
 
+// Turn a raw deploy/health failure message into a plain-English explanation
+// plus concrete "what to fix" steps. This is what powers the (previously
+// empty) "Read full explanation" panel for failed deploys, and the prompt the
+// "Fix problem" button hands to the AIs. Matching is substring-based so it
+// still degrades gracefully to a generic explanation for unknown errors.
+function explainProblem(result) {
+  if (!result || result.ok) return null;
+  if (result.kind !== 'deploy' && result.kind !== 'health') return null;
+  const raw = String(result.summary || result.detail || result.error || '').trim();
+  const lc = raw.toLowerCase();
+
+  if (lc.includes('project not found') || lc.includes('no such project')) {
+    return {
+      raw,
+      cause:
+        'Vercel has no project matching this deploy target, so there is nothing to deploy to. '
+        + 'This usually means the linked Vercel project was deleted or renamed, the saved Vercel '
+        + 'project ID is stale (common right after rebuilding the project), or a GitHub repo was '
+        + 'never linked to a Vercel project.',
+      fixes: [
+        'Confirm the Vercel project still exists and note its exact name/ID.',
+        'Re-link this deploy target to the current Vercel project (the old ID is stale after a rebuild).',
+        'Make sure a GitHub repo is connected AND linked to a Vercel project before deploying.',
+      ],
+    };
+  }
+  if (lc.includes('repo') && (lc.includes('empty') || lc.includes('no code'))) {
+    return {
+      raw,
+      cause: 'The connected GitHub repo has no application code yet, so there is nothing to build or deploy.',
+      fixes: [
+        'Use "Push initial code" to upload the app source to the repo.',
+        'Then re-run the deploy.',
+      ],
+    };
+  }
+  if (lc.includes('token') || lc.includes('unauthorized') || lc.includes('401') || lc.includes('403') || lc.includes('key')) {
+    return {
+      raw,
+      cause: 'The deploy was rejected for authentication reasons — a Vercel/GitHub token is missing, expired, or lacks permission.',
+      fixes: [
+        'Check the Vercel and GitHub API keys in the operator settings.',
+        'Re-generate any expired token and save it, then retry the deploy.',
+      ],
+    };
+  }
+  if (lc.includes('build') && (lc.includes('fail') || lc.includes('error'))) {
+    return {
+      raw,
+      cause: 'Vercel started the deploy but the build failed — the code did not compile or a build step errored.',
+      fixes: [
+        'Open the Vercel build logs to find the failing step.',
+        'Use "Fix problem" to have the AIs read the error and patch the code.',
+      ],
+    };
+  }
+  // Generic fallback so the panel is never empty.
+  return {
+    raw,
+    cause: raw
+      ? `The deploy failed with: "${raw}". This is the exact error the deploy pipeline returned.`
+      : 'The deploy failed but no detailed error message was returned by the pipeline.',
+    fixes: [
+      'Verify the deploy target (Vercel project + linked GitHub repo) is correctly configured.',
+      'Confirm the required API keys are set, then retry.',
+      'If it still fails, use "Fix problem" to hand the error to the AIs.',
+    ],
+  };
+}
+
 // Render a single finding whether it's a plain string or a structured object.
 function findingText(f) {
   if (typeof f === 'string') return f;
@@ -87,7 +157,7 @@ function findingText(f) {
   return `${sev}${loc}${body}`;
 }
 
-export default function ReviewResultModal({ result, onClose, onOpenFixChat }) {
+export default function ReviewResultModal({ result, onClose, onOpenFixChat, onFixProblem }) {
   const [expanded, setExpanded] = useState(false);
   const cls = classify(result);
   const open = !!result && !!cls;
@@ -108,10 +178,15 @@ export default function ReviewResultModal({ result, onClose, onOpenFixChat }) {
 
   const findings = isReview ? (result.findings || []) : [];
   const concerns = isReview ? (result.second?.concerns || []) : [];
+  // For failed deploy/health checks, build a real explanation so the panel is
+  // never empty and we can hand a precise prompt to the AIs via "Fix problem".
+  const problem = explainProblem(result);
+  const canFixProblem = !!problem && typeof onFixProblem === 'function';
   const hasDetail =
     (result.summary && result.summary.length > 0) ||
     findings.length > 0 ||
     concerns.length > 0 ||
+    !!problem ||
     (result.second && result.second.summary);
 
   return (
@@ -180,6 +255,30 @@ export default function ReviewResultModal({ result, onClose, onOpenFixChat }) {
 
         {expanded && (
           <div className="max-h-64 space-y-4 overflow-y-auto rounded-lg border border-slate-800 bg-slate-950/50 p-3 text-sm">
+            {problem && (
+              <div>
+                <p className="mb-1.5 text-xs font-bold uppercase tracking-wide text-slate-400">
+                  What went wrong
+                </p>
+                <p className="leading-relaxed text-slate-300">{problem.cause}</p>
+                {problem.raw && (
+                  <p className="mt-2 break-words rounded border border-slate-800 bg-slate-900 px-2 py-1 font-mono text-[11px] text-rose-300">
+                    {problem.raw}
+                  </p>
+                )}
+                <p className="mb-1.5 mt-3 text-xs font-bold uppercase tracking-wide text-slate-400">
+                  How to fix it
+                </p>
+                <ul className="space-y-1.5">
+                  {problem.fixes.map((f, i) => (
+                    <li key={i} className="flex gap-2 text-slate-300">
+                      <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-tbc-400" />
+                      <span className="leading-relaxed">{f}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             {findings.length > 0 && (
               <div>
                 <p className="mb-1.5 text-xs font-bold uppercase tracking-wide text-slate-400">
@@ -227,6 +326,16 @@ export default function ReviewResultModal({ result, onClose, onOpenFixChat }) {
             >
               <Wrench className="mr-1.5 h-4 w-4" />
               Open fix chat
+            </Button>
+          )}
+          {canFixProblem && (
+            <Button
+              variant="outline"
+              onClick={() => { onFixProblem(problem, result); onClose(); }}
+              className="border-rose-500/40 bg-rose-500/10 text-rose-200 hover:bg-rose-500/20"
+            >
+              <Wrench className="mr-1.5 h-4 w-4" />
+              Fix problem
             </Button>
           )}
           <Button
