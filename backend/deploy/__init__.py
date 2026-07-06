@@ -8,3 +8,5 @@ Imported for side-effects at the end of `deploy_projects_ext.setup_routers()`:
 each module hangs its endpoints off the shared `ops_router` / `projects_router`
 defined in the parent module.
 """
+
+__all__ = ['auto_fix', 'autopilot', 'code_review']
