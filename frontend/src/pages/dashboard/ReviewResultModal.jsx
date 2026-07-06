@@ -34,6 +34,12 @@ function classify(result) {
       ? { tone: 'yellow', headline: 'Deployed — shipped despite review' }
       : { tone: 'green', headline: 'Deployed — shipped' };
   }
+  if (result.kind === 'fix') {
+    if (!result.ok) return { tone: 'red', headline: 'Fix failed' };
+    if (result.mode === 'noop') return { tone: 'yellow', headline: 'No code change needed' };
+    if (result.mode === 'pr') return { tone: 'green', headline: 'Fix ready — PR opened' };
+    return { tone: 'green', headline: 'Fixed & redeployed' };
+  }
   switch (result.verdict) {
     case 'ship':
     case 'ok':
@@ -170,11 +176,15 @@ export default function ReviewResultModal({ result, onClose, onOpenFixChat, onFi
   const { Icon } = tone;
   const isReview = result.kind === 'review';
   const isDeploy = result.kind === 'deploy';
+  const isFix = result.kind === 'fix';
   const title = isReview
     ? 'Code review result'
     : isDeploy
       ? 'Deploy result'
-      : 'Health check result';
+      : isFix
+        ? 'Fix result'
+        : 'Health check result';
+  const changed = isFix ? (result.changed || []) : [];
 
   const findings = isReview ? (result.findings || []) : [];
   const concerns = isReview ? (result.second?.concerns || []) : [];
@@ -238,6 +248,41 @@ export default function ReviewResultModal({ result, onClose, onOpenFixChat, onFi
         )}
         {!isReview && result.url && (
           <p className="truncate text-xs text-slate-500">{result.url}</p>
+        )}
+
+        {/* Fix result: show which files the AI actually changed + a link to
+            the PR (platform repo) or the redeployed live app. */}
+        {isFix && changed.length > 0 && (
+          <div>
+            <p className="mb-1.5 text-xs font-bold uppercase tracking-wide text-slate-400">
+              Files changed ({changed.length})
+            </p>
+            <ul className="max-h-40 space-y-1 overflow-y-auto">
+              {changed.map((p, i) => (
+                <li key={i} className="truncate font-mono text-xs text-slate-300">{p}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {isFix && result.prUrl && (
+          <a
+            href={result.prUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex w-fit items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800/60 px-3 py-1.5 text-xs font-semibold text-tbc-200 transition hover:bg-slate-800"
+          >
+            Review PR #{result.prNumber}
+          </a>
+        )}
+        {isFix && result.deployUrl && (
+          <a
+            href={result.deployUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="truncate text-xs text-tbc-300 underline"
+          >
+            {result.deployUrl}
+          </a>
         )}
 
         {/* Read full explanation toggle. */}

@@ -286,6 +286,77 @@ async def _read_repo_files(
     return files
 
 
+async def generate_ai_code_fix(
+    repo: str,
+    branch: str,
+    instruction: str,
+    gh_token: str,
+    *,
+    provider: str,
+    model: str,
+) -> dict:
+    """Read the live app source, hand it + a fix instruction to the LLM, and
+    return the changed files — WITHOUT committing.
+
+    This is the shared "act, don't just explain" brain behind the Fix problem
+    button and the chat iterate loop: it reads the actual repo, produces real
+    file edits, and returns ``{'changed': {path: new_content}, 'notes': str,
+    'read': int}``. Committing / opening a PR / redeploying is left to the
+    caller so the write target (main vs a PR branch) stays a policy decision.
+
+    Uses the sandbox edit envelope (strict JSON `{files:[{path,new_content}]}`),
+    the same contract the chat apply loop relies on, so any current model
+    (Claude / GPT / Gemini / OpenRouter) can drive it.
+    """
+    from sandbox_ai_ext import SYSTEM_PROMPT, _strip_json_envelope
+    from llm_router import LlmChat, UserMessage
+
+    async with httpx.AsyncClient(timeout=45.0) as client:
+        files = await _read_repo_files(client, gh_token, repo, branch)
+    if not files:
+        raise HTTPException(502, 'Could not read the current app files from the repo.')
+
+    parts = [
+        f'INSTRUCTION:\n{instruction.strip()}\n',
+        f'EDIT MODE: multi — you may modify ANY of the {len(files)} files below. '
+        'Return the COMPLETE new content for every file you change. Produce the '
+        'actual code fix; do NOT reply with a checklist of manual steps.',
+    ]
+    for path, content in files.items():
+        parts.append(f'\n--- FILE: {path} ---\n{content}')
+    user_text = '\n'.join(parts)
+
+    chat = LlmChat(
+        api_key='',
+        session_id=f'fix:{repo}',
+        system_message=SYSTEM_PROMPT,
+        max_tokens=8192,
+    ).with_model(provider, model)
+    try:
+        raw = await chat.send_message(UserMessage(text=user_text))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f'AI edit failed: {str(e)[:200]}') from e
+
+    raw_text = raw if isinstance(raw, str) else getattr(raw, 'text', '') or str(raw)
+    import json as _json
+    try:
+        parsed = _json.loads(_strip_json_envelope(raw_text))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, 'The model did not return a valid edit. Try again.') from e
+
+    changed: dict[str, str] = {}
+    for entry in parsed.get('files', []) or []:
+        p = (entry.get('path') or '').strip().lstrip('./')
+        nc = entry.get('new_content')
+        if p and isinstance(nc, str) and not _is_blocked(p):
+            changed[p] = nc
+    return {
+        'changed': changed,
+        'notes': (parsed.get('notes') or '')[:500],
+        'read': len(files),
+    }
+
+
 async def _poll_deployment_ready(settings: dict, deployment_id: str) -> dict:
     """Poll a deployment until it reaches a terminal state or we time out."""
     token = vercel_token(settings)

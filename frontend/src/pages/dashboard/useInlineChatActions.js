@@ -19,7 +19,7 @@ import api from '../../lib/api';
  * version — no behaviour change, only a relocation.
  */
 export function useInlineChatActions({ navigate, messages, currentId, showResult }) {
-  return useCallback(async (kind) => {
+  return useCallback(async (kind, payload = {}) => {
     // `fix-errors` deep-links to AI Build (which has its own project
     // picker) — no need to enforce projectId here. The other actions
     // hit `/operator/deploy/{id}/*` and DO need a project selected.
@@ -296,6 +296,57 @@ export function useInlineChatActions({ navigate, messages, currentId, showResult
           second,
           promotedBySecond: data?.verdict_promoted_by === 'second_opinion',
           fixSession: data?.fix_chat_session_id,
+        });
+      } else if (kind === 'fix') {
+        // The real "Fix problem" action: instead of posting a message into
+        // the chat AI (which can only TALK), this reads the project repo,
+        // has the AI edit the actual code, commits it and redeploys — or
+        // opens a PR when the target is the live platform repo. `payload`
+        // carries the problem description assembled from the failed
+        // deploy / health result (error + likely cause + suggested fixes).
+        const instruction = (payload?.instruction || '').trim();
+        if (!instruction) {
+          toast.error('Nothing to fix — no problem description was provided.');
+          return;
+        }
+        const t = toast.loading('AI is fixing the app… (reading code, editing, redeploying)');
+        let data;
+        try {
+          ({ data } = await api.post(`/operator/deploy/${projectId}/fix`, { instruction }));
+        } finally {
+          toast.dismiss(t);
+        }
+        if (data?.mode === 'noop') {
+          toast.message(data?.notes || 'The AI determined no code change was needed.');
+        } else if (data?.mode === 'pr') {
+          toast.success(data?.message || 'Opened a PR with the fix.', {
+            duration: Infinity,
+            action: data?.pr_url
+              ? { label: `Review PR #${data.pr_number}`, onClick: () => window.open(data.pr_url, '_blank', 'noopener') }
+              : undefined,
+          });
+        } else {
+          toast.success(data?.message || 'Applied the fix and redeployed.', {
+            duration: 10000,
+            action: data?.deploy_url
+              ? { label: 'Open app', onClick: () => window.open(data.deploy_url, '_blank', 'noopener') }
+              : undefined,
+          });
+        }
+        showResult?.({
+          kind: 'fix',
+          ok: true,
+          mode: data?.mode,
+          changed: data?.changed || [],
+          notes: data?.notes,
+          prUrl: data?.pr_url,
+          prNumber: data?.pr_number,
+          deployUrl: data?.deploy_url,
+          state: data?.state,
+          summary: data?.message
+            || (data?.mode === 'noop'
+              ? (data?.notes || 'No code change was needed.')
+              : `Fixed ${(data?.changed || []).length} file(s).`),
         });
       } else if (kind === 'health') {
         const t = toast.loading('Running health check…');

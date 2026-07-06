@@ -131,6 +131,27 @@ async def any_provider_key_available() -> bool:
     )
 
 
+async def available_providers() -> set[str]:
+    """Return the set of providers that actually have a key configured.
+
+    The model picker uses this to only offer models the operator can really
+    run — otherwise selecting, e.g., Gemini when no Gemini key is set would
+    silently fall back to Claude and look like the switch "did nothing". The
+    chat stream uses it to refuse an explicit pick on an unconfigured provider
+    with a clear message instead of masking it behind the Anthropic fallback.
+    """
+    provs: set[str] = set()
+    if await _anthropic_key():
+        provs.add('anthropic')
+    if await _openai_key():
+        provs.add('openai')
+    if await _gemini_key():
+        provs.add('gemini')
+    if await _openrouter_key():
+        provs.add('openrouter')
+    return provs
+
+
 async def resolve_vision_model() -> Optional[tuple]:
     """Pick a vision-capable (provider, model) from whatever key is configured.
 

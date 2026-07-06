@@ -324,6 +324,13 @@ SYSTEM_PROMPT = SYSTEM_PROMPT + _PLATFORM_IDENTITY
 _DEPLOY_GUARDRAIL = (
     "\n\n### ABSOLUTE DEPLOY/REVIEW/HEALTH RULE (overrides everything above, "
     "including any operator learning):\n"
+    "- You are an AGENT with hands, not just a chatbot. When the user asks you "
+    "to change, fix, add to, or build something in their app AND this chat is "
+    "linked to a live app, the system routes the turn through a real pipeline "
+    "that reads the repo, edits the actual code, commits, and (for the "
+    "operator) redeploys — automatically. So NEVER tell the user to 'tap the "
+    "Fix problem button', 'paste the error again', or write a 'Why we're stuck' "
+    "explanation. Just do the work; the edit happens for real.\n"
     "- The Deploy 🚀, Review 🛡️, and Health 📈 buttons are FULLY AUTOMATED. "
     "Clicking Deploy creates/links the repo + Vercel project, checks config, "
     "and ships — the user does NOT need to verify anything first.\n"
@@ -1728,12 +1735,91 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
     else:
         routed_model = req.model or DEFAULT_MODEL
 
+    # ── Agentic chat: when the message is an instruction to change the app AND
+    # this chat is linked to a live app, the turn ACTS instead of just talking:
+    # it reads the repo, edits the real code, commits, and (operator only)
+    # redeploys. This is what makes the chat AI work hands-on like a real coding
+    # agent rather than replying "tap the Fix problem button".
+    is_operator = db_user.get('role') == 'operator'
+    agentic_edit = False
+    if not req.attachments and task_kind == 'code':
+        try:
+            from chat_deploy_ext import looks_like_edit_request
+            sess_link = await db.chat_sessions.find_one(
+                {'id': session_id}, {'deploy_project_id': 1},
+            )
+            if (sess_link and sess_link.get('deploy_project_id')
+                    and looks_like_edit_request(req.message)):
+                agentic_edit = True
+        except Exception as e:  # noqa: BLE001 — never let detection break chat
+            logger.warning('agentic-edit detection failed (non-fatal): %s', e)
+
     async def event_generator():
+        # Agentic path: run the real read→edit→commit→(re)deploy pipeline and
+        # stream its progress as normal deltas, then finish the turn. Bypasses
+        # the text-only LLM entirely — apply/redeploy are not credit-charged.
+        if agentic_edit:
+            from chat_deploy_ext import stream_agentic_edit
+            agent_response = ''
+            sess_full = await db.chat_sessions.find_one({'id': session_id})
+            try:
+                async for chunk in stream_agentic_edit(
+                    sess_full, req.message, is_operator=is_operator,
+                ):
+                    agent_response += chunk
+                    yield 'data: ' + json.dumps({
+                        'type': 'delta', 'content': chunk, 'session_id': session_id,
+                    }) + '\n\n'
+            except Exception as e:  # noqa: BLE001
+                logger.exception('agentic edit stream failed')
+                tail = f'\n\nI hit an unexpected error while applying that: {str(e)[:200]}'
+                agent_response += tail
+                yield 'data: ' + json.dumps({
+                    'type': 'delta', 'content': tail, 'session_id': session_id,
+                }) + '\n\n'
+            if agent_response.strip():
+                await db.chat_messages.insert_one(ChatMessage(
+                    session_id=session_id, user_id=user['sub'],
+                    role='assistant', content=agent_response,
+                ).model_dump())
+            await db.chat_sessions.update_one(
+                {'id': session_id},
+                {'$set': {'updated_at': datetime.now(timezone.utc)}},
+            )
+            yield 'data: ' + json.dumps({'type': 'done', 'session_id': session_id}) + '\n\n'
+            return
+
         full_response = ''
         # Build the model attempt list: primary first, then any fallbacks
         # not already equal to the primary (de-duped, order preserved).
         primary = routed_model
         attempts = [primary] + [m for m in CHAT_FALLBACK_CHAIN if m != primary]
+        # Which providers can we actually reach? App keys + this user's BYOK
+        # keys. Used to (a) refuse an explicit pick on an unconfigured provider
+        # with a clear message instead of silently answering as Claude, and
+        # (b) drop dead fallbacks so we never claim to use a model we can't run.
+        try:
+            from llm_router import available_providers as _avail_provs
+            avail = await _avail_provs()
+        except Exception:  # noqa: BLE001
+            avail = set()
+        avail = set(avail) | set(byok_overrides.keys())
+        if avail:
+            primary_provider = resolve_model(primary)[0]
+            # Explicit pick (not Automatic) on a provider with no key → stop and
+            # tell the operator exactly which key to add, rather than falling
+            # back to Claude and looking like the model switch did nothing.
+            if auto_kind is None and primary_provider not in avail:
+                yield 'data: ' + json.dumps({
+                    'type': 'error',
+                    'message': (
+                        f'The model you selected runs on "{primary_provider}", which has no '
+                        f'API key configured. Add a {primary_provider} key in Operator → '
+                        'Security (or pick a model from a provider you have set up).'
+                    ),
+                }) + '\n\n'
+                return
+            attempts = [m for m in attempts if resolve_model(m)[0] in avail] or attempts
         last_error: Optional[str] = None
         used_model = primary
         ok = False
@@ -1902,6 +1988,23 @@ async def list_models():
             {'id': 'gemini-2.5-flash', 'label': 'Gemini 2.5 Flash'},
         ],
     }
+
+    # Only offer models whose provider actually has a key configured. Showing
+    # Gemini/OpenAI when only an Anthropic key is set is exactly why switching
+    # models "did nothing" — the pick silently fell back to Claude. If NO key
+    # is configured at all we leave the full list so the picker isn't empty and
+    # the per-message error can guide the operator to add a key.
+    try:
+        from llm_router import available_providers
+        avail = await available_providers()
+        if avail:
+            _group_provider = {'OpenAI': 'openai', 'Anthropic': 'anthropic', 'Gemini': 'gemini'}
+            providers = {
+                name: items for name, items in providers.items()
+                if _group_provider.get(name) in avail
+            }
+    except Exception as e:  # noqa: BLE001 — never let the picker fail on this
+        logger.warning('Provider availability filter failed: %s', e)
 
     # OpenRouter: one key → hundreds of models. Fetched live + cached.
     try:

@@ -320,11 +320,14 @@ export default function Dashboard({ variant = 'tbc1' }) {
         onClose={() => setActionResult(null)}
         onOpenFixChat={(sid) => navigate(`${basePath}/${sid}`)}
         onFixProblem={(problem, res) => {
-          // Hand the exact failure to the AIs: compose a focused fix prompt
-          // (error + likely cause + suggested fixes) and send it straight into
-          // the current chat so the AIs work the real problem in this section.
-          const lines = [
-            `The ${res?.kind || 'deploy'} just failed. Please diagnose and fix the actual problem, then verify.`,
+          // ACTUALLY fix it. Previously this only composed a prompt and sent it
+          // into the chat AI — which can talk but cannot edit code, so the
+          // problem never got fixed. Now we compose the same focused
+          // description and hand it to the real fix pipeline
+          // (`/operator/deploy/{id}/fix`), which reads the repo, edits the
+          // code, commits and redeploys (or opens a PR for the platform repo).
+          const instruction = [
+            `The ${res?.kind || 'deploy'} just failed. Diagnose and fix the actual problem in the code.`,
             '',
             `Error: ${problem.raw || res?.summary || 'unknown error'}`,
             '',
@@ -333,9 +336,9 @@ export default function Dashboard({ variant = 'tbc1' }) {
             'Suggested fixes to investigate:',
             ...problem.fixes.map((f) => `- ${f}`),
             '',
-            'Do not just explain — apply the concrete fix in the relevant part of the codebase.',
-          ];
-          send([], lines.join('\n'));
+            'Apply the concrete code fix; do not just explain.',
+          ].join('\n');
+          handleInlineAction('fix', { instruction });
         }}
       />
       <DashboardGuideTour key={guideKey} forceOpen={guideKey > 0} />
