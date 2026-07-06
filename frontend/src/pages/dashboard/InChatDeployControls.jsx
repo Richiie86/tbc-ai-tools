@@ -171,8 +171,25 @@ export function InChatDeployControls({ user }) {
     const trimmed = next.trim();
     if (!trimmed || trimmed === current) return;
     try {
-      await api.patch(`/operator/deploy/${p.id}`, { projectName: trimmed });
-      toast.success(`Renamed to “${trimmed}”`);
+      const { data } = await api.patch(`/operator/deploy/${p.id}`, { projectName: trimmed });
+      const sync = data?.vercel_sync;
+      if (sync?.ok) {
+        toast.success(`Renamed to “${trimmed}” — Vercel project set to “${sync.slug}”`);
+      } else if (sync && sync.reason === 'no_vercel_project') {
+        toast.success(`Renamed to “${trimmed}”`, {
+          description: 'Deploy once to link a Vercel project — the name will sync then.',
+        });
+      } else if (sync && sync.reason === 'no_token') {
+        toast.success(`Renamed to “${trimmed}”`, {
+          description: 'Add your Vercel token in Operator → Ops to also rename it on Vercel.',
+        });
+      } else if (sync && !sync.ok) {
+        toast.success(`Renamed to “${trimmed}” here`, {
+          description: `Vercel didn’t accept the rename: ${sync.reason || 'unknown'}`,
+        });
+      } else {
+        toast.success(`Renamed to “${trimmed}”`);
+      }
       setProjects((prev) => prev.map((x) => (x.id === p.id ? { ...x, projectName: trimmed } : x)));
     } catch (err) {
       toast.error(err?.response?.data?.detail || 'Rename failed');

@@ -55,6 +55,7 @@ from vercel_api_ext import (
     vercel_get_deployment as _vercel_get_deployment,
     vercel_promote_to_production as _vercel_promote_to_production,
     vercel_redeploy as _vercel_redeploy,
+    vercel_rename_project as _vercel_rename_project,
     vercel_team_qs as _vercel_team_qs,
     vercel_token as _vercel_token,
 )
@@ -1391,10 +1392,13 @@ async def op_patch_project_flags(
         update['auto_heal'] = bool(payload.auto_heal)
     if payload.auto_rollback is not None:
         update['auto_rollback'] = bool(payload.auto_rollback)
+    renamed_to = None
     if payload.projectName is not None:
         new_name = payload.projectName.strip()
         if not new_name:
             raise HTTPException(400, 'Project name cannot be empty')
+        if new_name != (project.get('projectName') or ''):
+            renamed_to = new_name
         update['projectName'] = new_name
     if payload.repo is not None:
         update['repo'] = payload.repo.strip()
@@ -1402,7 +1406,33 @@ async def op_patch_project_flags(
         update['gitRef'] = payload.gitRef.strip() or None
     await db.deploy_projects.update_one({'id': project_id}, {'$set': update})
     fresh = await db.deploy_projects.find_one({'id': project_id})
-    return _project_to_out(fresh)
+
+    # Push the new name to the REAL Vercel project too, so a rename in our UI
+    # actually shows up in the Vercel dashboard (previously the name only lived
+    # in Mongo — hence "Vercel doesn't have the name"). We resolve the Vercel
+    # project conservatively (stored id, else name lookup) so a rename never
+    # accidentally CREATES a project. Best-effort: a Vercel hiccup or missing
+    # token must never fail the in-app rename.
+    vercel_sync = None
+    if renamed_to:
+        try:
+            settings = await get_settings_doc()
+            target = (fresh or {}).get('vercel_project_id')
+            if not target:
+                old_slug = _slugify((project or {}).get('projectName') or '')
+                target = await _vercel_find_project_id(settings, old_slug) if old_slug else None
+            if target:
+                vercel_sync = await _vercel_rename_project(settings, target, renamed_to)
+            else:
+                vercel_sync = {'ok': False, 'reason': 'no_vercel_project'}
+        except Exception as e:  # never block the rename on a Vercel error
+            logger.warning('Vercel rename sync failed for %s: %s', project_id, e)
+            vercel_sync = {'ok': False, 'reason': str(e)[:200]}
+
+    out = _project_to_out(fresh)
+    if vercel_sync is not None and isinstance(out, dict):
+        out['vercel_sync'] = vercel_sync
+    return out
 
 
 @ops_router.post('/{project_id}/rollback')

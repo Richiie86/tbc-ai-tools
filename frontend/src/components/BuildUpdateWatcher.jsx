@@ -42,30 +42,45 @@ export default function BuildUpdateWatcher() {
       if (main) currentHashRef.current = main.replace(/^https?:\/\/[^/]+/, '');
     };
 
-    const checkForUpdate = async () => {
+    // Returns true when the origin is serving a bundle different from the one
+    // this tab is running (i.e. a deploy happened since page load).
+    const isStale = async () => {
+      // cache:no-store guarantees we hit the origin, not the browser cache,
+      // so we truly see the latest deployed index.html.
+      const res = await fetch(`/?_v=${Date.now()}`, {
+        cache: 'no-store',
+        headers: { 'x-build-check': '1' },
+      });
+      if (!res.ok) return false;
+      const html = await res.text();
+      const latest = parseBundle(html);
+      if (!latest || !currentHashRef.current) return false;
+      return latest !== currentHashRef.current;
+    };
+
+    // `auto` (used when a frozen/backgrounded tab is being restored) reloads
+    // immediately with NO prompt — the user just came back to a stale tab and
+    // has no in-progress work to lose, so the safest thing is to hand them the
+    // latest build straight away. Interactive checks keep the one-tap toast so
+    // we never yank the page out from under someone who's mid-task.
+    const checkForUpdate = async ({ auto = false } = {}) => {
       if (cancelled || notifiedRef.current) return;
       try {
-        // cache:no-store guarantees we hit the origin, not the browser cache,
-        // so we truly see the latest deployed index.html.
-        const res = await fetch(`/?_v=${Date.now()}`, {
-          cache: 'no-store',
-          headers: { 'x-build-check': '1' },
-        });
-        if (!res.ok) return;
-        const html = await res.text();
-        const latest = parseBundle(html);
-        if (!latest || !currentHashRef.current) return;
-        if (latest !== currentHashRef.current) {
+        if (!(await isStale())) return;
+        if (auto) {
           notifiedRef.current = true;
-          toast('A new version of TBC AI Tools is available', {
-            description: 'Reload to get the latest features and fixes.',
-            duration: Infinity,
-            action: {
-              label: 'Reload',
-              onClick: () => window.location.reload(true),
-            },
-          });
+          window.location.reload(true);
+          return;
         }
+        notifiedRef.current = true;
+        toast('A new version of TBC AI Tools is available', {
+          description: 'Reload to get the latest features and fixes.',
+          duration: Infinity,
+          action: {
+            label: 'Reload',
+            onClick: () => window.location.reload(true),
+          },
+        });
       } catch {
         // Offline or transient network error — ignore and retry next tick.
       }
@@ -84,7 +99,7 @@ export default function BuildUpdateWatcher() {
     // back/forward cache (bfcache). Mobile Chrome freezes background tabs this
     // way, so a user with many open tabs restores a stale page WITHOUT any
     // network fetch — this is the main reason shipped features stayed invisible.
-    const onPageShow = (e) => { if (e.persisted) checkForUpdate(); };
+    const onPageShow = (e) => { if (e.persisted) checkForUpdate({ auto: true }); };
     window.addEventListener('focus', onFocus);
     document.addEventListener('visibilitychange', onVisibility);
     window.addEventListener('pageshow', onPageShow);

@@ -297,6 +297,59 @@ async def vercel_find_project_id(settings: dict, name: str) -> Optional[str]:
         return None
 
 
+def vercel_name_slug(name: str) -> str:
+    """Turn a human project name into a Vercel-legal project slug.
+
+    Vercel project names must be lowercase, <=100 chars, and contain only
+    letters, digits, '.', '_' and '-' (no spaces, no leading/trailing or
+    doubled separators). We keep the pretty name in Mongo and only send this
+    slug to Vercel so a rename like "My Landing Page" becomes "my-landing-page".
+    """
+    import re
+    s = (name or '').strip().lower()
+    s = re.sub(r'[^a-z0-9._-]+', '-', s)   # collapse illegal runs into a hyphen
+    s = re.sub(r'-{2,}', '-', s)            # no doubled hyphens
+    s = s.strip('-._')                      # no leading/trailing separators
+    return s[:100] or 'project'
+
+
+async def vercel_rename_project(
+    settings: dict, id_or_name: str, new_name: str,
+) -> dict:
+    """Rename the real Vercel project via `PATCH /v9/projects/{idOrName}`.
+
+    This is what makes an in-app rename actually show up in the Vercel
+    dashboard (previously the new name only lived in our Mongo record, so
+    "Vercel doesn't have the name"). We send a slugified `name` because Vercel
+    rejects spaces/uppercase. Best-effort by design: returns a small status
+    dict instead of throwing on a soft failure, so a rename in our UI never
+    hard-fails just because the Vercel side hiccupped.
+    """
+    token = vercel_token(settings)
+    if not token:
+        return {'ok': False, 'reason': 'no_token'}
+    if not (id_or_name or '').strip():
+        return {'ok': False, 'reason': 'no_project'}
+    slug = vercel_name_slug(new_name)
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            r = await client.patch(
+                f'{VERCEL_API}/v9/projects/{id_or_name.strip()}',
+                params=vercel_team_qs(settings),
+                headers={'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'},
+                json={'name': slug},
+            )
+        if r.status_code >= 400:
+            try:
+                msg = r.json().get('error', {}).get('message') or r.text[:200]
+            except Exception:
+                msg = r.text[:200]
+            return {'ok': False, 'reason': msg, 'status': r.status_code, 'slug': slug}
+        return {'ok': True, 'slug': slug, 'project': r.json()}
+    except Exception as e:  # network / timeout — non-fatal
+        return {'ok': False, 'reason': str(e)[:200], 'slug': slug}
+
+
 async def vercel_promote_to_production(
     settings: dict, project_vercel_id: str, deployment_id: str,
 ) -> dict:
