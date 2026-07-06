@@ -401,10 +401,13 @@ function StatusLine({ ok, okText, badText }) {
 
 /**
  * One-click "Fix DNS" — re-points a Porkbun domain at Vercel via
- * POST /operator/porkbun/point-to-vercel, which now also strips Porkbun's
- * default parking records (ALIAS/CNAME → *.porkbun.com) + URL forwarding that
- * otherwise keep serving the "A Brand New Domain!" page. Use this on a domain
- * that was already launched but is stuck on the parking page.
+ * POST /operator/porkbun/point-to-vercel, which:
+ *   1. strips Porkbun's parking records (ALIAS/CNAME → *.porkbun.com) + URL
+ *      forwarding that serve the "A Brand New Domain!" page, and
+ *   2. attaches the domain to its Vercel project so Vercel issues the SSL
+ *      certificate (fixes the "Not secure" / ERR_CERT_COMMON_NAME_INVALID
+ *      warning — DNS alone never provisions HTTPS).
+ * Use this on a domain that's stuck on the parking page OR showing "Not secure".
  */
 function FixDnsButton({ domain, testid, onDone }) {
   const [busy, setBusy] = useState(false);
@@ -417,12 +420,20 @@ function FixDnsButton({ domain, testid, onDone }) {
         { params: { domain } },
       );
       const cleared = data?.parking_cleared || [];
-      if (cleared.length) {
+      const clearedNote = cleared.length
+        ? ` Cleared ${cleared.length} parking record${cleared.length === 1 ? '' : 's'}.`
+        : '';
+      if (data?.ssl_requested) {
+        // Both steps succeeded: DNS pointed AND SSL issuance kicked off.
         toast.success(
-          `DNS re-pointed at Vercel — cleared ${cleared.length} parking record${cleared.length === 1 ? '' : 's'}. Live in a few minutes.`,
+          `DNS pointed + SSL requested for ${domain}.${clearedNote} HTTPS goes live in a few minutes.`,
         );
+      } else if (data?.ssl_error) {
+        // DNS worked but Vercel couldn't be attached — surface why so HTTPS
+        // doesn't silently stay broken.
+        toast.warning(`DNS pointed, but SSL not issued: ${data.ssl_error}`, { duration: 8000 });
       } else {
-        toast.success(`DNS re-pointed at Vercel (${data?.record || domain}). Live in a few minutes.`);
+        toast.success(`DNS re-pointed at Vercel (${data?.record || domain}).${clearedNote} Live in a few minutes.`);
       }
       onDone?.();
     } catch (e) {
@@ -437,7 +448,7 @@ function FixDnsButton({ domain, testid, onDone }) {
       onClick={fix}
       disabled={busy}
       data-testid={testid}
-      title="Re-point this domain at Vercel and remove Porkbun's parking page"
+      title="Re-point this domain at Vercel, remove Porkbun's parking page, and request its SSL certificate"
       className="inline-flex items-center gap-1 rounded-md border border-tbc-500/40 bg-tbc-500/10 px-2 py-1 text-xs font-semibold text-tbc-200 hover:bg-tbc-500/20 disabled:opacity-60"
     >
       {busy

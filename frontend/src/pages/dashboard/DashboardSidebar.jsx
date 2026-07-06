@@ -31,6 +31,19 @@ export function DashboardSidebar({
   const [renameTarget, setRenameTarget] = React.useState(null);
   const [renameValue, setRenameValue] = React.useState('');
 
+  // "New session" naming dialog — lets the user name a project up front instead
+  // of always creating an untitled "New Chat" they have to rename afterward.
+  const [newOpen, setNewOpen] = React.useState(false);
+  const [newName, setNewName] = React.useState('');
+
+  const submitNew = () => {
+    // Name is optional: an empty value falls back to the default title inside
+    // newChat, so the button still "just works" for anyone who skips naming.
+    newChat(newName.trim());
+    setNewName('');
+    setNewOpen(false);
+  };
+
   const openRename = (s) => { setRenameTarget(s); setRenameValue(s.title || ''); };
   const submitRename = () => {
     if (renameTarget && renameValue.trim()) {
@@ -58,7 +71,7 @@ export function DashboardSidebar({
       </div>
 
       <div className="p-3">
-        <Button onClick={newChat} className="w-full justify-start gap-2 bg-tbc-500 text-slate-950 hover:bg-tbc-400 font-semibold">
+        <Button onClick={() => { setNewName(''); setNewOpen(true); }} className="w-full justify-start gap-2 bg-tbc-500 text-slate-950 hover:bg-tbc-400 font-semibold">
           <Plus className="h-4 w-4" /> New session
         </Button>
       </div>
@@ -179,6 +192,45 @@ export function DashboardSidebar({
           <ShieldCheck className="h-3.5 w-3.5" /> Sign out everywhere
         </button>
       </div>
+
+      {/* New session naming pop-up — name is optional (blank = "New Chat"). */}
+      <Dialog open={newOpen} onOpenChange={(open) => { if (!open) { setNewOpen(false); setNewName(''); } }}>
+        <DialogContent className="border-slate-800 bg-slate-900 text-slate-100 sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Name your project</DialogTitle>
+          </DialogHeader>
+          <Input
+            autoFocus
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.nativeEvent.isComposing && e.keyCode !== 229) {
+                e.preventDefault();
+                submitNew();
+              }
+            }}
+            placeholder="e.g. My landing page (optional)"
+            maxLength={120}
+            className="border-slate-700 bg-slate-800 text-slate-100 placeholder:text-slate-500"
+            aria-label="New project name"
+          />
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              onClick={() => { setNewOpen(false); setNewName(''); }}
+              className="text-slate-300 hover:bg-slate-800 hover:text-white"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={submitNew}
+              className="bg-tbc-500 font-semibold text-slate-950 hover:bg-tbc-400"
+            >
+              Create
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Rename project pop-up */}
       <Dialog open={!!renameTarget} onOpenChange={(open) => { if (!open) setRenameTarget(null); }}>

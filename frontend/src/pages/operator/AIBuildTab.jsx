@@ -1,13 +1,14 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import api from '../../lib/api';
+import api, { streamPost } from '../../lib/api';
 import { Button } from '../../components/ui/button';
+import { Input } from '../../components/ui/input';
 import { Textarea } from '../../components/ui/textarea';
 import { toast } from 'sonner';
 import ScreenshotThumb from '../../components/ScreenshotThumb';
 import {
   Wand2, Loader2, GitBranch, AlertTriangle, FileText, ExternalLink, X, History, ShieldAlert,
-  ShieldCheck, ShieldX, Eye, ScanEye,
+  ShieldCheck, ShieldX, Eye, ScanEye, Rocket, Sparkles, CheckCircle2, Globe,
 } from 'lucide-react';
 
 /**
@@ -28,6 +29,9 @@ import {
  */
 export default function AIBuildTab() {
   const [searchParams, setSearchParams] = useSearchParams();
+  // 'feature' = add a PR to an existing repo (original flow).
+  // 'new'     = originate a brand-new app end-to-end (App Builder pipeline).
+  const [mode, setMode] = useState('feature');
   const [projects, setProjects] = useState([]);
   const [projectId, setProjectId] = useState('');
   const [prompt, setPrompt] = useState('');
@@ -146,6 +150,30 @@ export default function AIBuildTab() {
 
   return (
     <div className="space-y-6" data-testid="ai-build-tab">
+      {/* MODE TOGGLE — Add feature (PR) vs Build a brand-new app */}
+      <div className="flex flex-wrap gap-2" data-testid="ai-build-mode-toggle">
+        <button
+          type="button"
+          onClick={() => setMode('feature')}
+          data-testid="ai-build-mode-feature"
+          className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold transition ${mode === 'feature' ? 'border-tbc-500 bg-tbc-500/10 text-tbc-100' : 'border-tbc-900/60 bg-ink-950 text-tbc-200/70 hover:text-tbc-100'}`}
+        >
+          <GitBranch className="h-4 w-4" /> Add feature to existing repo
+        </button>
+        <button
+          type="button"
+          onClick={() => setMode('new')}
+          data-testid="ai-build-mode-new"
+          className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold transition ${mode === 'new' ? 'border-emerald-500 bg-emerald-500/10 text-emerald-100' : 'border-tbc-900/60 bg-ink-950 text-tbc-200/70 hover:text-tbc-100'}`}
+        >
+          <Sparkles className="h-4 w-4" /> Build new app
+        </button>
+      </div>
+
+      {mode === 'new' && <BuildNewAppPanel />}
+
+      {mode === 'feature' && (
+      <>
       {/* SAFETY BANNER */}
       <div className="rounded-xl border border-amber-500/30 bg-amber-500/[0.05] px-4 py-3 text-[12px] text-amber-200/90">
         <ShieldAlert className="mr-1.5 inline h-4 w-4 -mt-0.5" />
@@ -360,6 +388,215 @@ export default function AIBuildTab() {
                 ) : (
                   <span className="shrink-0 text-[10px] uppercase text-tbc-200/40">{h.status}</span>
                 )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+      </>
+      )}
+    </div>
+  );
+}
+
+/** Build New App panel — originates a full app from a prompt and streams the
+ *  pipeline (plan → repo → deploy → domain) live via the App Builder SSE
+ *  endpoint. On success it links the live URL + repo. Reuses existing panel
+ *  styling; no new design system. */
+function BuildNewAppPanel() {
+  const [prompt, setPrompt] = useState('');
+  const [appName, setAppName] = useState('');
+  const [domain, setDomain] = useState('');
+  const [stack, setStack] = useState('auto');
+  const [building, setBuilding] = useState(false);
+  const [steps, setSteps] = useState([]);
+  const [result, setResult] = useState(null);
+  const [history, setHistory] = useState([]);
+
+  const loadHistory = useCallback(async () => {
+    try {
+      const { data } = await api.get('/operator/app-builder/history');
+      setHistory(data?.entries || []);
+    } catch { /* non-fatal */ }
+  }, []);
+  useEffect(() => { loadHistory(); }, [loadHistory]);
+
+  const build = async () => {
+    if (prompt.trim().length < 4) { toast.error('Describe the app to build (4+ chars)'); return; }
+    setBuilding(true);
+    setSteps([]);
+    setResult(null);
+    try {
+      for await (const ev of streamPost('/operator/app-builder/build', {
+        prompt: prompt.trim(),
+        app_name: appName.trim() || undefined,
+        domain: domain.trim() || undefined,
+        stack,
+      })) {
+        if (ev.step === 'error') {
+          setSteps((s) => [...s, { ...ev, error: true }]);
+          toast.error(ev.message || 'Build failed');
+          continue;
+        }
+        setSteps((s) => [...s, ev]);
+        if (ev.done && ev.result) {
+          setResult(ev.result);
+          toast.success('App built and deployed');
+          loadHistory();
+        }
+      }
+    } catch (e) {
+      toast.error(e?.message || 'Build failed');
+    } finally {
+      setBuilding(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6" data-testid="app-builder-panel">
+      <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/[0.05] px-4 py-3 text-[12px] text-emerald-200/90">
+        <Sparkles className="mr-1.5 inline h-4 w-4 -mt-0.5" />
+        Build a <strong>brand-new app</strong> from a prompt. This creates a
+        private repo, deploys it to Vercel, and optionally attaches a domain.
+      </div>
+
+      <section className="rounded-xl border border-tbc-900/60 bg-ink-900/40 p-5">
+        <h3 className="flex items-center gap-2 text-sm font-bold text-tbc-100">
+          <Wand2 className="h-4 w-4 text-tbc-300" /> Describe the app
+        </h3>
+        <div className="mt-3 space-y-3">
+          <div>
+            <label className="text-[10px] uppercase tracking-wider text-tbc-300">What should it do?</label>
+            <Textarea
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              placeholder="e.g. A landing page for a coffee subscription with a hero, features grid, pricing, and a waitlist email form."
+              rows={4}
+              maxLength={6000}
+              data-testid="app-builder-prompt"
+              className="mt-1 border-tbc-900/60 bg-ink-950 text-tbc-100"
+            />
+            <div className="mt-1 text-right text-[10px] text-tbc-200/50">{prompt.length} / 6000</div>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div>
+              <label className="text-[10px] uppercase tracking-wider text-tbc-300">App name (optional)</label>
+              <Input
+                value={appName}
+                onChange={(e) => setAppName(e.target.value)}
+                placeholder="Coffee Club"
+                maxLength={80}
+                data-testid="app-builder-name"
+                className="mt-1 border-tbc-900/60 bg-ink-950 text-tbc-100"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] uppercase tracking-wider text-tbc-300">Domain (optional)</label>
+              <Input
+                value={domain}
+                onChange={(e) => setDomain(e.target.value)}
+                placeholder="myapp.tbctools.org"
+                maxLength={253}
+                data-testid="app-builder-domain"
+                className="mt-1 border-tbc-900/60 bg-ink-950 text-tbc-100"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] uppercase tracking-wider text-tbc-300">Stack</label>
+              <select
+                value={stack}
+                onChange={(e) => setStack(e.target.value)}
+                data-testid="app-builder-stack"
+                className="mt-1 block w-full rounded-md border border-tbc-900/60 bg-ink-950 px-3 py-2 text-sm text-tbc-100"
+              >
+                <option value="auto">Auto (AI picks)</option>
+                <option value="nextjs">Next.js</option>
+                <option value="static">Static HTML/CSS/JS</option>
+              </select>
+            </div>
+          </div>
+          <Button
+            onClick={build}
+            disabled={building || prompt.trim().length < 4}
+            data-testid="app-builder-build"
+            className="bg-emerald-500 text-ink-950 hover:bg-emerald-400 font-bold"
+          >
+            {building ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Rocket className="mr-2 h-4 w-4" />}
+            {building ? 'Building…' : 'Build & deploy'}
+          </Button>
+        </div>
+      </section>
+
+      {steps.length > 0 && (
+        <section className="rounded-xl border border-tbc-900/60 bg-ink-900/40 p-5" data-testid="app-builder-steps">
+          <h3 className="text-sm font-bold text-tbc-100">Pipeline</h3>
+          <ul className="mt-3 space-y-1.5">
+            {steps.map((s, i) => (
+              <li key={i} className={`flex items-start gap-2 text-xs ${s.error ? 'text-rose-300' : 'text-tbc-200/80'}`}>
+                {s.error
+                  ? <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-rose-400" />
+                  : <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-400" />}
+                <span><span className="font-mono uppercase text-[10px] opacity-60">{s.step}</span> · {s.message}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {result && (
+        <section className="rounded-xl border border-emerald-500/30 bg-emerald-500/[0.04] p-5" data-testid="app-builder-result">
+          <h3 className="text-sm font-bold text-emerald-200">{result.app_name} is live</h3>
+          <p className="mt-1 text-[11px] text-emerald-200/60">
+            {result.stack} · {result.deployment_state}
+          </p>
+          <div className="mt-3 flex flex-wrap gap-3 text-xs">
+            {result.deploy_url && (
+              <a href={result.deploy_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-emerald-300 hover:text-emerald-100">
+                <ExternalLink className="h-3.5 w-3.5" /> Open app
+              </a>
+            )}
+            {result.repo_url && (
+              <a href={result.repo_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-tbc-300 hover:text-tbc-100">
+                <GitBranch className="h-3.5 w-3.5" /> {result.repo}
+              </a>
+            )}
+            {result.domain && (
+              <span className="inline-flex items-center gap-1 text-emerald-300">
+                <Globe className="h-3.5 w-3.5" /> {result.domain}
+              </span>
+            )}
+          </div>
+        </section>
+      )}
+
+      <section className="rounded-xl border border-tbc-900/60 bg-ink-900/40 p-5">
+        <h3 className="flex items-center gap-2 text-sm font-bold text-tbc-100">
+          <History className="h-4 w-4 text-tbc-300" /> Recently built apps
+        </h3>
+        {history.length === 0 ? (
+          <p className="mt-2 text-xs text-tbc-200/50">No apps built yet. Describe one above and click Build & deploy.</p>
+        ) : (
+          <ul className="mt-3 space-y-2" data-testid="app-builder-history">
+            {history.map((h) => (
+              <li key={h.project_id} className="flex items-start justify-between gap-3 rounded-md border border-tbc-900/60 bg-ink-950 px-3 py-2 text-xs">
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-tbc-100">{h.app_name}</div>
+                  <div className="mt-0.5 text-[10px] text-tbc-200/50">
+                    {new Date(h.created_at).toLocaleString()} · {h.stack} · {h.repo}
+                  </div>
+                </div>
+                <div className="flex shrink-0 items-center gap-3">
+                  {h.deploy_url && (
+                    <a href={h.deploy_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-emerald-300 hover:text-emerald-100">
+                      Open <ExternalLink className="h-3 w-3" />
+                    </a>
+                  )}
+                  {h.repo_url && (
+                    <a href={h.repo_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-tbc-300 hover:text-tbc-100">
+                      Repo <ExternalLink className="h-3 w-3" />
+                    </a>
+                  )}
+                </div>
               </li>
             ))}
           </ul>

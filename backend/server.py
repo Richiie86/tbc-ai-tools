@@ -2504,6 +2504,9 @@ from status_ext import router as status_router
 app.include_router(status_router)
 from ai_build_ext import router as ai_build_router
 app.include_router(ai_build_router)
+from app_builder_ext import operator_router as app_builder_op_router, agent_router as app_builder_agent_router
+app.include_router(app_builder_op_router)
+app.include_router(app_builder_agent_router)
 from ai_visual_verify_ext import router as ai_visual_verify_router
 app.include_router(ai_visual_verify_router)
 from porkbun_ext import router as porkbun_router  # noqa: E402

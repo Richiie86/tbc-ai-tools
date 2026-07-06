@@ -300,16 +300,79 @@ async def domain_in_porkbun(root: str) -> bool:
     return False
 
 
+async def _attach_to_vercel_for_ssl(domain: str) -> dict:
+    """Attach `domain` (apex + www) to its Vercel project so Vercel issues the
+    TLS certificate.
+
+    Pointing DNS at Vercel is NOT enough for HTTPS: Vercel only provisions a
+    Let's Encrypt cert for a domain that is *attached to a project*. Without
+    this step the browser gets Vercel's fallback cert and shows
+    NET::ERR_CERT_COMMON_NAME_INVALID ("Not secure"). We look up the project by
+    its stored domain and attach every host we point DNS for. Fully
+    best-effort — never raises, so a DNS-only success is still returned.
+    """
+    root, sub = _split_domain(domain)
+    targets = [root, f'www.{root}'] if sub in ('', 'www') else [domain]
+    result = {'ssl_requested': False, 'ssl_hosts': [], 'ssl_error': None}
+    try:
+        # Match the project that owns this domain (stored as apex or www).
+        proj = await db.deploy_projects.find_one(
+            {'domain': {'$in': [domain, root, f'www.{root}']}}
+        )
+        if not proj:
+            result['ssl_error'] = (
+                'DNS is pointed, but no project here claims this domain, so '
+                'Vercel can\'t issue its SSL certificate. Use "Use this domain" '
+                'to attach it to a project.'
+            )
+            return result
+        vpid = proj.get('vercel_project_id')
+        if not vpid:
+            result['ssl_error'] = (
+                'DNS is pointed, but the project has never been deployed to '
+                'Vercel yet, so there\'s no project to issue SSL against. '
+                'Deploy the project once, then Fix DNS again.'
+            )
+            return result
+        from payments_ext import get_settings_doc
+        from vercel_api_ext import vercel_attach_domain
+        settings = await get_settings_doc()
+        attached = []
+        for host in targets:
+            try:
+                await vercel_attach_domain(settings, vpid, host)
+                attached.append(host)
+            except HTTPException as e:
+                result['ssl_error'] = e.detail if isinstance(e.detail, str) else str(e.detail)
+            except Exception as e:  # pragma: no cover - network
+                result['ssl_error'] = f'Vercel attach failed: {e}'
+                logger.warning('point-to-vercel SSL attach failed for %s: %s', host, e)
+        result['ssl_hosts'] = attached
+        result['ssl_requested'] = bool(attached)
+    except Exception as e:  # pragma: no cover - never block DNS success
+        result['ssl_error'] = f'SSL provisioning skipped: {e}'
+        logger.warning('point-to-vercel SSL step error for %s: %s', domain, e)
+    return result
+
+
 @router.post('/point-to-vercel')
 async def porkbun_point_to_vercel(
     domain: str = Query(..., min_length=3),
     _: dict = Depends(get_current_operator),
 ):
-    """Manually (re)point a Porkbun domain at Vercel from the Domains tab."""
+    """Manually (re)point a Porkbun domain at Vercel from the Domains tab.
+
+    Two steps, both needed for a working HTTPS site:
+      1. Rewrite DNS (+ clear Porkbun's parking records) via configure_vercel_dns.
+      2. Attach the domain to its Vercel project so Vercel issues the TLS cert
+         — otherwise the browser shows "Not secure" (ERR_CERT_COMMON_NAME_INVALID).
+    """
     d = (domain or '').strip().lower()
     if '.' not in d or ' ' in d:
         raise HTTPException(400, 'Enter a full domain, e.g. app.example.com')
-    return await configure_vercel_dns(d)
+    dns = await configure_vercel_dns(d)
+    ssl = await _attach_to_vercel_for_ssl(d)
+    return {**dns, **ssl}
 
 
 @router.get('/status')

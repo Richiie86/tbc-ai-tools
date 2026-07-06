@@ -24,6 +24,45 @@ api.interceptors.response.use(
 
 export default api;
 
+// Generic SSE-over-fetch helper for operator streaming endpoints (e.g. the
+// App Builder pipeline). Yields each parsed `data:` frame. credentials:'include'
+// sends the httpOnly session cookie so operator auth works exactly like the
+// axios client above. `path` is relative to the /api base.
+export async function* streamPost(path, body) {
+  const res = await fetch(`${API}${path}`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body || {}),
+  });
+  if (!res.ok) {
+    let detail = 'Request failed';
+    try { const j = await res.json(); detail = j.detail || detail; } catch (e) {
+      console.warn('streamPost: non-JSON error body', e);
+    }
+    throw new Error(detail);
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const parts = buffer.split('\n\n');
+    buffer = parts.pop() || '';
+    for (const part of parts) {
+      const line = part.trim();
+      if (!line.startsWith('data:')) continue;
+      try {
+        yield JSON.parse(line.slice(5).trim());
+      } catch (e) {
+        console.warn('streamPost: skipped malformed SSE frame', e);
+      }
+    }
+  }
+}
+
 // Streaming helper for chat (SSE via fetch). credentials:'include' sends the cookie.
 export async function* streamChat({ session_id, message, model, variant, attachments }) {
   const res = await fetch(`${API}/chat/stream`, {
