@@ -914,6 +914,74 @@ async def _create_fix_review_chat(project: dict, review: dict, user_id: Optional
     return s.id
 
 
+def _looks_like_missing_project(detail) -> bool:
+    """True when a Vercel error detail looks like the target project no longer
+    exists — i.e. a stale `vercel_project_id` (common right after the operator
+    rebuilds/recreates the project). This is the signal that the deploy can
+    self-heal by re-linking or re-creating the Vercel project.
+    """
+    if isinstance(detail, str):
+        text = detail
+    elif isinstance(detail, dict):
+        text = ' '.join(str(v) for v in detail.values())
+    else:
+        text = str(detail or '')
+    text = text.lower()
+    needles = (
+        'not found', 'does not exist', 'no such project',
+        'could not find', 'not_found', 'project_not_found',
+    )
+    return any(n in text for n in needles)
+
+
+async def _reconcile_vercel_project(
+    project: dict, settings: dict, name_slug: str, git_ref: Optional[str],
+) -> Optional[str]:
+    """Re-link (or re-create) the Vercel project backing `project` and persist
+    the resolved id to Mongo. Returns the fresh `vercel_project_id`, or None if
+    it can't be reconciled (e.g. no repo configured, or Vercel refused).
+
+    Used to self-heal a stale project id: after a rebuild the Vercel project can
+    be deleted/recreated, leaving our stored id dangling so Vercel rejects the
+    deploy with a "project not found" error. We first try a cheap resolve by
+    slug; if that yields nothing (or only the same dangling id) we create a
+    fresh project via `vercel_ensure_project`.
+    """
+    repo = (project.get('repo') or '').strip()
+    if not repo:
+        return None
+    from vercel_api_ext import vercel_ensure_project, vercel_find_project_id
+
+    stale = project.get('vercel_project_id')
+    resolved = await vercel_find_project_id(settings, name_slug)
+    if resolved and resolved == stale:
+        # Same dangling id the deploy just failed on — force a fresh create.
+        resolved = None
+    if not resolved:
+        try:
+            ensured = await vercel_ensure_project(
+                settings, name_slug, repo,
+                repo_type=project.get('repoType', 'github'),
+                git_ref=git_ref or project.get('gitRef'),
+            )
+            resolved = ensured.get('id')
+        except HTTPException:
+            return None
+    if not resolved:
+        return None
+    if resolved != stale:
+        await db.deploy_projects.update_one(
+            {'id': project['id']},
+            {'$set': {'vercel_project_id': resolved,
+                      'updated_at': datetime.now(timezone.utc)}},
+        )
+        logger.info(
+            'Self-healed stale Vercel project for %s: %s -> %s',
+            project['id'], stale, resolved,
+        )
+    return resolved
+
+
 async def _trigger_deploy(
     project_id: str,
     settings: dict,
@@ -1042,9 +1110,26 @@ async def _trigger_deploy(
                 },
             )
 
-    res = await vercel_create_deployment(
-        settings, project, target, git_ref, name_slug=_slugify(project['projectName']),
-    )
+    name_slug = _slugify(project['projectName'])
+    try:
+        res = await vercel_create_deployment(
+            settings, project, target, git_ref, name_slug=name_slug,
+        )
+    except HTTPException as exc:
+        # Self-heal a stale Vercel project id. After a rebuild the linked Vercel
+        # project can be gone, so the stored id dangles and Vercel rejects the
+        # deploy with a "project not found" error. Re-link/re-create the project,
+        # persist the fresh id, and retry the deploy exactly once. Any other
+        # error (or a project we can't reconcile) re-raises unchanged.
+        if not _looks_like_missing_project(exc.detail):
+            raise
+        healed_id = await _reconcile_vercel_project(project, settings, name_slug, git_ref)
+        if not healed_id:
+            raise
+        project['vercel_project_id'] = healed_id
+        res = await vercel_create_deployment(
+            settings, project, target, git_ref, name_slug=name_slug,
+        )
     await _record_deployment(project_id, res)
     return {
         'deployment_id': res.get('id') or res.get('uid'),
