@@ -23,6 +23,58 @@
         -->
         <title>TBC AI Tools</title>
         <script>window.addEventListener("error",function(e){if(e.error instanceof DOMException&&e.error.name==="DataCloneError"&&e.message&&e.message.includes("PerformanceServerTiming")){e.stopImmediatePropagation();e.preventDefault()}},true);</script>
+        <!--
+          Stale-shell gate. This SPA is served from index.html (now sent with
+          `max-age=0, must-revalidate`), so browsers revalidate this file on
+          load. This tiny inline script runs INDEPENDENTLY of the hashed React
+          bundle — so even a shell too old to contain <BuildUpdateWatcher> will
+          self-heal: it compares the main bundle this document references with
+          the one the origin is currently serving and, on a mismatch, force-
+          reloads exactly ONCE (guarded via sessionStorage to prevent loops).
+          This is why users on stuck mobile tabs stopped seeing shipped
+          features — this gate fixes it without any user action.
+        -->
+        <script>
+            (function () {
+                try {
+                    var h = location.hostname;
+                    if (h === "localhost" || h === "127.0.0.1") return;
+                    var re = /\/static\/js\/main\.[a-f0-9]+\.js/;
+                    function currentBundle() {
+                        var s = document.querySelectorAll("script[src]");
+                        for (var i = 0; i < s.length; i++) {
+                            var src = s[i].getAttribute("src") || "";
+                            if (re.test(src)) return src.replace(/^https?:\/\/[^/]+/, "");
+                        }
+                        return null;
+                    }
+                    function check() {
+                        var cur = currentBundle();
+                        if (!cur) return;
+                        fetch("/?_shell=" + Date.now(), {
+                            cache: "no-store",
+                            headers: { "x-shell-check": "1" },
+                        })
+                            .then(function (r) { return r.ok ? r.text() : null; })
+                            .then(function (html) {
+                                if (!html) return;
+                                var m = html.match(re);
+                                if (!m || m[0] === cur) return;
+                                var key = "tbc.shellReloaded." + m[0];
+                                if (sessionStorage.getItem(key)) return;
+                                sessionStorage.setItem(key, "1");
+                                location.reload(true);
+                            })
+                            .catch(function () {});
+                    }
+                    if (document.readyState === "loading") {
+                        window.addEventListener("DOMContentLoaded", check);
+                    } else {
+                        setTimeout(check, 0);
+                    }
+                } catch (e) {}
+            })();
+        </script>
     </head>
     <body>
         <noscript>You need to enable JavaScript to run this app.</noscript>

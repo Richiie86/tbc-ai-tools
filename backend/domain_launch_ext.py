@@ -223,6 +223,44 @@ async def perform_domain_launch(
                     except Exception as e:  # pragma: no cover - network
                         vercel_error = f"Vercel project create failed: {e}"
 
+                # Deploy-first-then-attach: a domain pointed at a Vercel
+                # project that has NO ready production deployment serves the
+                # dreaded `404 NOT_FOUND` (exactly the tbcdomain.com symptom).
+                # Before attaching, guarantee a READY production deployment —
+                # trigger one and poll if the project has never shipped (or its
+                # last deploy didn't reach READY). Best-effort: a deploy hiccup
+                # never blocks the attach (Vercel will serve once a build lands).
+                if vercel_project_id and (proj.get("repo") or "").strip():
+                    last_state = (proj.get("last_deployment_state") or "").upper()
+                    if last_state != "READY":
+                        try:
+                            from deploy_projects_ext import _trigger_deploy
+                            from app_builder_ext import _poll_deployment_ready
+                            dep = await _trigger_deploy(
+                                project_id, settings, "production",
+                                proj.get("gitRef") or "main",
+                                bypass_review=True, user_id=uid,
+                            )
+                            dep_id = dep.get("deployment_id")
+                            if dep_id:
+                                ready = await _poll_deployment_ready(settings, dep_id)
+                                rstate = (ready.get("readyState")
+                                          or ready.get("status") or "").upper()
+                                launch_doc["production_deploy_state"] = rstate
+                                await db.deploy_projects.update_one(
+                                    {"id": project_id},
+                                    {"$set": {"last_deployment_state": rstate,
+                                              "updated_at": now}},
+                                )
+                        except HTTPException as e:
+                            logger.warning(
+                                "launch-domain deploy-first failed for %s: %s",
+                                domain, e.detail,
+                            )
+                        except Exception as e:  # pragma: no cover - network
+                            logger.warning(
+                                "launch-domain deploy-first error for %s: %s", domain, e,
+                            )
                 if vercel_project_id:
                     # Attach every host we pointed DNS for (apex + www, or the
                     # single sub-domain) so Vercel serves the app on all of

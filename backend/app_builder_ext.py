@@ -223,6 +223,69 @@ async def _commit_files(client: httpx.AsyncClient, token: str, repo: str, branch
     return committed
 
 
+async def _read_repo_files(
+    client: httpx.AsyncClient,
+    token: str,
+    repo: str,
+    branch: str,
+    *,
+    max_files: int = _MAX_FILES,
+    max_file_bytes: int = _MAX_FILE_BYTES,
+) -> dict[str, str]:
+    """Read the current app source from `repo`@`branch` into a {path: content}
+    map, so the chat "iterate" loop can feed the live files back to the LLM.
+
+    Uses the git trees API (recursive) to list paths in one call, then fetches
+    each blob. Applies the SAME safety caps as writes (blocklist, per-file size,
+    file count) and skips obvious non-source paths (node_modules, .next, build
+    output, binaries, lockfiles) so we don't blow the LLM context or pull junk.
+    """
+    tree_resp = await _gh_get(
+        client, f'{GITHUB_API}/repos/{repo}/git/trees/{branch}?recursive=1', token,
+    )
+    if tree_resp.status_code >= 400:
+        raise HTTPException(
+            502, f'Could not list repo files ({tree_resp.status_code}): {tree_resp.text[:200]}',
+        )
+    tree = (tree_resp.json() or {}).get('tree', [])
+    _SKIP_DIRS = ('node_modules/', '.next/', '.git/', 'dist/', 'build/', '.vercel/', 'out/')
+    _SKIP_SUFFIX = (
+        '.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico', '.svg', '.pdf', '.woff',
+        '.woff2', '.ttf', '.otf', '.mp4', '.mov', '.zip', '.lock', '.map',
+    )
+    _SKIP_EXACT = ('package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', 'bun.lockb')
+    files: dict[str, str] = {}
+    for node in tree:
+        if node.get('type') != 'blob':
+            continue
+        path = node.get('path') or ''
+        if not path or _is_blocked(path):
+            continue
+        if any(path.startswith(d) or f'/{d}' in path for d in _SKIP_DIRS):
+            continue
+        if path.split('/')[-1] in _SKIP_EXACT:
+            continue
+        if path.lower().endswith(_SKIP_SUFFIX):
+            continue
+        if (node.get('size') or 0) > max_file_bytes:
+            continue
+        if len(files) >= max_files:
+            break
+        blob = await _gh_get(
+            client, f'{GITHUB_API}/repos/{repo}/contents/{path}?ref={branch}', token,
+        )
+        if blob.status_code >= 400:
+            continue
+        data = blob.json() or {}
+        if data.get('encoding') != 'base64' or not data.get('content'):
+            continue
+        try:
+            files[path] = base64.b64decode(data['content']).decode('utf-8')
+        except Exception:
+            continue  # binary / non-utf8 — skip
+    return files
+
+
 async def _poll_deployment_ready(settings: dict, deployment_id: str) -> dict:
     """Poll a deployment until it reaches a terminal state or we time out."""
     token = vercel_token(settings)
