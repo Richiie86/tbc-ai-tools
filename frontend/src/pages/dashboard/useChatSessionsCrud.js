@@ -43,14 +43,18 @@ export function useChatSessionsCrud({
 
   useEffect(() => { loadSessions(); }, [loadSessions]);
 
-  const newChat = useCallback(async () => {
+  const newChat = useCallback(async (title) => {
     // Reset UI first so the empty-state shows immediately even on slow connections.
     setMessages([]);
     setStreamText('');
     setInput('');
+    // Optional name from the "New session" dialog. `title` may arrive as a DOM
+    // event when the button is wired directly to onClick, so guard the type
+    // and fall back to the default so existing callers keep working.
+    const chosen = (typeof title === 'string' && title.trim()) ? title.trim() : 'New Chat';
     try {
       const { data } = await api.post('/chat/sessions', {
-        title: 'New Chat',
+        title: chosen,
         model,
         variant,
       });
