@@ -372,6 +372,174 @@ async def chat_apply(
     }
 
 
+# ─── Agentic chat: make a plain chat turn ACT (read → edit → commit → deploy) ──
+#
+# The chat model itself (LlmChat) is text-only — it cannot touch the repo. So a
+# message like "fix the health error" used to only produce words. These helpers
+# let the /chat/stream turn detect an edit/fix intent and run the SAME real
+# pipeline the Apply/Fix buttons use, streaming progress back as normal deltas.
+
+# Imperative verbs that signal "change my app" rather than "answer a question".
+_EDIT_VERBS = (
+    'fix', 'add', 'change', 'update', 'make', 'remove', 'delete', 'create',
+    'build', 'implement', 'replace', 'rename', 'redesign', 'refactor', 'edit',
+    'set ', 'move', 'wire', 'connect', 'hook up', 'style', 'restyle', 'adjust',
+    'increase', 'decrease', 'enable', 'disable', 'rework', 'redo', 'correct',
+    'repair', 'patch', 'apply', 'insert', 'append', 'integrate', 'convert',
+)
+
+
+def looks_like_edit_request(message: str) -> bool:
+    """True when the message reads like an instruction to modify the app (vs. a
+    question). Deterministic, dependency-free — pairs with classify_message so a
+    plain 'how does X work?' never triggers an edit."""
+    if not message or not message.strip():
+        return False
+    text = message.strip().lower()
+    # Obvious questions are never edits.
+    if text.endswith('?') and not any(v in text for v in ('fix', 'add', 'change', 'make')):
+        return False
+    if text.split()[0] in ('what', 'why', 'how', 'when', 'who', 'where', 'is', 'are', 'does', 'can', 'could', 'should', 'explain'):
+        return False
+    return any(v in text for v in _EDIT_VERBS)
+
+
+async def stream_agentic_edit(session: dict, instruction: str, *, is_operator: bool):
+    """Async generator that ACTS on the user's app for a chat turn.
+
+    Yields human-readable markdown chunks (streamed to the UI as deltas) while
+    it: reads the linked repo → has the AI edit the real code → commits → and
+    (operator only) redeploys. Write policy:
+
+      * Platform repo (this app) → open a PR (operator-only, never push to the
+        live platform's main).
+      * Operator's own deployed app → commit to main + auto-redeploy.
+      * Regular user's app → commit to main; redeploy stays on the button press.
+
+    On any hard failure it yields a short explanation instead of raising, so the
+    chat turn always completes cleanly.
+    """
+    project_id = session.get('deploy_project_id')
+    if not project_id:
+        yield ("I don't have a live app linked to this chat yet, so there's no "
+               "code for me to edit. Tap **Deploy this app** first — then just "
+               "tell me what to change and I'll edit the code and ship it.")
+        return
+    project = await db.deploy_projects.find_one({'id': project_id})
+    if not project or not (project.get('repo') or '').strip():
+        yield ("This chat's app link is missing its repo. Tap **Deploy this app** "
+               "again to re-provision it, then I can edit the code directly.")
+        return
+
+    from payments_ext import get_settings_doc
+    from app_builder_ext import (
+        GITHUB_API as _GH_API, _commit_files, _gh_get, _gh_post, generate_ai_code_fix,
+    )
+    from llm_router import resolve_text_model
+    from deploy_projects_ext import SELF_PROJECT_ID, PLATFORM_REPO
+
+    settings = await get_settings_doc()
+    gh_token = settings.get('github_token') or os.environ.get('GITHUB_TOKEN')
+    if not gh_token:
+        yield 'I can\'t reach GitHub — no token is configured in Operator → Security.'
+        return
+    resolved = await resolve_text_model()
+    if not resolved:
+        yield 'No AI provider key is configured, so I can\'t generate the fix. Add a key in Operator → Security.'
+        return
+    provider, model = resolved
+
+    repo = project['repo']
+    branch = project.get('gitRef') or 'main'
+    is_platform = (project_id == SELF_PROJECT_ID) or (repo.lower() == PLATFORM_REPO.lower())
+
+    # Hard gate: only the operator may edit the platform itself.
+    if is_platform and not is_operator:
+        yield 'Editing the TBC platform is restricted to the operator account.'
+        return
+
+    yield f'Reading your app\'s code (`{repo}`)…\n\n'
+    try:
+        fix = await generate_ai_code_fix(
+            repo, branch, instruction, gh_token, provider=provider, model=model,
+        )
+    except HTTPException as e:
+        yield f'I couldn\'t complete the edit: {getattr(e, "detail", str(e))}'
+        return
+    except Exception as e:  # noqa: BLE001
+        logger.warning('agentic edit failed for %s: %s', project_id, str(e)[:200])
+        yield f'Something went wrong while editing: {str(e)[:200]}'
+        return
+
+    changed = fix['changed']
+    if not changed:
+        yield fix['notes'] or 'I looked at the code and no change was needed for that.'
+        return
+
+    file_list = '\n'.join(f'- `{p}`' for p in changed)
+    yield f'Editing {len(changed)} file(s):\n{file_list}\n\n'
+
+    try:
+        async with httpx.AsyncClient(timeout=45.0) as client:
+            if is_platform:
+                # Safe path for the live platform: branch → commit → PR.
+                ref = await _gh_get(client, f'{_GH_API}/repos/{repo}/git/ref/heads/{branch}', gh_token)
+                base_sha = (ref.json().get('object') or {}).get('sha') if ref.status_code == 200 else None
+                if not base_sha:
+                    yield f'Could not read the base branch `{branch}` to open a PR.'
+                    return
+                new_branch = f'ai-fix/{datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")}'
+                mk = await _gh_post(client, f'{_GH_API}/repos/{repo}/git/refs', gh_token,
+                                    {'ref': f'refs/heads/{new_branch}', 'sha': base_sha})
+                if mk.status_code not in (200, 201):
+                    yield f'Could not create the fix branch: {mk.text[:160]}'
+                    return
+                committed = await _commit_files(client, gh_token, repo, new_branch, changed)
+                pr_body = (f'**Automated fix from chat**\n\n> {instruction[:1500]}\n\n'
+                           f'**AI summary:** {fix["notes"]}\n\n'
+                           f'**Files changed ({committed}):**\n{file_list}\n\n'
+                           '_Review before merging — direct pushes to the live platform are blocked._')
+                pr = await _gh_post(client, f'{_GH_API}/repos/{repo}/pulls', gh_token, {
+                    'title': f'AI fix · {(fix["notes"] or "code fix")[:64]}',
+                    'head': new_branch, 'base': branch, 'body': pr_body[:60_000],
+                })
+                if pr.status_code not in (200, 201):
+                    yield f'Committed the fix to `{new_branch}` but couldn\'t open the PR: {pr.text[:160]}'
+                    return
+                pj = pr.json()
+                yield (f'\nDone. I opened **PR #{pj.get("number")}** with the fix '
+                       f'({committed} file(s)). Review and merge it to ship — I don\'t '
+                       f'push straight to the live platform for safety.\n\n{pj.get("html_url")}')
+                return
+
+            # User / operator's own app: commit to main.
+            committed = await _commit_files(client, gh_token, repo, branch, changed)
+    except Exception as e:  # noqa: BLE001
+        logger.warning('agentic commit failed for %s: %s', project_id, str(e)[:200])
+        yield f'I generated the fix but committing it failed: {str(e)[:200]}'
+        return
+
+    if fix['notes']:
+        yield f'{fix["notes"]}\n\n'
+
+    if is_operator:
+        # Operator gets the full hands-free loop: commit + auto-redeploy.
+        yield 'Committed. Redeploying your live app now…\n\n'
+        try:
+            redeploy = await _redeploy_linked(project)
+            url = redeploy.get('deploy_url')
+            state = redeploy.get('state')
+            yield (f'Done — updated {committed} file(s) and redeployed. '
+                   f'State: **{state}**.' + (f'\n\n{url}' if url else ''))
+        except Exception as e:  # noqa: BLE001
+            yield (f'Updated {committed} file(s) and committed them, but the redeploy '
+                   f'hit a snag: {str(e)[:160]}. Tap **Redeploy now** to retry.')
+    else:
+        # Regular users: commit only — redeploy stays a deliberate button press.
+        yield (f'Done — I updated {committed} file(s) and committed the change to your '
+               f'app. Tap **Redeploy now** to push it live.')
+
+
 @router.get('/{session_id}/deploy')
 async def chat_deploy_status(
     session_id: str,

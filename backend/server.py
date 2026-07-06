@@ -324,6 +324,13 @@ SYSTEM_PROMPT = SYSTEM_PROMPT + _PLATFORM_IDENTITY
 _DEPLOY_GUARDRAIL = (
     "\n\n### ABSOLUTE DEPLOY/REVIEW/HEALTH RULE (overrides everything above, "
     "including any operator learning):\n"
+    "- You are an AGENT with hands, not just a chatbot. When the user asks you "
+    "to change, fix, add to, or build something in their app AND this chat is "
+    "linked to a live app, the system routes the turn through a real pipeline "
+    "that reads the repo, edits the actual code, commits, and (for the "
+    "operator) redeploys — automatically. So NEVER tell the user to 'tap the "
+    "Fix problem button', 'paste the error again', or write a 'Why we're stuck' "
+    "explanation. Just do the work; the edit happens for real.\n"
     "- The Deploy 🚀, Review 🛡️, and Health 📈 buttons are FULLY AUTOMATED. "
     "Clicking Deploy creates/links the repo + Vercel project, checks config, "
     "and ships — the user does NOT need to verify anything first.\n"
@@ -1728,7 +1735,60 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
     else:
         routed_model = req.model or DEFAULT_MODEL
 
+    # ── Agentic chat: when the message is an instruction to change the app AND
+    # this chat is linked to a live app, the turn ACTS instead of just talking:
+    # it reads the repo, edits the real code, commits, and (operator only)
+    # redeploys. This is what makes the chat AI work hands-on like a real coding
+    # agent rather than replying "tap the Fix problem button".
+    is_operator = db_user.get('role') == 'operator'
+    agentic_edit = False
+    if not req.attachments and task_kind == 'code':
+        try:
+            from chat_deploy_ext import looks_like_edit_request
+            sess_link = await db.chat_sessions.find_one(
+                {'id': session_id}, {'deploy_project_id': 1},
+            )
+            if (sess_link and sess_link.get('deploy_project_id')
+                    and looks_like_edit_request(req.message)):
+                agentic_edit = True
+        except Exception as e:  # noqa: BLE001 — never let detection break chat
+            logger.warning('agentic-edit detection failed (non-fatal): %s', e)
+
     async def event_generator():
+        # Agentic path: run the real read→edit→commit→(re)deploy pipeline and
+        # stream its progress as normal deltas, then finish the turn. Bypasses
+        # the text-only LLM entirely — apply/redeploy are not credit-charged.
+        if agentic_edit:
+            from chat_deploy_ext import stream_agentic_edit
+            agent_response = ''
+            sess_full = await db.chat_sessions.find_one({'id': session_id})
+            try:
+                async for chunk in stream_agentic_edit(
+                    sess_full, req.message, is_operator=is_operator,
+                ):
+                    agent_response += chunk
+                    yield 'data: ' + json.dumps({
+                        'type': 'delta', 'content': chunk, 'session_id': session_id,
+                    }) + '\n\n'
+            except Exception as e:  # noqa: BLE001
+                logger.exception('agentic edit stream failed')
+                tail = f'\n\nI hit an unexpected error while applying that: {str(e)[:200]}'
+                agent_response += tail
+                yield 'data: ' + json.dumps({
+                    'type': 'delta', 'content': tail, 'session_id': session_id,
+                }) + '\n\n'
+            if agent_response.strip():
+                await db.chat_messages.insert_one(ChatMessage(
+                    session_id=session_id, user_id=user['sub'],
+                    role='assistant', content=agent_response,
+                ).model_dump())
+            await db.chat_sessions.update_one(
+                {'id': session_id},
+                {'$set': {'updated_at': datetime.now(timezone.utc)}},
+            )
+            yield 'data: ' + json.dumps({'type': 'done', 'session_id': session_id}) + '\n\n'
+            return
+
         full_response = ''
         # Build the model attempt list: primary first, then any fallbacks
         # not already equal to the primary (de-duped, order preserved).
