@@ -101,10 +101,15 @@ function ModelPicker({ models, model, setModel }) {
 
   return (
     <Select value={model} onValueChange={setModel}>
-      <SelectTrigger className="h-9 w-[140px] border-slate-700 bg-slate-900 text-slate-100 sm:w-[230px]">
-        <div className="flex items-center gap-2 text-sm">
-          <Cpu className="h-3.5 w-3.5 text-tbc-400" />
-          <SelectValue placeholder="Select model" />
+      <SelectTrigger className="h-9 w-[140px] min-w-0 border-slate-700 bg-slate-900 text-slate-100 sm:w-[230px]">
+        {/* min-w-0 + overflow-hidden on the inner flex, plus truncate on the
+            value, so a long model label (e.g. "Claude Opus 4.7 (recommended)")
+            clips inside the pill instead of spilling over the credits badge. */}
+        <div className="flex min-w-0 items-center gap-2 overflow-hidden text-sm">
+          <Cpu className="h-3.5 w-3.5 shrink-0 text-tbc-400" />
+          <span className="min-w-0 truncate">
+            <SelectValue placeholder="Select model" />
+          </span>
         </div>
       </SelectTrigger>
       <SelectContent className="border-slate-800 bg-slate-900 text-slate-100">
