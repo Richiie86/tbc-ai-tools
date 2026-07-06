@@ -82,7 +82,8 @@ async def _resolve_max_iters(project_id: str, requested: int) -> int:
             )
             if proj_doc and proj_doc.get('auto_heal'):
                 iters = 3  # operator-opted-in default
-        except Exception:
+        except Exception as e:
+            logger.warning(f'Failed to check auto_heal flag: {e}')
             pass  # never block autopilot on a flag lookup
     return max(0, min(iters, MAX_ALLOWED))
 
@@ -106,7 +107,11 @@ async def _react_to_deployment(
             {'$set': {'last_deployment_state': 'READY'}},
         )
         fresh = await db.deploy_projects.find_one({'id': project_id}) or project
-        health = await _project_health(fresh, settings)
+        try:
+            health = await _project_health(fresh, settings)
+        except Exception as e:
+            logger.error(f'Health check failed for {project_id}: {e}')
+            health = {'ok': False, 'error': str(e)[:200]}
         yield _sse('health_check', health)
         yield _sse('loop_complete', {
             'ok': health.get('ok'),
@@ -143,7 +148,11 @@ async def _autopilot_stream(
     """
     from deploy.auto_fix import commit_patches, request_patches
 
-    max_iters = await _resolve_max_iters(project_id, req.auto_fix_max_iterations)
+    try:
+        max_iters = await _resolve_max_iters(project_id, req.auto_fix_max_iterations)
+    except Exception as e:
+        logger.error(f'Failed to resolve max iterations: {e}')
+        max_iters = 0
 
     try:
         project = await db.deploy_projects.find_one({'id': project_id})
@@ -175,6 +184,11 @@ async def _autopilot_stream(
             except HTTPException as he:
                 yield _sse('loop_error', {'stage': 'review', 'status': he.status_code, 'message': str(he.detail)})
                 return
+            except Exception as e:
+                logger.error(f'Unexpected error during code review: {e}')
+                yield _sse('loop_error', {'stage': 'review', 'message': str(e)[:300]})
+                return
+            
             yield _sse('review_done', {
                 'verdict': review.get('verdict'),
                 'summary': (review.get('summary') or '')[:600],
@@ -190,7 +204,12 @@ async def _autopilot_stream(
             if iteration >= max_iters:
                 # No auto-fix budget left (or it was disabled) — emit the
                 # gate_blocked event and stop.
-                fix_session_id = await _create_fix_review_chat(project, review, user_id)
+                try:
+                    fix_session_id = await _create_fix_review_chat(project, review, user_id)
+                except Exception as e:
+                    logger.error(f'Failed to create fix chat: {e}')
+                    fix_session_id = None
+                
                 yield _sse('gate_blocked', {
                     'verdict': review.get('verdict'),
                     'fix_chat_session_id': fix_session_id,
@@ -218,6 +237,14 @@ async def _autopilot_stream(
                     'status': he.status_code, 'message': str(he.detail),
                 })
                 return
+            except Exception as e:
+                logger.error(f'Unexpected error requesting patches: {e}')
+                yield _sse('auto_fix_error', {
+                    'iteration': iteration, 'stage': 'request_patches',
+                    'message': str(e)[:300],
+                })
+                return
+            
             yield _sse('auto_fix_patches', {
                 'iteration': iteration,
                 'commit_message': patch_set.get('commit_message'),
@@ -245,6 +272,14 @@ async def _autopilot_stream(
                     'status': he.status_code, 'message': str(he.detail),
                 })
                 return
+            except Exception as e:
+                logger.error(f'Unexpected error committing patches: {e}')
+                yield _sse('auto_fix_error', {
+                    'iteration': iteration, 'stage': 'commit_patches',
+                    'message': str(e)[:300],
+                })
+                return
+            
             yield _sse('auto_fix_committed', {
                 'iteration': iteration,
                 'commits': commits,
@@ -263,6 +298,11 @@ async def _autopilot_stream(
         except HTTPException as he:
             yield _sse('loop_error', {'stage': 'deploy', 'status': he.status_code, 'message': str(he.detail)})
             return
+        except Exception as e:
+            logger.error(f'Unexpected error creating deployment: {e}')
+            yield _sse('loop_error', {'stage': 'deploy', 'message': str(e)[:300]})
+            return
+        
         await _record_deployment(project_id, deploy_res)
         deployment_id = deploy_res.get('id') or deploy_res.get('uid')
         deployment_url = deploy_res.get('url')
@@ -281,6 +321,7 @@ async def _autopilot_stream(
                 try:
                     state_res = await _vercel_get_deployment(settings, deployment_id)
                 except Exception as e:
+                    logger.warning(f'Vercel poll error: {e}')
                     yield _sse('deploy_state', {'state': 'POLL_ERROR', 'detail': str(e)[:200]})
                     continue
                 state = state_res.get('readyState') or state_res.get('state')
