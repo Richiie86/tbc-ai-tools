@@ -229,12 +229,36 @@ async def perform_domain_launch(
                     # them. Attaching is idempotent, so re-launching is safe.
                     hosts = launch_doc.get("dns_hosts") or [domain]
                     attached_any = False
+                    reconciled = False
+                    from deploy_projects_ext import (
+                        _looks_like_missing_project, _reconcile_vercel_project, _slugify,
+                    )
                     for host in hosts:
                         try:
                             await vercel_attach_domain(settings, vercel_project_id, host)
                             attached_any = True
                         except HTTPException as e:
-                            vercel_error = e.detail if isinstance(e.detail, str) else str(e.detail)
+                            detail = e.detail if isinstance(e.detail, str) else str(e.detail)
+                            # Self-heal a stale project id (deleted/recreated
+                            # after a rebuild): reconcile once, then retry this
+                            # host. Same fix the Deploy path uses, so connecting
+                            # a domain "just works" even on a stale project.
+                            if not reconciled and _looks_like_missing_project(detail):
+                                reconciled = True
+                                healed = await _reconcile_vercel_project(
+                                    proj, settings,
+                                    _slugify(proj.get("projectName") or "project"),
+                                    proj.get("gitRef"),
+                                )
+                                if healed:
+                                    vercel_project_id = healed
+                                    try:
+                                        await vercel_attach_domain(settings, vercel_project_id, host)
+                                        attached_any = True
+                                        continue
+                                    except HTTPException as e2:
+                                        detail = e2.detail if isinstance(e2.detail, str) else str(e2.detail)
+                            vercel_error = detail
                     launch_doc["vercel_attached"] = attached_any
                 elif not vercel_error:
                     vercel_error = (

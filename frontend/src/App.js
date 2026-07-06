@@ -27,6 +27,7 @@ import Status from './pages/Status';
 import ChangelogPage from './pages/ChangelogPage';
 import MarketingBanner from './components/MarketingBanner';
 import PersonalUseBanner from './components/PersonalUseBanner';
+import BuildUpdateWatcher from './components/BuildUpdateWatcher';
 import './App.css';
 
 function App() {
@@ -35,6 +36,7 @@ function App() {
       <ViewModeProvider>
       <AuthProvider>
         <BrowserRouter>
+          <BuildUpdateWatcher />
           <MarketingBanner />
           <PersonalUseBanner />
           <Routes>
