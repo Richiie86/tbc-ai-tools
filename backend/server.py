@@ -863,7 +863,21 @@ async def _activate_plan_for_user(user_id: str, plan_doc: dict | None) -> dict:
 # ===== HEALTH =====
 @api.get('/')
 async def root():
-    return {'service': 'TBC AI Tools', 'status': 'online'}
+    # Surface the running build's git commit (Render auto-injects
+    # RENDER_GIT_COMMIT at build time) so we can verify a merge actually went
+    # live, instead of guessing. Falls back gracefully in other environments.
+    commit = (
+        os.environ.get('RENDER_GIT_COMMIT')
+        or os.environ.get('GIT_COMMIT')
+        or os.environ.get('VERCEL_GIT_COMMIT_SHA')
+        or 'unknown'
+    )
+    return {
+        'service': 'TBC AI Tools',
+        'status': 'online',
+        'commit': commit[:8] if commit != 'unknown' else commit,
+        'branch': os.environ.get('RENDER_GIT_BRANCH') or 'unknown',
+    }
 
 
 # ===== AUTH =====
