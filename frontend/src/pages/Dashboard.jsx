@@ -116,8 +116,11 @@ export default function Dashboard({ variant = 'tbc1' }) {
   // Mirror live stream text so the final-message commit doesn't lose the tail.
   useEffect(() => { streamTextRef.current = streamText; }, [streamText]);
 
-  async function send(attachments = []) {
-    const text = input.trim();
+  async function send(attachments = [], overrideText) {
+    // overrideText lets programmatic callers (e.g. the "Fix problem" button on
+    // a failed deploy) send a composed prompt directly, bypassing the async
+    // input-state closure. Normal composer sends still read the textarea.
+    const text = (typeof overrideText === 'string' ? overrideText : input).trim();
     if (!text && attachments.length === 0) return;
     if (streaming) return;
     if (user && user.role !== 'operator' && (user.credits ?? 0) <= 0) {
@@ -314,6 +317,24 @@ export default function Dashboard({ variant = 'tbc1' }) {
         result={actionResult}
         onClose={() => setActionResult(null)}
         onOpenFixChat={(sid) => navigate(`${basePath}/${sid}`)}
+        onFixProblem={(problem, res) => {
+          // Hand the exact failure to the AIs: compose a focused fix prompt
+          // (error + likely cause + suggested fixes) and send it straight into
+          // the current chat so the AIs work the real problem in this section.
+          const lines = [
+            `The ${res?.kind || 'deploy'} just failed. Please diagnose and fix the actual problem, then verify.`,
+            '',
+            `Error: ${problem.raw || res?.summary || 'unknown error'}`,
+            '',
+            `Likely cause: ${problem.cause}`,
+            '',
+            'Suggested fixes to investigate:',
+            ...problem.fixes.map((f) => `- ${f}`),
+            '',
+            'Do not just explain — apply the concrete fix in the relevant part of the codebase.',
+          ];
+          send([], lines.join('\n'));
+        }}
       />
       <DashboardGuideTour key={guideKey} forceOpen={guideKey > 0} />
       {/* Embedded live preview — a docked panel with an iframe of the web

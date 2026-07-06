@@ -178,10 +178,15 @@ export default function ReviewResultModal({ result, onClose, onOpenFixChat, onFi
 
   const findings = isReview ? (result.findings || []) : [];
   const concerns = isReview ? (result.second?.concerns || []) : [];
+  // For failed deploy/health checks, build a real explanation so the panel is
+  // never empty and we can hand a precise prompt to the AIs via "Fix problem".
+  const problem = explainProblem(result);
+  const canFixProblem = !!problem && typeof onFixProblem === 'function';
   const hasDetail =
     (result.summary && result.summary.length > 0) ||
     findings.length > 0 ||
     concerns.length > 0 ||
+    !!problem ||
     (result.second && result.second.summary);
 
   return (
@@ -250,6 +255,30 @@ export default function ReviewResultModal({ result, onClose, onOpenFixChat, onFi
 
         {expanded && (
           <div className="max-h-64 space-y-4 overflow-y-auto rounded-lg border border-slate-800 bg-slate-950/50 p-3 text-sm">
+            {problem && (
+              <div>
+                <p className="mb-1.5 text-xs font-bold uppercase tracking-wide text-slate-400">
+                  What went wrong
+                </p>
+                <p className="leading-relaxed text-slate-300">{problem.cause}</p>
+                {problem.raw && (
+                  <p className="mt-2 break-words rounded border border-slate-800 bg-slate-900 px-2 py-1 font-mono text-[11px] text-rose-300">
+                    {problem.raw}
+                  </p>
+                )}
+                <p className="mb-1.5 mt-3 text-xs font-bold uppercase tracking-wide text-slate-400">
+                  How to fix it
+                </p>
+                <ul className="space-y-1.5">
+                  {problem.fixes.map((f, i) => (
+                    <li key={i} className="flex gap-2 text-slate-300">
+                      <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-tbc-400" />
+                      <span className="leading-relaxed">{f}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             {findings.length > 0 && (
               <div>
                 <p className="mb-1.5 text-xs font-bold uppercase tracking-wide text-slate-400">
@@ -297,6 +326,16 @@ export default function ReviewResultModal({ result, onClose, onOpenFixChat, onFi
             >
               <Wrench className="mr-1.5 h-4 w-4" />
               Open fix chat
+            </Button>
+          )}
+          {canFixProblem && (
+            <Button
+              variant="outline"
+              onClick={() => { onFixProblem(problem, result); onClose(); }}
+              className="border-rose-500/40 bg-rose-500/10 text-rose-200 hover:bg-rose-500/20"
+            >
+              <Wrench className="mr-1.5 h-4 w-4" />
+              Fix problem
             </Button>
           )}
           <Button
