@@ -77,6 +77,76 @@ const TONES = {
   },
 };
 
+// Turn a raw deploy/health failure message into a plain-English explanation
+// plus concrete "what to fix" steps. This is what powers the (previously
+// empty) "Read full explanation" panel for failed deploys, and the prompt the
+// "Fix problem" button hands to the AIs. Matching is substring-based so it
+// still degrades gracefully to a generic explanation for unknown errors.
+function explainProblem(result) {
+  if (!result || result.ok) return null;
+  if (result.kind !== 'deploy' && result.kind !== 'health') return null;
+  const raw = String(result.summary || result.detail || result.error || '').trim();
+  const lc = raw.toLowerCase();
+
+  if (lc.includes('project not found') || lc.includes('no such project')) {
+    return {
+      raw,
+      cause:
+        'Vercel has no project matching this deploy target, so there is nothing to deploy to. '
+        + 'This usually means the linked Vercel project was deleted or renamed, the saved Vercel '
+        + 'project ID is stale (common right after rebuilding the project), or a GitHub repo was '
+        + 'never linked to a Vercel project.',
+      fixes: [
+        'Confirm the Vercel project still exists and note its exact name/ID.',
+        'Re-link this deploy target to the current Vercel project (the old ID is stale after a rebuild).',
+        'Make sure a GitHub repo is connected AND linked to a Vercel project before deploying.',
+      ],
+    };
+  }
+  if (lc.includes('repo') && (lc.includes('empty') || lc.includes('no code'))) {
+    return {
+      raw,
+      cause: 'The connected GitHub repo has no application code yet, so there is nothing to build or deploy.',
+      fixes: [
+        'Use "Push initial code" to upload the app source to the repo.',
+        'Then re-run the deploy.',
+      ],
+    };
+  }
+  if (lc.includes('token') || lc.includes('unauthorized') || lc.includes('401') || lc.includes('403') || lc.includes('key')) {
+    return {
+      raw,
+      cause: 'The deploy was rejected for authentication reasons — a Vercel/GitHub token is missing, expired, or lacks permission.',
+      fixes: [
+        'Check the Vercel and GitHub API keys in the operator settings.',
+        'Re-generate any expired token and save it, then retry the deploy.',
+      ],
+    };
+  }
+  if (lc.includes('build') && (lc.includes('fail') || lc.includes('error'))) {
+    return {
+      raw,
+      cause: 'Vercel started the deploy but the build failed — the code did not compile or a build step errored.',
+      fixes: [
+        'Open the Vercel build logs to find the failing step.',
+        'Use "Fix problem" to have the AIs read the error and patch the code.',
+      ],
+    };
+  }
+  // Generic fallback so the panel is never empty.
+  return {
+    raw,
+    cause: raw
+      ? `The deploy failed with: "${raw}". This is the exact error the deploy pipeline returned.`
+      : 'The deploy failed but no detailed error message was returned by the pipeline.',
+    fixes: [
+      'Verify the deploy target (Vercel project + linked GitHub repo) is correctly configured.',
+      'Confirm the required API keys are set, then retry.',
+      'If it still fails, use "Fix problem" to hand the error to the AIs.',
+    ],
+  };
+}
+
 // Render a single finding whether it's a plain string or a structured object.
 function findingText(f) {
   if (typeof f === 'string') return f;
@@ -87,7 +157,7 @@ function findingText(f) {
   return `${sev}${loc}${body}`;
 }
 
-export default function ReviewResultModal({ result, onClose, onOpenFixChat }) {
+export default function ReviewResultModal({ result, onClose, onOpenFixChat, onFixProblem }) {
   const [expanded, setExpanded] = useState(false);
   const cls = classify(result);
   const open = !!result && !!cls;
