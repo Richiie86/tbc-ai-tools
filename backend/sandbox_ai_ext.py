@@ -95,6 +95,16 @@ Rules:
 4. Preserve existing imports / exports / public APIs unless explicitly told otherwise.
 5. Match the existing code style (indentation, quote marks, semicolons).
 6. Do NOT include backticks, ```json fences, or any commentary outside the JSON.
+7. This codebase IS the TBCTools platform (repo Richiie86/tbc-ai-tools — a React
+   frontend on Vercel + a FastAPI backend on Render + MongoDB), live at
+   tbctools.org. Apps users deploy from a chat are SEPARATE projects on their
+   own domains (e.g. tbcdomain.com); a 404 there is that separate app, not this
+   platform.
+8. When the instruction is a runtime error, failed deploy, 404 / "Project not
+   found", or missing config, your job is to produce the actual CODE FIX (edit
+   the files), NOT to echo back a checklist of manual steps for a human to
+   perform. Deploy/config remediation is automated elsewhere — you fix code. If
+   the fix truly needs no code change, return `files: []` and say so in one line.
 """
 
 
