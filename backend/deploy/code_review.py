@@ -40,7 +40,7 @@ GITHUB_API = 'https://api.github.com'
 # Keep prompt bounded so a huge repo doesn't blow our token budget; we sample
 # the highest-signal files (config + entry points + top-level source).
 _PER_FILE_CHARS = 6_000
-_TOTAL_CHARS = 40_000
+_TOTAL_CHARS = 70_000
 
 # File patterns we ALWAYS try to include if present (high signal).
 _PRIORITY_FILES = (
@@ -251,16 +251,19 @@ async def fetch_repo_snapshot(
             p = t['path']
             if '/' not in p and p.endswith(_CODE_EXTS) and p not in chosen_paths:
                 chosen_paths.append(p)
-                if len(chosen_paths) >= 20:
+                if len(chosen_paths) >= 24:
                     break
-        if len(chosen_paths) < 20:
-            for t in tree:
-                p = t['path']
-                if p.startswith(('src/', 'backend/', 'frontend/src/', 'app/')) and p.endswith(_CODE_EXTS):
-                    if p not in chosen_paths:
-                        chosen_paths.append(p)
-                        if len(chosen_paths) >= 30:
-                            break
+        # Always sweep subdirectory source too (backend/, src/, app/, …) so the
+        # sample includes the files that DEFINE the symbols other files import.
+        # Skipping this (the old `< 20` guard) is what made the reviewer wrongly
+        # report cross-file imports as "non-existent functions".
+        for t in tree:
+            p = t['path']
+            if p.startswith(('src/', 'backend/', 'frontend/src/', 'app/', 'lib/', 'server/')) and p.endswith(_CODE_EXTS):
+                if p not in chosen_paths and not _is_placeholder_path(p):
+                    chosen_paths.append(p)
+                    if len(chosen_paths) >= 48:
+                        break
 
         for path in chosen_paths:
             if total >= _TOTAL_CHARS:
@@ -332,16 +335,28 @@ _SYSTEM_PROMPT = (
     "3. Files under test/, tests/, or named *_test.py / test_*.py are TEST "
     "code, not production runtime. Do not treat literals there as production "
     "secrets when they are read from environment variables or are obvious "
-    "placeholders.\n\n"
+    "placeholders.\n"
+    "4. You are shown only a PARTIAL SAMPLE of the repository's files (a small "
+    "high-signal subset), NOT the whole codebase. NEVER report a function, "
+    "class, variable, import, component, endpoint, or module as "
+    "'non-existent', 'undefined', 'missing', 'not defined', or claim it 'will "
+    "crash at module load / import error' merely because you cannot see its "
+    "definition in the files below — the definition very likely lives in a "
+    "file that was not included in this sample. Only flag an import/reference "
+    "if the DEFINING file IS present in the sample AND the symbol is provably "
+    "absent from it. When unsure, do not raise it.\n\n"
     "DO flag these REAL deploy blockers (they are NOT false positives):\n"
     "A. A pinned language/runtime version in deploy config (e.g. "
     "PYTHON_VERSION in render.yaml, the `runtime` field, .python-version, or "
-    "engines in package.json) that the target host does not ship. Render only "
-    "provides select 3.11.x / 3.12.x / 3.13.x Python builds; a pin like "
-    "'3.13.4' does not exist there and fails the build instantly. Report it as "
-    "HIGH with the exact working version to use. This is about the RUNTIME "
-    "PIN, which is verifiable — it is different from rule 2, which is about "
-    "AI/LLM model identifier strings that you cannot verify."
+    "engines in package.json) that the target host provably does not ship. "
+    "Only flag this when you are CONFIDENT the exact version is unavailable — "
+    "e.g. a clearly fabricated or non-existent build. Render supports a wide "
+    "range of real CPython patch releases including common 3.11.x and 3.12.x "
+    "versions, so a normal pin such as '3.12.7' is VALID — do NOT flag it. A "
+    "pin like '3.13.4' (which never shipped) is the kind that fails instantly; "
+    "report only that class of clearly-invalid pin, as HIGH, with the exact "
+    "working version to use. This is about the RUNTIME PIN — different from "
+    "rule 2 (AI/LLM model identifier strings you cannot verify)."
 )
 
 
@@ -361,7 +376,11 @@ _SECOND_OPINION_PROMPT = (
     "the sample was clipped for length, not that the file is broken), on AI "
     "model identifier names being 'invalid/non-existent' (you lack the "
     "provider's live catalog), or on literals in test files that are read from "
-    "environment variables."
+    "environment variables. You are shown only a PARTIAL SAMPLE of the repo — "
+    "do NOT claim a function/import/symbol is 'non-existent' or 'will crash at "
+    "import' just because its definition is not in the sampled files; it "
+    "likely lives in an unsampled file. Do NOT flag a normal runtime pin like "
+    "Python '3.12.7' as invalid — common patch releases are valid on Render."
 )
 
 
@@ -620,7 +639,7 @@ async def op_code_review(
     from rate_limit import rate_limit_operator
     rate_limit_operator(
         _user, 'code-review:run',
-        limit=int(os.environ.get('CODE_REVIEW_LIMIT', '10')),
+        limit=int(os.environ.get('CODE_REVIEW_LIMIT', '30')),
         window_seconds=int(os.environ.get('CODE_REVIEW_WINDOW', '60')),
     )
     project = await db.deploy_projects.find_one({'id': project_id})
