@@ -1824,9 +1824,42 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
             from chat_deploy_ext import stream_agentic_edit
             agent_response = ''
             sess_full = await db.chat_sessions.find_one({'id': session_id})
+            # Resolve the model the user actually picked and honour it on the
+            # code-editing path (previously this path ignored the selection and
+            # always used Anthropic — so switching to Gemini "did nothing").
+            edit_provider, edit_model = resolve_model(routed_model)
+            try:
+                from llm_router import available_providers as _avail_provs
+                _avail = set(await _avail_provs()) | set(byok_overrides.keys())
+            except Exception:  # noqa: BLE001
+                _avail = set()
+            # Explicit pick on a provider with no key → stop with a clear message
+            # instead of silently falling back to Anthropic.
+            if auto_kind is None and _avail and edit_provider not in _avail:
+                yield 'data: ' + json.dumps({
+                    'type': 'error',
+                    'message': (
+                        f'The model you selected runs on "{edit_provider}", which has no '
+                        f'API key configured. Add a {edit_provider} key in Operator → '
+                        'Security (or pick a model from a provider you have set up).'
+                    ),
+                }) + '\n\n'
+                yield 'data: ' + json.dumps({'type': 'done', 'session_id': session_id}) + '\n\n'
+                return
+            # For Automatic, or when the picked provider has no key, prefer any
+            # configured provider so a funded key is used rather than a dead one.
+            if _avail and edit_provider not in _avail:
+                try:
+                    from llm_router import resolve_text_model as _rtm
+                    _r = await _rtm()
+                    if _r:
+                        edit_provider, edit_model = _r
+                except Exception:  # noqa: BLE001
+                    pass
             try:
                 async for chunk in stream_agentic_edit(
                     sess_full, req.message, is_operator=is_operator,
+                    provider=edit_provider, model=edit_model,
                 ):
                     # Structured events (the Allow/Build proposal gate, deploy
                     # progress, etc.) are dicts carrying `__event__`; forward
