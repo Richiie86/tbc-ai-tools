@@ -195,6 +195,20 @@ async def _create_private_repo(client: httpx.AsyncClient, token: str, slug: str,
         existing = await _gh_get(client, f'{GITHUB_API}/repos/{login}/{slug}', token)
         if existing.status_code == 200:
             return existing.json()
+    # A fine-grained PAT that can push to existing repos but lacks account-level
+    # repo-creation rights returns 403 "Resource not accessible by personal
+    # access token" here. This is the single most common reason a brand-new
+    # app deploy fails while editing existing apps still works — so surface an
+    # actionable message instead of a cryptic 502.
+    if r.status_code == 403 and 'not accessible by personal access token' in (r.text or '').lower():
+        raise HTTPException(502, (
+            'Your GitHub token can push to existing repos but is not allowed to '
+            'CREATE new repositories, so a brand-new app can\'t be provisioned. '
+            'This happens with fine-grained tokens (github_pat_…). Fix: in Operator '
+            '→ Security, replace it with a CLASSIC token (github.com/settings/tokens/new) '
+            'that has the "repo" scope (and "delete_repo" if you want cleanup). '
+            'Editing already-deployed apps keeps working either way.'
+        ))
     raise HTTPException(502, f'Repo create failed ({r.status_code}): {r.text[:200]}')
 
 
