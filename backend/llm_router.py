@@ -36,6 +36,7 @@ import base64
 import binascii
 import logging
 import os
+import time
 from dataclasses import dataclass, field
 from typing import AsyncIterator, List, Optional
 
@@ -152,6 +153,121 @@ async def available_providers() -> set[str]:
     return provs
 
 
+# ---------------------------------------------------------------------------
+# Provider health tracking + auto-failover
+# ---------------------------------------------------------------------------
+# When a provider call fails because it is out of credits / unauthorized / rate
+# limited, we remember that for a short while so that:
+#   * resolution automatically SKIPS a dead provider (the operator asked: "if
+#     any is out of credits it should automatically choose another AI"), and
+#   * the UI can render a status dot per provider — green (ok), yellow
+#     (degraded: rate-limited / overloaded), red (down: out of credits / bad
+#     key) — and stop offering a red provider until it recovers.
+#
+# This is in-process state (per web worker). It is intentionally simple and
+# self-healing: every entry carries an expiry, after which the provider is
+# retried optimistically. A successful call clears the entry immediately.
+_PROVIDER_HEALTH: dict = {}  # provider -> {'status', 'reason', 'until'}
+
+# How long to keep a provider marked unhealthy before optimistically retrying.
+_COOLDOWN_DOWN_CREDIT = 30 * 60   # out of credits — refill takes a human
+_COOLDOWN_DOWN_AUTH = 10 * 60     # bad/expired key — needs a human, retry sooner
+_COOLDOWN_DEGRADED = 60           # transient rate-limit / overload
+
+
+def _classify_provider_error(exc: Exception) -> Optional[tuple]:
+    """Map a provider exception to (status, reason, cooldown_seconds).
+
+    Returns None for errors that are NOT the provider's fault (e.g. a bad
+    request in our own payload) so we don't wrongly mark a healthy provider
+    down. status is 'down' (red) or 'degraded' (yellow).
+    """
+    msg = str(exc).lower()
+    code = getattr(exc, 'status_code', None) or getattr(exc, 'code', None)
+    # Out of credits / billing / quota → RED (down). A human must top up.
+    credit_markers = (
+        'credit balance is too low', 'insufficient_quota', 'insufficient funds',
+        'billing', 'quota', 'payment required', 'exceeded your current quota',
+        'out of credits', 'not enough credits',
+    )
+    if code == 402 or any(m in msg for m in credit_markers):
+        return ('down', 'out_of_credits', _COOLDOWN_DOWN_CREDIT)
+    # Auth problems → RED (down). Key missing/invalid/expired.
+    if code in (401, 403) or 'invalid api key' in msg or 'incorrect api key' in msg \
+            or 'authentication' in msg or 'unauthorized' in msg \
+            or isinstance(exc, ProviderKeyMissing):
+        return ('down', 'auth_error', _COOLDOWN_DOWN_AUTH)
+    # Rate limit / overloaded → YELLOW (degraded). Recovers on its own.
+    if code in (429, 529) or 'rate limit' in msg or 'overloaded' in msg \
+            or 'too many requests' in msg:
+        return ('degraded', 'rate_limited', _COOLDOWN_DEGRADED)
+    # Anything else (timeouts, our own 400s, network blips) — don't penalise.
+    return None
+
+
+def record_provider_ok(provider: str) -> None:
+    """Mark a provider healthy again after a successful call."""
+    if not provider:
+        return
+    _PROVIDER_HEALTH.pop(provider.lower(), None)
+
+
+def record_provider_error(provider: str, exc: Exception) -> None:
+    """Record a provider failure so resolution/UI can react to it."""
+    if not provider:
+        return
+    verdict = _classify_provider_error(exc)
+    if verdict is None:
+        return
+    status, reason, cooldown = verdict
+    _PROVIDER_HEALTH[provider.lower()] = {
+        'status': status,
+        'reason': reason,
+        'until': time.time() + cooldown,
+    }
+    logger.warning('Provider %s marked %s (%s) for %ss', provider, status, reason, cooldown)
+
+
+def provider_status(provider: str) -> str:
+    """Return 'ok' | 'degraded' | 'down' for a provider, auto-expiring stale
+    entries so a recovered provider goes back to green on its own."""
+    entry = _PROVIDER_HEALTH.get((provider or '').lower())
+    if not entry:
+        return 'ok'
+    if time.time() >= entry.get('until', 0):
+        _PROVIDER_HEALTH.pop((provider or '').lower(), None)
+        return 'ok'
+    return entry.get('status', 'ok')
+
+
+def is_provider_down(provider: str) -> bool:
+    """True only when a provider is hard-down (red) right now."""
+    return provider_status(provider) == 'down'
+
+
+async def providers_health() -> dict:
+    """Per-provider health for the UI dots. Shape:
+        { 'anthropic': {'configured': True, 'status': 'ok'|'degraded'|'down',
+                        'reason': str|None}, ... }
+    Only providers with a configured key are 'configured': True; the picker
+    greys out the rest. 'status' drives the dot colour.
+    """
+    configured = await available_providers()
+    out: dict = {}
+    for prov in ('anthropic', 'openai', 'gemini', 'openrouter'):
+        entry = _PROVIDER_HEALTH.get(prov)
+        # expire stale
+        if entry and time.time() >= entry.get('until', 0):
+            _PROVIDER_HEALTH.pop(prov, None)
+            entry = None
+        out[prov] = {
+            'configured': prov in configured,
+            'status': (entry or {}).get('status', 'ok'),
+            'reason': (entry or {}).get('reason'),
+        }
+    return out
+
+
 async def resolve_vision_model() -> Optional[tuple]:
     """Pick a vision-capable (provider, model) from whatever key is configured.
 
@@ -184,17 +300,49 @@ async def resolve_text_model() -> Optional[tuple]:
     forced to add an Anthropic key. Returns ``None`` when no key is set.
 
     Prefers Anthropic's Sonnet for build quality, then OpenAI, then the same
-    class of model via OpenRouter, then Gemini.
+    class of model via OpenRouter, then Gemini. Providers currently marked
+    'down' (out of credits / bad key) are skipped so a dead provider never
+    blocks a build; if EVERY configured provider is down we fall back to the
+    first configured one anyway (better to try and surface the real error).
     """
-    if await _anthropic_key():
-        return ('anthropic', 'claude-sonnet-4-5-20250929')
-    if await _openai_key():
-        return ('openai', 'gpt-4o')
-    if await _openrouter_key():
-        return ('openrouter', 'anthropic/claude-3.5-sonnet')
-    if await _gemini_key():
-        return ('gemini', 'gemini-2.0-flash')
-    return None
+    ordered = await ordered_text_models()
+    if not ordered:
+        return None
+    for prov, model in ordered:
+        if not is_provider_down(prov):
+            return (prov, model)
+    return ordered[0]
+
+
+# Preference order + the default text model per provider, in one place so
+# resolution and failover agree.
+_TEXT_MODEL_BY_PROVIDER = [
+    ('anthropic', 'claude-sonnet-4-5-20250929'),
+    ('openai', 'gpt-4o'),
+    ('openrouter', 'anthropic/claude-3.5-sonnet'),
+    ('gemini', 'gemini-2.0-flash'),
+]
+
+
+async def ordered_text_models(primary: Optional[tuple] = None) -> List[tuple]:
+    """Return a preference-ordered list of (provider, model) among CONFIGURED
+    providers, healthy ones first then any down ones last.
+
+    Used by the code-edit path to fail over automatically: try the first entry,
+    and if it errors with an out-of-credits / auth problem, move to the next.
+    An optional ``primary`` (provider, model) is placed first so an explicit
+    user pick is honoured before the default chain.
+    """
+    configured = await available_providers()
+    chain: List[tuple] = []
+    if primary and primary[0] in configured:
+        chain.append(primary)
+    for prov, model in _TEXT_MODEL_BY_PROVIDER:
+        if prov in configured and (not chain or chain[0][0] != prov):
+            chain.append((prov, model))
+    # Healthy providers first; keep relative order otherwise.
+    chain.sort(key=lambda pm: is_provider_down(pm[0]))
+    return chain
 
 
 def _sniff_mime(raw: bytes) -> str:

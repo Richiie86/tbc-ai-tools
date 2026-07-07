@@ -81,6 +81,38 @@ export function DashboardHeader({
  * the currently-selected model is always kept visible so SelectValue can
  * render it even when it's filtered out of the list.
  */
+// Map a provider group label ("OpenAI", "Anthropic", …) to its health entry
+// from the /chat/models `health` map (keyed by lowercase provider id).
+const _GROUP_TO_HEALTH_KEY = {
+  OpenAI: 'openai',
+  Anthropic: 'anthropic',
+  Gemini: 'gemini',
+  OpenRouter: 'openrouter',
+};
+
+function providerStatus(health, groupName) {
+  const key = _GROUP_TO_HEALTH_KEY[groupName];
+  if (!key || !health || !health[key]) return 'ok';
+  return health[key].status || 'ok';
+}
+
+// Green = ok, amber = degraded (rate-limited / overloaded), red = down (out of
+// credits or bad key — auto-skipped, another AI is used instead).
+function ProviderStatusDot({ status }) {
+  const cfg = {
+    ok: { cls: 'bg-emerald-500', title: 'Available' },
+    degraded: { cls: 'bg-amber-400', title: 'Busy / rate-limited — may be slow' },
+    down: { cls: 'bg-red-500', title: 'Out of credits — auto-skipped, another AI is used' },
+  }[status] || { cls: 'bg-slate-600', title: 'Unknown' };
+  return (
+    <span
+      className={`inline-block h-2 w-2 shrink-0 rounded-full ${cfg.cls}`}
+      title={cfg.title}
+      aria-label={`Provider status: ${cfg.title}`}
+    />
+  );
+}
+
 function ModelPicker({ models, model, setModel }) {
   const [q, setQ] = useState('');
 
@@ -146,7 +178,10 @@ function ModelPicker({ models, model, setModel }) {
         )}
         {filtered.map(([provider, items]) => (
           <SelectGroup key={provider}>
-            <SelectLabel className="text-[10px] uppercase tracking-wider text-slate-500">{provider}</SelectLabel>
+            <SelectLabel className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-slate-500">
+              <ProviderStatusDot status={providerStatus(models.health, provider)} />
+              {provider}
+            </SelectLabel>
             {items.map((m) => (
               <SelectItem key={m.id} value={m.id} className="focus:bg-slate-800">{m.label}</SelectItem>
             ))}
