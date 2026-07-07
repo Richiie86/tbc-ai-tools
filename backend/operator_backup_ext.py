@@ -37,6 +37,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -278,8 +279,31 @@ def _s3_mirror_prune(filenames_to_delete: list[str]) -> int:
 
 
 def _ensure_backup_dir() -> Path:
-    _BACKUP_DIR.mkdir(parents=True, exist_ok=True)
-    return _BACKUP_DIR
+    """Return a writable backup directory, creating it if needed.
+
+    On Render (and any host without a mounted persistent disk) the default
+    ``/app/data/backups`` path is NOT writable, so ``mkdir`` raises and the
+    daily snapshot job crashes with a traceback. We fall back to a writable
+    temp directory instead of failing. The resolved path is memoised on the
+    module global so we only log the fallback once and every later caller
+    (list / download / restore) agrees on the same location.
+    """
+    global _BACKUP_DIR
+    try:
+        _BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+        return _BACKUP_DIR
+    except OSError as e:
+        fallback = Path(tempfile.gettempdir()) / 'tbc-backups'
+        if _BACKUP_DIR != fallback:
+            logger.warning(
+                'backup dir %s is not writable (%s) — falling back to %s. '
+                'Set BACKUP_SNAPSHOT_DIR to a writable path (or mount a disk) '
+                'for backups that survive restarts.',
+                _BACKUP_DIR, e, fallback,
+            )
+            _BACKUP_DIR = fallback
+        _BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+        return _BACKUP_DIR
 
 
 async def _build_snapshot_payload(operator_email: str | None = None) -> dict:

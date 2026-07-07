@@ -143,7 +143,11 @@ def _validate_production_env() -> None:
         'SECRETS_KEY': 'token/secret encryption falls back to a MONGO_URL-derived key.',
         'OPERATOR_PASSWORD': 'a random one-time operator password is generated and logged.',
         'STRIPE_API_KEY': 'Stripe card payments are disabled until set.',
-        'GITHUB_TOKEN': 'AI Build / auto-deploy PR creation is disabled until set.',
+        'GITHUB_TOKEN': (
+            'AI Build / auto-deploy PR creation needs a GitHub token. Set it '
+            'here (env) OR under Operator → Security. A [github-auth] line '
+            'below reports the real, resolved status.'
+        ),
     }
     for key, effect in recommended.items():
         if not os.environ.get(key):
@@ -902,6 +906,64 @@ async def startup():
         scheduler.add_job(
             _backup_snapshot_job, 'interval', hours=24,
             next_run_time=datetime.now(timezone.utc) + timedelta(minutes=7),
+        )
+
+        # GitHub auth self-check — the [env-check] warning above only looks at
+        # the OS env var and is blind to a token saved in Operator → Security,
+        # so it reports "GITHUB_TOKEN not set" even when the operator has a
+        # valid key stored in-app. This one-shot job resolves the token from
+        # EITHER source, calls GitHub /user, and logs the definitive truth so
+        # a broken push / auto-deploy / 503 has an unambiguous root cause line.
+        async def _github_auth_check_job():
+            import httpx
+            try:
+                settings = await get_settings_doc()
+            except Exception:
+                settings = {}
+            token = (settings or {}).get('github_token') or os.environ.get('GITHUB_TOKEN')
+            source = (
+                'Operator → Security (settings doc)'
+                if (settings or {}).get('github_token')
+                else ('GITHUB_TOKEN env var' if os.environ.get('GITHUB_TOKEN') else None)
+            )
+            if not token:
+                logger.warning(
+                    '[github-auth] No GitHub token found in either the settings '
+                    'doc or GITHUB_TOKEN env — AI push / auto-deploy / PR creation '
+                    'will 503. Fix: set GITHUB_TOKEN in Render → Environment, or '
+                    'save it under Operator → Security.'
+                )
+                return
+            try:
+                async with httpx.AsyncClient(timeout=15.0) as client:
+                    r = await client.get(
+                        'https://api.github.com/user',
+                        headers={
+                            'Authorization': f'Bearer {token}',
+                            'Accept': 'application/vnd.github+json',
+                        },
+                    )
+                if r.status_code == 200:
+                    login = (r.json() or {}).get('login', '?')
+                    scopes = r.headers.get('x-oauth-scopes', '(fine-grained or unknown)')
+                    logger.info(
+                        '[github-auth] OK — authenticated as %s via %s. scopes=%s',
+                        login, source, scopes,
+                    )
+                else:
+                    logger.error(
+                        '[github-auth] Token from %s was REJECTED by GitHub '
+                        '(HTTP %s). It is invalid/expired/wrong-scope — AI push '
+                        '& auto-deploy will fail. Replace it in Operator → '
+                        'Security or set a valid GITHUB_TOKEN in Render.',
+                        source, r.status_code,
+                    )
+            except Exception:
+                logger.exception('[github-auth] verification request failed')
+
+        scheduler.add_job(
+            _github_auth_check_job, 'date',
+            run_date=datetime.now(timezone.utc) + timedelta(seconds=20),
         )
 
         # Recurring hosting billing — charges the "keep it live" fee in credits
