@@ -405,7 +405,8 @@ def looks_like_edit_request(message: str) -> bool:
     return any(v in text for v in _EDIT_VERBS)
 
 
-async def stream_agentic_edit(session: dict, instruction: str, *, is_operator: bool):
+async def stream_agentic_edit(session: dict, instruction: str, *, is_operator: bool,
+                              provider: str | None = None, model: str | None = None):
     """Async generator that ACTS on the user's app for a chat turn.
 
     Yields human-readable markdown chunks (streamed to the UI as deltas) while
@@ -442,11 +443,20 @@ async def stream_agentic_edit(session: dict, instruction: str, *, is_operator: b
     if not gh_token:
         yield 'I can\'t reach GitHub — no token is configured in Operator → Security.'
         return
-    resolved = await resolve_text_model()
-    if not resolved:
-        yield 'No AI provider key is configured, so I can\'t generate the fix. Add a key in Operator → Security.'
-        return
-    provider, model = resolved
+    # Honour the model the user picked in the chat UI. server.py resolves and
+    # validates the (provider, model) pair against the keys that are actually
+    # configured and passes it in. Only when the caller gives us nothing (e.g.
+    # an internal call) do we fall back to auto-resolution. This is what makes
+    # switching to Gemini/OpenAI actually take effect on the code-editing path
+    # instead of silently always using Anthropic.
+    if provider and model:
+        pass
+    else:
+        resolved = await resolve_text_model()
+        if not resolved:
+            yield 'No AI provider key is configured, so I can\'t generate the fix. Add a key in Operator → Security.'
+            return
+        provider, model = resolved
 
     repo = project['repo']
     branch = project.get('gitRef') or 'main'
