@@ -1828,6 +1828,16 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
                 async for chunk in stream_agentic_edit(
                     sess_full, req.message, is_operator=is_operator,
                 ):
+                    # Structured events (the Allow/Build proposal gate, deploy
+                    # progress, etc.) are dicts carrying `__event__`; forward
+                    # them as their own typed SSE event. Plain strings are text
+                    # deltas that also accumulate into the saved message.
+                    if isinstance(chunk, dict):
+                        ev = {k: v for k, v in chunk.items() if k != '__event__'}
+                        ev['type'] = chunk.get('__event__', 'delta')
+                        ev['session_id'] = session_id
+                        yield 'data: ' + json.dumps(ev) + '\n\n'
+                        continue
                     agent_response += chunk
                     yield 'data: ' + json.dumps({
                         'type': 'delta', 'content': chunk, 'session_id': session_id,

@@ -47,6 +47,7 @@ from typing import Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from auth_utils import get_current_user
@@ -432,9 +433,7 @@ async def stream_agentic_edit(session: dict, instruction: str, *, is_operator: b
         return
 
     from payments_ext import get_settings_doc
-    from app_builder_ext import (
-        GITHUB_API as _GH_API, _commit_files, _gh_get, _gh_post, generate_ai_code_fix,
-    )
+    from app_builder_ext import generate_ai_code_fix
     from llm_router import resolve_text_model
     from deploy_projects_ext import SELF_PROJECT_ID, PLATFORM_REPO
 
@@ -476,68 +475,64 @@ async def stream_agentic_edit(session: dict, instruction: str, *, is_operator: b
         yield fix['notes'] or 'I looked at the code and no change was needed for that.'
         return
 
-    file_list = '\n'.join(f'- `{p}`' for p in changed)
-    yield f'Editing {len(changed)} file(s):\n{file_list}\n\n'
-
+    # ── Approval gate ─────────────────────────────────────────────────────
+    # We DELIBERATELY do not commit or deploy here. Every code change is first
+    # presented as a proposal (changed files + summary) and nothing touches the
+    # repo or the live app until the user presses Allow/Build. This is the
+    # code-review gate the operator asked for, and it applies to EVERYONE.
+    import uuid
+    proposal_id = uuid.uuid4().hex
+    will_deploy = bool(is_operator and not is_platform)
+    will_pr = bool(is_platform)
+    summary = (fix.get('notes') or '').strip()
     try:
-        async with httpx.AsyncClient(timeout=45.0) as client:
-            if is_platform:
-                # Safe path for the live platform: branch → commit → PR.
-                ref = await _gh_get(client, f'{_GH_API}/repos/{repo}/git/ref/heads/{branch}', gh_token)
-                base_sha = (ref.json().get('object') or {}).get('sha') if ref.status_code == 200 else None
-                if not base_sha:
-                    yield f'Could not read the base branch `{branch}` to open a PR.'
-                    return
-                new_branch = f'ai-fix/{datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")}'
-                mk = await _gh_post(client, f'{_GH_API}/repos/{repo}/git/refs', gh_token,
-                                    {'ref': f'refs/heads/{new_branch}', 'sha': base_sha})
-                if mk.status_code not in (200, 201):
-                    yield f'Could not create the fix branch: {mk.text[:160]}'
-                    return
-                committed = await _commit_files(client, gh_token, repo, new_branch, changed)
-                pr_body = (f'**Automated fix from chat**\n\n> {instruction[:1500]}\n\n'
-                           f'**AI summary:** {fix["notes"]}\n\n'
-                           f'**Files changed ({committed}):**\n{file_list}\n\n'
-                           '_Review before merging — direct pushes to the live platform are blocked._')
-                pr = await _gh_post(client, f'{_GH_API}/repos/{repo}/pulls', gh_token, {
-                    'title': f'AI fix · {(fix["notes"] or "code fix")[:64]}',
-                    'head': new_branch, 'base': branch, 'body': pr_body[:60_000],
-                })
-                if pr.status_code not in (200, 201):
-                    yield f'Committed the fix to `{new_branch}` but couldn\'t open the PR: {pr.text[:160]}'
-                    return
-                pj = pr.json()
-                yield (f'\nDone. I opened **PR #{pj.get("number")}** with the fix '
-                       f'({committed} file(s)). Review and merge it to ship — I don\'t '
-                       f'push straight to the live platform for safety.\n\n{pj.get("html_url")}')
-                return
-
-            # User / operator's own app: commit to main.
-            committed = await _commit_files(client, gh_token, repo, branch, changed)
+        await db.chat_proposals.insert_one({
+            'id': proposal_id,
+            'session_id': session.get('id'),
+            'project_id': project_id,
+            'repo': repo,
+            'branch': branch,
+            'is_platform': is_platform,
+            'is_operator': bool(is_operator),
+            'will_deploy': will_deploy,
+            'will_pr': will_pr,
+            'changed': changed,            # {path: new_content}
+            'notes': summary[:2000],
+            'instruction': instruction[:4000],
+            'status': 'pending',
+            'created_at': _now(),
+        })
     except Exception as e:  # noqa: BLE001
-        logger.warning('agentic commit failed for %s: %s', project_id, str(e)[:200])
-        yield f'I generated the fix but committing it failed: {str(e)[:200]}'
+        logger.warning('could not store proposal for %s: %s', project_id, str(e)[:200])
+        yield f'I generated the change but could not stage it for approval: {str(e)[:160]}'
         return
 
-    if fix['notes']:
-        yield f'{fix["notes"]}\n\n'
-
-    if is_operator:
-        # Operator gets the full hands-free loop: commit + auto-redeploy.
-        yield 'Committed. Redeploying your live app now…\n\n'
-        try:
-            redeploy = await _redeploy_linked(project)
-            url = redeploy.get('deploy_url')
-            state = redeploy.get('state')
-            yield (f'Done — updated {committed} file(s) and redeployed. '
-                   f'State: **{state}**.' + (f'\n\n{url}' if url else ''))
-        except Exception as e:  # noqa: BLE001
-            yield (f'Updated {committed} file(s) and committed them, but the redeploy '
-                   f'hit a snag: {str(e)[:160]}. Tap **Redeploy now** to retry.')
+    file_list = '\n'.join(f'- `{p}`' for p in changed)
+    yield (f'I\'ve prepared changes to **{len(changed)} file(s)** — nothing has been '
+           f'committed or deployed yet:\n{file_list}\n\n')
+    if summary:
+        yield f'**What this does:** {summary}\n\n'
+    # Structured event → the UI renders the Allow/Build + Reject gate.
+    yield {
+        '__event__': 'proposal',
+        'proposal_id': proposal_id,
+        'files': list(changed.keys()),
+        'summary': summary[:1000],
+        'is_platform': is_platform,
+        'will_deploy': will_deploy,
+        'will_pr': will_pr,
+    }
+    if will_pr:
+        yield ('Review the changes above, then press **Allow & Open PR** to commit '
+               'them to a review branch and open a pull request. The live platform '
+               'is never pushed directly.')
+    elif will_deploy:
+        yield ('Review the changes above, then press **Allow & Build** to commit and '
+               'deploy your live app — I\'ll wait for the build and tell you the '
+               'moment it\'s live.')
     else:
-        # Regular users: commit only — redeploy stays a deliberate button press.
-        yield (f'Done — I updated {committed} file(s) and committed the change to your '
-               f'app. Tap **Redeploy now** to push it live.')
+        yield ('Review the changes above, then press **Allow & Save** to commit them '
+               'to your app. Tap **Deploy** when you\'re ready to push it live.')
 
 
 @router.get('/{session_id}/deploy')
@@ -562,3 +557,240 @@ async def chat_deploy_status(
         'deploy_url': project.get('last_deployment_url'),
         'state': project.get('last_deployment_state'),
     }
+
+
+# ─── Approval gate: apply / reject / list staged proposals ─────────────────
+#
+# stream_agentic_edit stages every code change as a `chat_proposals` doc and
+# hands the UI an Allow/Build gate. Nothing is committed or deployed until the
+# user approves here. On approval the operator flow commits + deploys and WAITS
+# for the build (streaming progress), then continues; regular users commit only
+# and deploy with the manual button, exactly as required.
+
+def _sse_frame(chunk) -> str:
+    """Serialise an agentic chunk to an SSE `data:` frame. Dicts carrying an
+    `__event__` key become their own typed event (proposal / deploy_progress /
+    deploy_done); plain strings become `delta` text."""
+    import json as _json
+    if isinstance(chunk, dict):
+        ev = dict(chunk)
+        if '__event__' in ev:
+            ev['type'] = ev.pop('__event__')
+        return 'data: ' + _json.dumps(ev) + '\n\n'
+    return 'data: ' + _json.dumps({'type': 'delta', 'content': chunk}) + '\n\n'
+
+
+async def _redeploy_linked_streaming(project: dict):
+    """Trigger a production deploy and WAIT for it, yielding progress events so
+    the chat can show 'still building…' and then continue when it's live.
+
+    Reuses the blocking `_poll_deployment_ready` for the actual Vercel polling
+    (so we don't duplicate its self-heal / API details) and emits a heartbeat
+    `deploy_progress` event every few seconds while it runs. Ends with a single
+    `deploy_done` event carrying the terminal state + live URL."""
+    from payments_ext import get_settings_doc
+    from deploy_projects_ext import _trigger_deploy
+    from app_builder_ext import _poll_deployment_ready
+    import asyncio
+    import time as _time
+
+    settings = await get_settings_doc()
+    git_ref = project.get('gitRef') or 'main'
+    res = await _trigger_deploy(
+        project['id'], settings, 'production', git_ref,
+        bypass_review=True, user_id=None,
+    )
+    deployment_id = res.get('deployment_id')
+    deploy_url = res.get('url')
+    if deploy_url and not deploy_url.startswith('http'):
+        deploy_url = f'https://{deploy_url}'
+    state = (res.get('state') or 'QUEUED')
+    yield {'__event__': 'deploy_progress', 'state': state, 'elapsed': 0, 'url': deploy_url}
+
+    if not deployment_id:
+        await db.deploy_projects.update_one(
+            {'id': project['id']},
+            {'$set': {'last_deployment_state': state,
+                      'last_deployment_url': deploy_url, 'updated_at': _now()}},
+        )
+        yield {'__event__': 'deploy_done', 'state': state, 'url': deploy_url}
+        return
+
+    poll_task = asyncio.create_task(_poll_deployment_ready(settings, deployment_id))
+    start = _time.monotonic()
+    # Heartbeat while the build runs so the UI shows it's not done yet.
+    while not poll_task.done():
+        try:
+            await asyncio.wait_for(asyncio.shield(poll_task), timeout=4)
+        except asyncio.TimeoutError:
+            elapsed = int(_time.monotonic() - start)
+            yield {'__event__': 'deploy_progress', 'state': 'BUILDING',
+                   'elapsed': elapsed, 'url': deploy_url}
+        except Exception:  # noqa: BLE001 — real result handled below
+            break
+    ready = await poll_task
+    rstate = (ready.get('readyState') or ready.get('status') or state).upper()
+    u = ready.get('url')
+    if u:
+        deploy_url = f'https://{u}' if not u.startswith('http') else u
+    await db.deploy_projects.update_one(
+        {'id': project['id']},
+        {'$set': {'last_deployment_state': rstate,
+                  'last_deployment_url': deploy_url, 'updated_at': _now()}},
+    )
+    yield {'__event__': 'deploy_done', 'state': rstate, 'url': deploy_url}
+
+
+async def _apply_proposal_stream(proposal: dict, *, is_operator: bool):
+    """Commit an approved proposal (platform → PR; otherwise → main) and, for the
+    operator on their own app, deploy + wait. Yields text + structured events."""
+    from payments_ext import get_settings_doc
+    from app_builder_ext import GITHUB_API as _GH_API, _commit_files, _gh_get, _gh_post
+
+    settings = await get_settings_doc()
+    gh_token = settings.get('github_token') or os.environ.get('GITHUB_TOKEN')
+    if not gh_token:
+        yield "I can't reach GitHub — no token is configured in Operator → Security."
+        return
+
+    repo = proposal['repo']
+    branch = proposal.get('branch') or 'main'
+    changed = proposal.get('changed') or {}
+    is_platform = bool(proposal.get('is_platform'))
+    if is_platform and not is_operator:
+        yield 'Editing the TBC platform is restricted to the operator account.'
+        return
+    if not changed:
+        await db.chat_proposals.update_one({'id': proposal['id']}, {'$set': {'status': 'empty'}})
+        yield 'There are no changes left to apply.'
+        return
+
+    project = await db.deploy_projects.find_one({'id': proposal['project_id']})
+    file_list = '\n'.join(f'- `{p}`' for p in changed)
+    try:
+        async with httpx.AsyncClient(timeout=45.0) as client:
+            if is_platform:
+                ref = await _gh_get(client, f'{_GH_API}/repos/{repo}/git/ref/heads/{branch}', gh_token)
+                base_sha = (ref.json().get('object') or {}).get('sha') if ref.status_code == 200 else None
+                if not base_sha:
+                    yield f'Could not read the base branch `{branch}` to open a PR.'
+                    return
+                new_branch = f'ai-fix/{datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")}'
+                mk = await _gh_post(client, f'{_GH_API}/repos/{repo}/git/refs', gh_token,
+                                    {'ref': f'refs/heads/{new_branch}', 'sha': base_sha})
+                if mk.status_code not in (200, 201):
+                    yield f'Could not create the fix branch: {mk.text[:160]}'
+                    return
+                committed = await _commit_files(client, gh_token, repo, new_branch, changed)
+                pr_body = (f'**Approved change from chat**\n\n> {proposal.get("instruction", "")[:1500]}\n\n'
+                           f'**AI summary:** {proposal.get("notes", "")}\n\n'
+                           f'**Files changed ({committed}):**\n{file_list}\n\n'
+                           '_Review before merging — direct pushes to the live platform are blocked._')
+                pr = await _gh_post(client, f'{_GH_API}/repos/{repo}/pulls', gh_token, {
+                    'title': f'AI fix · {(proposal.get("notes") or "code fix")[:64]}',
+                    'head': new_branch, 'base': branch, 'body': pr_body[:60_000],
+                })
+                await db.chat_proposals.update_one({'id': proposal['id']}, {'$set': {'status': 'applied'}})
+                if pr.status_code not in (200, 201):
+                    yield f'Committed to `{new_branch}` but couldn\'t open the PR: {pr.text[:160]}'
+                    return
+                pj = pr.json()
+                await db.chat_proposals.update_one(
+                    {'id': proposal['id']}, {'$set': {'pr_url': pj.get('html_url')}})
+                yield (f'Approved. I opened **PR #{pj.get("number")}** with the change '
+                       f'({committed} file(s)). Review and merge it to ship — I never '
+                       f'push straight to the live platform.\n\n{pj.get("html_url")}')
+                return
+
+            committed = await _commit_files(client, gh_token, repo, branch, changed)
+    except Exception as e:  # noqa: BLE001
+        logger.warning('proposal apply commit failed for %s: %s', proposal.get('id'), str(e)[:200])
+        yield f'I tried to apply the change but committing failed: {str(e)[:200]}'
+        return
+
+    await db.chat_proposals.update_one({'id': proposal['id']}, {'$set': {'status': 'applied'}})
+
+    if is_operator and project:
+        yield (f'Approved — committed {committed} file(s). Deploying your live app now; '
+               f'I\'ll wait for the build…\n\n')
+        try:
+            async for prog in _redeploy_linked_streaming(project):
+                yield prog
+        except Exception as e:  # noqa: BLE001
+            yield (f'Committed {committed} file(s), but the deploy hit a snag: '
+                   f'{str(e)[:160]}. Tap **Redeploy now** to retry.')
+            return
+        yield '\nYour app is live with the change.'
+    else:
+        yield (f'Approved — I committed {committed} file(s) to your app. '
+               f'Tap **Deploy** to push it live when you\'re ready.')
+
+
+@router.post('/{session_id}/proposals/{proposal_id}/apply')
+async def chat_apply_proposal(
+    session_id: str,
+    proposal_id: str,
+    user: dict = Depends(get_current_user),
+):
+    """Approve a staged proposal: commit (+ deploy & wait for operator). SSE."""
+    session = await _get_session_or_404(session_id, user)
+    proposal = await db.chat_proposals.find_one({'id': proposal_id, 'session_id': session_id})
+    if not proposal:
+        raise HTTPException(404, 'That change was not found — it may have expired.')
+    if proposal.get('status') != 'pending':
+        raise HTTPException(409, f'This change was already {proposal.get("status")}.')
+    db_user = await db.users.find_one({'id': user['sub']})
+    is_operator = bool(db_user and db_user.get('role') == 'operator')
+
+    async def gen():
+        try:
+            async for chunk in _apply_proposal_stream(proposal, is_operator=is_operator):
+                yield _sse_frame(chunk)
+        except Exception as e:  # noqa: BLE001
+            logger.exception('apply proposal stream failed')
+            yield _sse_frame(f'\n\nSomething went wrong applying that: {str(e)[:200]}')
+        yield 'data: ' + __import__('json').dumps({'type': 'done'}) + '\n\n'
+
+    return StreamingResponse(gen(), media_type='text/event-stream')
+
+
+@router.post('/{session_id}/proposals/{proposal_id}/reject')
+async def chat_reject_proposal(
+    session_id: str,
+    proposal_id: str,
+    user: dict = Depends(get_current_user),
+):
+    """Discard a staged proposal without touching the repo or the live app."""
+    session = await _get_session_or_404(session_id, user)  # noqa: F841 — authz
+    r = await db.chat_proposals.update_one(
+        {'id': proposal_id, 'session_id': session_id, 'status': 'pending'},
+        {'$set': {'status': 'rejected', 'updated_at': _now()}},
+    )
+    if not r.matched_count:
+        raise HTTPException(404, 'That change was not found or was already handled.')
+    return {'ok': True, 'status': 'rejected'}
+
+
+@router.get('/{session_id}/proposals')
+async def chat_list_proposals(
+    session_id: str,
+    user: dict = Depends(get_current_user),
+):
+    """Pending proposals for this chat so the Allow/Build gate survives reload."""
+    session = await _get_session_or_404(session_id, user)  # noqa: F841 — authz
+    out = []
+    cur = db.chat_proposals.find(
+        {'session_id': session_id, 'status': 'pending'}
+    ).sort('created_at', -1)
+    async for p in cur:
+        created = p.get('created_at')
+        out.append({
+            'proposal_id': p['id'],
+            'files': list((p.get('changed') or {}).keys()),
+            'summary': (p.get('notes') or '')[:1000],
+            'is_platform': bool(p.get('is_platform')),
+            'will_deploy': bool(p.get('will_deploy')),
+            'will_pr': bool(p.get('will_pr')),
+            'created_at': created.isoformat() if hasattr(created, 'isoformat') else None,
+        })
+    return {'proposals': out}
