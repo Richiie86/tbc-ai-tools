@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import api, { streamChat } from '../lib/api';
+import api, { streamChat, getPendingProposals } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { toast } from 'sonner';
 import { ArrowDownToLine } from 'lucide-react';
@@ -10,6 +10,7 @@ import { DashboardHeader } from './dashboard/DashboardHeader';
 import { TrialBanner } from './dashboard/TrialBanner';
 import { EmptyState, MessageBubble } from './dashboard/ChatMessages';
 import EndOfSessionActions from './dashboard/EndOfSessionActions';
+import ProposalGate from './dashboard/ProposalGate';
 import PreviewPane from '../components/PreviewPane';
 import { ChatComposer } from './dashboard/ChatComposer';
 import { OutOfCreditsDialog } from './dashboard/OutOfCreditsDialog';
@@ -52,6 +53,9 @@ export default function Dashboard({ variant = 'tbc1' }) {
   const [showDeploySuggest, setShowDeploySuggest] = useState(false);
   // Color-coded verdict modal for Run Code Review / Run Health Check.
   const [actionResult, setActionResult] = useState(null);
+  // Staged AI code change awaiting the user's Allow/Build approval. Nothing is
+  // committed or deployed until they approve it in the ProposalGate.
+  const [pendingProposal, setPendingProposal] = useState(null);
   const taRef = useRef(null);
   const streamTextRef = useRef('');
 
@@ -82,14 +86,25 @@ export default function Dashboard({ variant = 'tbc1' }) {
         let stored = 'claude-opus-4-7';
         try { stored = localStorage.getItem('tbc.chat.model') || stored; } catch { /* private mode */ }
         setModel(data.session?.model || stored);
+        // Restore any un-answered Allow/Build gate so it survives a reload.
+        try {
+          const { data: pd } = await getPendingProposals(id);
+          if (!cancelled) setPendingProposal((pd.proposals || [])[0] || null);
+        } catch (err) {
+          console.warn('Failed to load pending proposals', err);
+        }
       } catch (e) {
         console.error('Failed to load messages', e);
         toast.error('Could not load session');
         navigate('/dashboard');
       }
     }
-    if (currentId) loadMessages(currentId);
-    else setMessages([]);
+    if (currentId) {
+      loadMessages(currentId);
+    } else {
+      setMessages([]);
+      setPendingProposal(null);
+    }
     return () => { cancelled = true; };
   }, [currentId, navigate]);
 
@@ -201,6 +216,17 @@ export default function Dashboard({ variant = 'tbc1' }) {
               : undefined,
             duration: 6000,
           });
+        } else if (ev.type === 'proposal') {
+          // The AI staged a code change — surface the Allow/Build gate.
+          // Nothing is committed or deployed until the user approves it.
+          setPendingProposal({
+            proposal_id: ev.proposal_id,
+            files: ev.files || [],
+            summary: ev.summary || '',
+            is_platform: ev.is_platform,
+            will_deploy: ev.will_deploy,
+            will_pr: ev.will_pr,
+          });
         } else if (ev.type === 'done') {
           if (ev.session_id && !acquiredSessionId) acquiredSessionId = ev.session_id;
           break;
@@ -289,6 +315,23 @@ export default function Dashboard({ variant = 'tbc1' }) {
                 ))}
                 {streaming && (
                   <MessageBubble role="assistant" content={streamText} streaming />
+                )}
+                {pendingProposal && !streaming && (
+                  <ProposalGate
+                    key={pendingProposal.proposal_id}
+                    proposal={pendingProposal}
+                    sessionId={currentId}
+                    onDone={({ status }) => {
+                      // Leave the gate mounted so its terminal state (live URL
+                      // or "discarded") stays visible; it clears on reload since
+                      // the proposal is no longer pending.
+                      if (status === 'applied') {
+                        loadSessions();
+                        refresh();
+                        if (user?.role === 'operator') setShowDeploySuggest(true);
+                      }
+                    }}
+                  />
                 )}
                 <EndOfSessionActions
                   messages={messages}

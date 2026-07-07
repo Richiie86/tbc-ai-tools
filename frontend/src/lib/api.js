@@ -106,3 +106,19 @@ export async function* streamChat({ session_id, message, model, variant, attachm
     }
   }
 }
+
+// Approve a staged proposal (the Allow/Build gate). Streams commit + deploy
+// progress the same way the chat turn does. Reuses streamPost's SSE reader.
+export function streamApplyProposal(sessionId, proposalId) {
+  return streamPost(`/chat/sessions/${sessionId}/proposals/${proposalId}/apply`, {});
+}
+
+// Discard a staged proposal without touching the repo or the live app.
+export function rejectProposal(sessionId, proposalId) {
+  return api.post(`/chat/sessions/${sessionId}/proposals/${proposalId}/reject`);
+}
+
+// Pending proposals for a chat — used to restore the gate after a reload.
+export function getPendingProposals(sessionId) {
+  return api.get(`/chat/sessions/${sessionId}/proposals`);
+}
