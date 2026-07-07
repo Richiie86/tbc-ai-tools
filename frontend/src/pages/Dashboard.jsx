@@ -35,7 +35,13 @@ export default function Dashboard({ variant = 'tbc1' }) {
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
   const [streamText, setStreamText] = useState('');
-  const [model, setModel] = useState('claude-opus-4-7');
+  // Persist the operator's model choice so it survives hard refresh / tab
+  // switches instead of snapping back to the Claude default. Read the stored
+  // value synchronously on mount; a dedicated effect writes it back on change.
+  const [model, setModel] = useState(() => {
+    try { return localStorage.getItem('tbc.chat.model') || 'claude-opus-4-7'; }
+    catch { return 'claude-opus-4-7'; }
+  });
   const [models, setModels] = useState({ providers: {} });
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [outOfCreditsOpen, setOutOfCreditsOpen] = useState(false);
@@ -71,7 +77,11 @@ export default function Dashboard({ variant = 'tbc1' }) {
         const { data } = await api.get(`/chat/sessions/${id}/messages`);
         if (cancelled) return;
         setMessages(data.messages || []);
-        setModel(data.session?.model || 'claude-opus-4-7');
+        // Prefer the model the session was last used with; otherwise fall back
+        // to the operator's saved preference (not a hardcoded Claude default).
+        let stored = 'claude-opus-4-7';
+        try { stored = localStorage.getItem('tbc.chat.model') || stored; } catch { /* private mode */ }
+        setModel(data.session?.model || stored);
       } catch (e) {
         console.error('Failed to load messages', e);
         toast.error('Could not load session');
@@ -88,9 +98,12 @@ export default function Dashboard({ variant = 'tbc1' }) {
     api.get('/chat/models').then((r) => {
       setModels(r.data);
       // If the operator made "Automatic" the default and we're on a fresh
-      // chat (no session loaded yet), pre-select it. Never override a model
-      // the user is already viewing in an existing session.
-      if (r.data?.auto_default && r.data?.auto?.id && !currentId) {
+      // chat (no session loaded yet), pre-select it — but never clobber an
+      // explicit model preference the operator has already saved, and never
+      // override a model they're viewing in an existing session.
+      let hasStoredPref = false;
+      try { hasStoredPref = !!localStorage.getItem('tbc.chat.model'); } catch { /* private mode */ }
+      if (r.data?.auto_default && r.data?.auto?.id && !currentId && !hasStoredPref) {
         setModel(r.data.auto.id);
       }
     }).catch((err) => {
@@ -99,6 +112,14 @@ export default function Dashboard({ variant = 'tbc1' }) {
       console.warn('Failed to load chat models', err);
     });
   }, [variant, currentId]);
+
+  // Persist the chosen model on every change so it survives a hard refresh
+  // or navigating away and back. This is what stops the picker snapping back
+  // to Claude. Skip empty/placeholder values.
+  useEffect(() => {
+    if (!model) return;
+    try { localStorage.setItem('tbc.chat.model', model); } catch { /* private mode */ }
+  }, [model]);
 
   // Sync sessionId from URL — functional setState so we don't depend on
   // `currentId` (would re-fire every time it changed and create a loop).
