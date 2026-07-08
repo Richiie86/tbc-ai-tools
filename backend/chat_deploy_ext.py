@@ -532,6 +532,7 @@ async def stream_agentic_edit(session: dict, instruction: str, *, is_operator: b
             'will_deploy': will_deploy,
             'will_pr': will_pr,
             'changed': changed,            # {path: new_content}
+            'created': list(fix.get('created') or []),  # subset of changed that are new files
             'notes': summary[:2000],
             'instruction': instruction[:4000],
             'status': 'pending',
@@ -542,8 +543,21 @@ async def stream_agentic_edit(session: dict, instruction: str, *, is_operator: b
         yield f'I generated the change but could not stage it for approval: {str(e)[:160]}'
         return
 
-    file_list = '\n'.join(f'- `{p}`' for p in changed)
-    yield (f'I\'ve prepared changes to **{len(changed)} file(s)** — nothing has been '
+    # Distinguish brand-new files from edits so the user can see features being
+    # ADDED, not just tweaked (the in-app editor can now create new files).
+    created = set(fix.get('created') or [])
+    file_list = '\n'.join(
+        (f'- `{p}` _(new)_' if p in created else f'- `{p}`') for p in changed
+    )
+    n_new = len(created)
+    n_edit = len(changed) - n_new
+    if n_new and n_edit:
+        headline = f'**{n_new} new file(s)** and edits to **{n_edit} file(s)**'
+    elif n_new:
+        headline = f'**{n_new} new file(s)**'
+    else:
+        headline = f'changes to **{n_edit} file(s)**'
+    yield (f'I\'ve prepared {headline} — nothing has been '
            f'committed or deployed yet:\n{file_list}\n\n')
     if summary:
         yield f'**What this does:** {summary}\n\n'
@@ -552,6 +566,7 @@ async def stream_agentic_edit(session: dict, instruction: str, *, is_operator: b
         '__event__': 'proposal',
         'proposal_id': proposal_id,
         'files': list(changed.keys()),
+        'created': list(created),
         'summary': summary[:1000],
         'is_platform': is_platform,
         'will_deploy': will_deploy,
