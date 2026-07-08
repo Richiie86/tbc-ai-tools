@@ -435,7 +435,9 @@ async def stream_agentic_edit(session: dict, instruction: str, *, is_operator: b
 
     from payments_ext import get_settings_doc
     from app_builder_ext import generate_ai_code_fix
-    from llm_router import resolve_text_model
+    from llm_router import (
+        ordered_text_models, record_provider_ok, record_provider_error,
+    )
     from deploy_projects_ext import SELF_PROJECT_ID, PLATFORM_REPO
 
     settings = await get_settings_doc()
@@ -443,20 +445,16 @@ async def stream_agentic_edit(session: dict, instruction: str, *, is_operator: b
     if not gh_token:
         yield 'I can\'t reach GitHub — no token is configured in Operator → Security.'
         return
-    # Honour the model the user picked in the chat UI. server.py resolves and
-    # validates the (provider, model) pair against the keys that are actually
-    # configured and passes it in. Only when the caller gives us nothing (e.g.
-    # an internal call) do we fall back to auto-resolution. This is what makes
-    # switching to Gemini/OpenAI actually take effect on the code-editing path
-    # instead of silently always using Anthropic.
-    if provider and model:
-        pass
-    else:
-        resolved = await resolve_text_model()
-        if not resolved:
-            yield 'No AI provider key is configured, so I can\'t generate the fix. Add a key in Operator → Security.'
-            return
-        provider, model = resolved
+    # Build a preference-ordered provider chain for AUTO-FAILOVER. The model the
+    # user picked (passed in by server.py, validated against configured keys) is
+    # tried first; if it's out of credits / unauthorized we transparently fall
+    # over to the next available AI so a single dead provider never blocks an
+    # edit. Providers already known-down are pushed to the back of the chain.
+    primary = (provider, model) if (provider and model) else None
+    chain = await ordered_text_models(primary)
+    if not chain:
+        yield 'No AI provider key is configured, so I can\'t generate the fix. Add a key in Operator → Security.'
+        return
 
     repo = project['repo']
     branch = project.get('gitRef') or 'main'
@@ -468,16 +466,43 @@ async def stream_agentic_edit(session: dict, instruction: str, *, is_operator: b
         return
 
     yield f'Reading your app\'s code (`{repo}`)…\n\n'
-    try:
-        fix = await generate_ai_code_fix(
-            repo, branch, instruction, gh_token, provider=provider, model=model,
-        )
-    except HTTPException as e:
-        yield f'I couldn\'t complete the edit: {getattr(e, "detail", str(e))}'
-        return
-    except Exception as e:  # noqa: BLE001
-        logger.warning('agentic edit failed for %s: %s', project_id, str(e)[:200])
-        yield f'Something went wrong while editing: {str(e)[:200]}'
+    fix = None
+    last_err = None
+    for idx, (prov_i, model_i) in enumerate(chain):
+        try:
+            fix = await generate_ai_code_fix(
+                repo, branch, instruction, gh_token, provider=prov_i, model=model_i,
+            )
+            record_provider_ok(prov_i)
+            if idx > 0:
+                # We recovered on a fallback provider — tell the user plainly.
+                yield (f'_(The previous AI was unavailable, so I switched to '
+                       f'**{prov_i}** to finish this.)_\n\n')
+            break
+        except HTTPException as e:
+            last_err = getattr(e, 'detail', str(e))
+            record_provider_error(prov_i, e)
+            # Only fail over on provider-fault errors (credits/auth/rate). For
+            # anything else, stop and report it — retrying won't help.
+            from llm_router import _classify_provider_error
+            if _classify_provider_error(e) is None or idx == len(chain) - 1:
+                yield f'I couldn\'t complete the edit: {last_err}'
+                return
+            yield (f'_({prov_i} is unavailable — {str(last_err)[:80]}. Trying '
+                   f'another AI…)_\n\n')
+            continue
+        except Exception as e:  # noqa: BLE001
+            last_err = str(e)[:200]
+            record_provider_error(prov_i, e)
+            logger.warning('agentic edit failed for %s on %s: %s', project_id, prov_i, last_err)
+            from llm_router import _classify_provider_error
+            if _classify_provider_error(e) is None or idx == len(chain) - 1:
+                yield f'Something went wrong while editing: {last_err}'
+                return
+            yield (f'_({prov_i} is unavailable — trying another AI…)_\n\n')
+            continue
+    if fix is None:
+        yield f'All available AIs failed to generate the edit. Last error: {last_err or "unknown"}'
         return
 
     changed = fix['changed']

@@ -1925,6 +1925,14 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
                 }) + '\n\n'
                 return
             attempts = [m for m in attempts if resolve_model(m)[0] in avail] or attempts
+            # Push providers currently known to be DOWN (out of credits / bad
+            # key) to the back so we don't waste the first attempt on a dead
+            # provider every time. A stable sort keeps the rest of the order.
+            try:
+                from llm_router import is_provider_down as _is_down
+                attempts.sort(key=lambda m: _is_down(resolve_model(m)[0]))
+            except Exception:  # noqa: BLE001
+                pass
         last_error: Optional[str] = None
         used_model = primary
         ok = False
@@ -1976,6 +1984,11 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
                         break
                 ok = True
                 used_model = model_id
+                try:
+                    from llm_router import record_provider_ok as _rec_ok
+                    _rec_ok(provider_i)
+                except Exception:  # noqa: BLE001
+                    pass
                 if idx > 0:
                     # Surface that we recovered with a fallback so the UI can
                     # render the "retried with X after Y failed" pill.
@@ -1988,6 +2001,11 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
                 break
             except Exception as e:
                 last_error = str(e)[:300]
+                try:
+                    from llm_router import record_provider_error as _rec_err
+                    _rec_err(provider_i, e)
+                except Exception:  # noqa: BLE001
+                    pass
                 logger.warning('LLM stream error (model=%s, attempt=%d/%d): %s',
                                model_id, idx + 1, len(attempts), last_error)
                 # Only retry if we haven't yet produced any deltas — partial
@@ -2120,6 +2138,16 @@ async def list_models():
     except Exception as e:  # noqa: BLE001 — never let the picker fail on this
         logger.warning('OpenRouter catalog unavailable: %s', e)
 
+    # Per-provider health so the picker can render a status dot (green ok /
+    # yellow degraded / red out-of-credits) and the UI can reassure users that
+    # a dead provider is auto-skipped.
+    health = {}
+    try:
+        from llm_router import providers_health
+        health = await providers_health()
+    except Exception as e:  # noqa: BLE001
+        logger.warning('providers_health unavailable: %s', e)
+
     return {
         'default': DEFAULT_MODEL,
         # When True, the chat UI should default the picker to "Automatic".
@@ -2129,7 +2157,22 @@ async def list_models():
             'label': 'Automatic (best + cheapest per task)',
         },
         'providers': providers,
+        'health': health,
     }
+
+
+@api.get('/chat/providers/health')
+async def chat_providers_health():
+    """Lightweight per-provider health for the status dots. Pollable so the UI
+    turns a provider green again on its own once it recovers. Shape:
+        { 'anthropic': {'configured', 'status', 'reason'}, ... }
+    status is 'ok' (green) | 'degraded' (yellow) | 'down' (red)."""
+    try:
+        from llm_router import providers_health
+        return {'providers': await providers_health()}
+    except Exception as e:  # noqa: BLE001
+        logger.warning('providers_health endpoint failed: %s', e)
+        return {'providers': {}}
 
 
 # ===== PAYMENTS =====

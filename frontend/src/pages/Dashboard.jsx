@@ -128,6 +128,21 @@ export default function Dashboard({ variant = 'tbc1' }) {
     });
   }, [variant, currentId]);
 
+  // Poll provider health so the picker's status dots update on their own — a
+  // provider that ran out of credits (red) turns green again once it recovers,
+  // without a page reload. Best-effort: merge only the `health` map so we don't
+  // disturb the model catalog. Cleared on unmount.
+  useEffect(() => {
+    let alive = true;
+    const tick = () => {
+      api.get('/chat/providers/health')
+        .then((r) => { if (alive && r.data?.providers) setModels((m) => ({ ...m, health: r.data.providers })); })
+        .catch(() => { /* transient — dots just keep their last state */ });
+    };
+    const id = setInterval(tick, 30000);
+    return () => { alive = false; clearInterval(id); };
+  }, []);
+
   // Persist the chosen model on every change so it survives a hard refresh
   // or navigating away and back. This is what stops the picker snapping back
   // to Claude. Skip empty/placeholder values.
