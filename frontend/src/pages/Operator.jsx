@@ -42,6 +42,7 @@ import TaxCalculatorTab from './operator/TaxCalculatorTab';
 import TaxameterTab from './operator/TaxameterTab';
 import PricingTab from './operator/PricingTab';
 import UserProjectsTab from './operator/UserProjectsTab';
+import PlatformHealthStrip from './operator/PlatformHealthStrip';
 import PreviewWidget from './PreviewWidget';
 import EmergencyLockdownPill from '../components/EmergencyLockdownPill';
 import AnalyticsTab from './operator/AnalyticsTab';
@@ -201,6 +202,11 @@ export default function Operator() {
             </div>
 
             <StatsToolbar stats={stats} onRefresh={loadAll} />
+
+            {/* Always-visible readout of the four pillars needed to build,
+                edit & deploy independently. Tapping it jumps to the Domains
+                tab where the full diagnostics panel (with fixes) lives. */}
+            <PlatformHealthStrip onOpenDetails={() => onTabChange('domains')} />
 
             {/* Build badge — a clearly visible marker that proves this
                 bundle reached production. If you can see this pill on

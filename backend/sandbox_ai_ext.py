@@ -79,28 +79,40 @@ matching this exact schema:
   "notes": "<one-sentence summary of what you changed>",
   "files": [
     {
-      "path": "<exactly the path you were given>",
-      "new_content": "<FULL updated file contents, not a diff>",
+      "path": "<path of a provided file to edit, OR a brand-new file path to create>",
+      "new_content": "<FULL file contents, not a diff>",
       "reason": "<one sentence explaining the change>"
     }
   ]
 }
 
 Rules:
-1. Only edit files that were provided in the context. If the instruction asks
-   for changes outside those files, return `files: []` and explain in `notes`.
-2. ALWAYS return the COMPLETE new file content for every file you touch — never
-   a diff, never a snippet. The system will overwrite the file as-is.
-3. If a file doesn't need to change, OMIT it from the `files` array.
-4. Preserve existing imports / exports / public APIs unless explicitly told otherwise.
-5. Match the existing code style (indentation, quote marks, semicolons).
-6. Do NOT include backticks, ```json fences, or any commentary outside the JSON.
-7. This codebase IS the TBCTools platform (repo Richiie86/tbc-ai-tools — a React
+1. You may BOTH edit the files provided in the context AND create brand-new
+   files when the instruction needs them (e.g. a new page, component, route,
+   model, or helper). To create a file, add an entry whose `path` is the new
+   file's full repo-relative path (e.g. "frontend/src/pages/Foo.jsx" or
+   "backend/foo_ext.py") with its COMPLETE contents in `new_content`. Only
+   return `files: []` when the instruction genuinely requires no code change
+   (then explain why in `notes`).
+2. When you create a new file, also EDIT whatever existing file must reference
+   it so the feature is actually wired up and works end-to-end — e.g. add the
+   import + route in the app's router, register a new FastAPI router in
+   server.py, or add the nav link. A new file that nothing imports is a bug.
+   Include those wiring edits in the same `files` array. If a file you must
+   wire into was NOT provided in the context, say so clearly in `notes` so it
+   can be included on the next pass, and still return the new file(s).
+3. ALWAYS return the COMPLETE file content for every file you create or touch —
+   never a diff, never a snippet. The system writes each file as-is.
+4. If an existing file doesn't need to change, OMIT it from the `files` array.
+5. Preserve existing imports / exports / public APIs unless explicitly told otherwise.
+6. Match the existing code style (indentation, quote marks, semicolons).
+7. Do NOT include backticks, ```json fences, or any commentary outside the JSON.
+8. This codebase IS the TBCTools platform (repo Richiie86/tbc-ai-tools — a React
    frontend on Vercel + a FastAPI backend on Render + MongoDB), live at
    tbctools.org. Apps users deploy from a chat are SEPARATE projects on their
    own domains (e.g. tbcdomain.com); a 404 there is that separate app, not this
    platform.
-8. When the instruction is a runtime error, failed deploy, 404 / "Project not
+9. When the instruction is a runtime error, failed deploy, 404 / "Project not
    found", or missing config, your job is to produce the actual CODE FIX (edit
    the files), NOT to echo back a checklist of manual steps for a human to
    perform. Deploy/config remediation is automated elsewhere — you fix code. If
