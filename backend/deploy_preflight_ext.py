@@ -133,6 +133,95 @@ async def _probe_porkbun(settings: dict) -> dict:
                       "Re-check both keys in My Keys.")
 
 
+async def _probe_github(settings: dict) -> dict:
+    """The linchpin for EVERYTHING that writes code: commit, push, PR, new-app
+    creation. Resolves the token the real flow uses (settings doc → env) and
+    verifies it actually authenticates AND can create repos (classic scope)."""
+    token = (settings.get("github_token") or os.environ.get("GITHUB_TOKEN") or "").strip()
+    if not token:
+        return _check(
+            "GitHub token", False,
+            "No GitHub token in settings or GITHUB_TOKEN — the AI can't commit, "
+            "push, open PRs, or create new app repos.",
+            "Operator Console → Security → paste a classic token with the 'repo' "
+            "scope (or set GITHUB_TOKEN in Render).",
+        )
+    # A fine-grained PAT (github_pat_) authenticates but can't reliably create
+    # repos, so new-app deploys fall back to manual. Flag it explicitly.
+    fine_grained = token.startswith("github_pat_")
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.get(
+                "https://api.github.com/user",
+                headers={"Authorization": f"token {token}",
+                         "User-Agent": "tbc-preflight"},
+            )
+        if r.status_code == 200:
+            login = (r.json() or {}).get("login") or "ok"
+            if fine_grained:
+                return _check(
+                    "GitHub token", False,
+                    f"Authenticated as '{login}', but this is a FINE-GRAINED token "
+                    "which can't reliably create new repos — new-app deploys will "
+                    "fall back to manual.",
+                    "Replace it with a CLASSIC token (scope 'repo') at "
+                    "github.com/settings/tokens/new.",
+                )
+            scopes = r.headers.get("x-oauth-scopes") or ""
+            return _check(
+                "GitHub token", True,
+                f"Authenticated as '{login}' (classic token; can create repos). "
+                f"Scopes: {scopes or 'n/a'}.",
+            )
+        if r.status_code in (401, 403):
+            return _check(
+                "GitHub token", False,
+                f"GitHub rejected the token ({r.status_code}) — expired or revoked.",
+                "Generate a fresh classic token (scope 'repo') and re-paste it in "
+                "Operator → Security.",
+            )
+        return _check(
+            "GitHub token", False,
+            f"Unexpected GitHub response ({r.status_code}).",
+            "Retry shortly; if it persists, re-paste the token.",
+        )
+    except Exception as e:  # pragma: no cover - network
+        return _check("GitHub token", False, f"Could not reach GitHub: {e}",
+                      "Check outbound network / GitHub status.")
+
+
+async def _probe_ai_providers() -> dict:
+    """At least one AI provider must be usable or nothing can build/edit. Uses
+    the same health map that drives the failover chain + the picker dots."""
+    try:
+        from llm_router import providers_health
+        health = await providers_health() or {}
+        avail = [p for p, v in health.items() if (v or {}).get("configured")]
+        if not avail:
+            return _check(
+                "AI provider", False,
+                "No AI provider key configured — the AI can't generate or edit code.",
+                "Operator Console → My Keys → add at least one provider key "
+                "(Anthropic, OpenAI, or Gemini).",
+            )
+        up = [p for p in avail if (health.get(p, {}) or {}).get("status", "ok") != "down"]
+        down = [p for p in avail if p not in up]
+        if up:
+            note = f"{len(up)} provider(s) ready: {', '.join(sorted(up))}."
+            if down:
+                note += f" Temporarily unavailable: {', '.join(sorted(down))}."
+            return _check("AI provider", True, note,
+                          "" if not down else "Top up or check the unavailable "
+                          "provider(s); the platform auto-fails over meanwhile.")
+        return _check(
+            "AI provider", False,
+            f"All configured providers are unavailable: {', '.join(sorted(down))}.",
+            "Top up credits / fix the key for at least one provider (My Keys).",
+        )
+    except Exception as e:  # pragma: no cover
+        return _check("AI provider", False, f"Provider health check failed: {e}")
+
+
 def _probe_env() -> list[dict]:
     """Non-secret environment sanity the deploy/CORS paths rely on."""
     rows: list[dict] = []
@@ -153,6 +242,8 @@ async def deploy_preflight(_op: dict = Depends(get_current_operator)):
 
     settings = await get_settings_doc()
     checks: list[dict] = []
+    checks.append(await _probe_github(settings))
+    checks.append(await _probe_ai_providers())
     checks.extend(await _probe_vercel_token(settings))
     checks.append(await _probe_porkbun(settings))
     checks.extend(_probe_env())
@@ -173,12 +264,16 @@ async def deploy_preflight(_op: dict = Depends(get_current_operator)):
     except Exception as e:  # pragma: no cover
         checks.append(_check("Deployed projects", False, f"DB read failed: {e}"))
 
-    ready = all(c["ok"] for c in checks if c["name"] in
-                ("Vercel token", "Vercel team scope"))
+    # The four pillars of building independently: write code (GitHub), generate
+    # it (AI), and ship it (Vercel token + team scope).
+    _critical = ("GitHub token", "AI provider", "Vercel token", "Vercel team scope")
+    blocked = [c["name"] for c in checks if c["name"] in _critical and not c["ok"]]
+    ready = not blocked
     return {
         "ready": ready,
-        "summary": "Deploy is ready." if ready else
-                   "Deploy is blocked — fix the red items below.",
+        "summary": "Everything is ready — you can build, edit, and deploy on your own."
+                   if ready else
+                   f"Blocked — fix: {', '.join(blocked)} (see the red items below).",
         "checks": checks,
     }
 

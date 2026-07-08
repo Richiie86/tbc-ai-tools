@@ -332,9 +332,15 @@ async def generate_ai_code_fix(
 
     parts = [
         f'INSTRUCTION:\n{instruction.strip()}\n',
-        f'EDIT MODE: multi — you may modify ANY of the {len(files)} files below. '
-        'Return the COMPLETE new content for every file you change. Produce the '
-        'actual code fix; do NOT reply with a checklist of manual steps.',
+        f'EDIT MODE: multi — you may modify ANY of the {len(files)} files below '
+        'AND create brand-new files when the instruction needs them (a new page, '
+        'component, route, model, or helper). To create a file, add a `files` '
+        'entry whose `path` is the new file\'s full repo-relative path with its '
+        'COMPLETE contents. When you add a new file, also edit whatever existing '
+        'file must import/register it (router, server.py, nav) so the feature is '
+        'wired up and actually works. Return the COMPLETE new content for every '
+        'file you create or change. Produce the actual code; do NOT reply with a '
+        'checklist of manual steps.',
     ]
     for path, content in files.items():
         parts.append(f'\n--- FILE: {path} ---\n{content}')
@@ -359,13 +365,19 @@ async def generate_ai_code_fix(
         raise HTTPException(502, 'The model did not return a valid edit. Try again.') from e
 
     changed: dict[str, str] = {}
+    created: list[str] = []
+    edited: list[str] = []
     for entry in parsed.get('files', []) or []:
         p = (entry.get('path') or '').strip().lstrip('./')
         nc = entry.get('new_content')
         if p and isinstance(nc, str) and not _is_blocked(p):
             changed[p] = nc
+            # A path we didn't send as context is a brand-new file being created.
+            (edited if p in files else created).append(p)
     return {
         'changed': changed,
+        'created': created,
+        'edited': edited,
         'notes': (parsed.get('notes') or '')[:500],
         'read': len(files),
     }
@@ -418,14 +430,19 @@ async def _run_pipeline(
         yield step('error', 'Vercel token not configured (Operator → Ops → Vercel keys).')
         return
 
-    from llm_router import LlmChat, UserMessage, resolve_text_model
-    resolved = await resolve_text_model()
-    if not resolved:
+    from llm_router import (
+        LlmChat, UserMessage, ordered_text_models,
+        record_provider_ok, record_provider_error, _classify_provider_error,
+    )
+    # Preference-ordered, health-aware provider chain so a build never dies just
+    # because the first AI is out of credits — we transparently fail over to the
+    # next available provider (same logic as the chat/edit paths).
+    chain = await ordered_text_models()
+    if not chain:
         yield step('error', 'No AI provider key configured (Operator → My Keys).')
         return
-    provider, model = resolved
 
-    # ── 1. plan + generate (single LLM call) ─────────────────────────────
+    # ── 1. plan + generate (single LLM call, with failover) ──────────────
     yield step('plan', 'Asking the AI to design and generate the app…')
     forced = _validate_stack(stack_choice) if stack_choice and stack_choice != 'auto' else None
     user_prompt = (
@@ -434,15 +451,31 @@ async def _run_pipeline(
         + (f'REQUIRED stack: {forced}\n' if forced else 'Pick the best stack.\n')
         + '\nReturn the JSON now.'
     )
-    chat = LlmChat(
-        api_key='',
-        session_id=f'app-builder-{datetime.now(timezone.utc).timestamp():.0f}',
-        system_message=_SYSTEM_PROMPT,
-    ).with_model(provider, model)
-    try:
-        raw = await chat.send_message(UserMessage(text=user_prompt))
-    except Exception as e:
-        yield step('error', f'LLM error: {str(e)[:300]}')
+    raw = None
+    last_err = None
+    for idx, (provider, model) in enumerate(chain):
+        chat = LlmChat(
+            api_key='',
+            session_id=f'app-builder-{datetime.now(timezone.utc).timestamp():.0f}',
+            system_message=_SYSTEM_PROMPT,
+        ).with_model(provider, model)
+        try:
+            raw = await chat.send_message(UserMessage(text=user_prompt))
+            record_provider_ok(provider)
+            if idx > 0:
+                yield step('plan', f'Primary AI was unavailable — used {provider} instead.')
+            break
+        except Exception as e:  # noqa: BLE001
+            last_err = str(e)[:300]
+            record_provider_error(provider, e)
+            # Only fail over for provider-fault errors (credits/auth/rate limit).
+            if _classify_provider_error(e) is None or idx == len(chain) - 1:
+                yield step('error', f'LLM error: {last_err}')
+                return
+            yield step('plan', f'{provider} unavailable ({last_err[:60]}) — trying another AI…')
+            continue
+    if raw is None:
+        yield step('error', f'All available AIs failed. Last error: {last_err or "unknown"}')
         return
 
     text = _strip_codefences(raw or '')
