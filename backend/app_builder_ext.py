@@ -323,7 +323,10 @@ async def generate_ai_code_fix(
     (Claude / GPT / Gemini / OpenRouter) can drive it.
     """
     from sandbox_ai_ext import SYSTEM_PROMPT, _strip_json_envelope
-    from llm_router import LlmChat, UserMessage
+    from llm_router import (
+        LlmChat, UserMessage, ordered_text_models,
+        record_provider_ok, record_provider_error,
+    )
 
     async with httpx.AsyncClient(timeout=45.0) as client:
         files = await _read_repo_files(client, gh_token, repo, branch)
@@ -346,16 +349,38 @@ async def generate_ai_code_fix(
         parts.append(f'\n--- FILE: {path} ---\n{content}')
     user_text = '\n'.join(parts)
 
-    chat = LlmChat(
-        api_key='',
-        session_id=f'fix:{repo}',
-        system_message=SYSTEM_PROMPT,
-        max_tokens=8192,
-    ).with_model(provider, model)
-    try:
-        raw = await chat.send_message(UserMessage(text=user_text))
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(502, f'AI edit failed: {str(e)[:200]}') from e
+    # Fail over across EVERY configured provider so one out-of-credits /
+    # dead-model AI never blocks a working one. The caller's (provider, model)
+    # is tried FIRST (honours an explicit user pick), then the rest of the
+    # health-ordered chain. This is the shared brain behind the Fix-problem
+    # button and the chat iterate loop, so both get resilience for free.
+    chain = await ordered_text_models(
+        primary=(provider, model) if provider else None
+    )
+    if not chain:
+        raise HTTPException(502, 'No AI provider key is configured (Operator -> Security).')
+    raw = None
+    last_err = None
+    for prov_i, model_i in chain:
+        chat = LlmChat(
+            api_key='',
+            session_id=f'fix:{repo}',
+            system_message=SYSTEM_PROMPT,
+            max_tokens=8192,
+        ).with_model(prov_i, model_i)
+        try:
+            raw = await chat.send_message(UserMessage(text=user_text))
+            record_provider_ok(prov_i)
+            break
+        except Exception as e:  # noqa: BLE001
+            last_err = str(e)[:200]
+            record_provider_error(prov_i, e)
+            # Try the NEXT provider on ANY error (a dead model or
+            # out-of-credits on one provider must not stop us reaching a
+            # healthy one.
+            continue
+    if raw is None:
+        raise HTTPException(502, f'AI edit failed on every provider. Last error: {last_err}')
 
     raw_text = raw if isinstance(raw, str) else getattr(raw, 'text', '') or str(raw)
     import json as _json
