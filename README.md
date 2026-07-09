@@ -64,6 +64,7 @@ and [`frontend/.env.example`](frontend/.env.example). Key ones:
 | -------------------- | :------: | ---------------------------------------------- |
 | `MONGO_URL`          |    Yes   | MongoDB connection string                      |
 | `DB_NAME`            |    Yes   | Database name                                  |
+| `REDIS_URL`          |    Yes   | Redis connection string (for rate limiting)    |
 | `JWT_SECRET`         |    Yes   | Signs session tokens (`openssl rand -base64 48`)|
 | `OPERATOR_EMAIL`     |    Yes   | Bootstrap operator login                       |
 | `OPERATOR_PASSWORD`  |    Yes   | Bootstrap operator password (rotate after use) |
