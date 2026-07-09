@@ -288,7 +288,7 @@ async def resolve_vision_model() -> Optional[tuple]:
     if await _anthropic_key():
         return ('anthropic', 'claude-sonnet-4-5-20250929')
     if await _gemini_key():
-        return ('gemini', 'gemini-2.0-flash')
+        return ('gemini', 'gemini-2.5-flash')
     return None
 
 
@@ -320,7 +320,7 @@ _TEXT_MODEL_BY_PROVIDER = [
     ('anthropic', 'claude-sonnet-4-5-20250929'),
     ('openai', 'gpt-4o'),
     ('openrouter', 'anthropic/claude-3.5-sonnet'),
-    ('gemini', 'gemini-2.0-flash'),
+    ('gemini', 'gemini-2.5-flash'),
 ]
 
 
