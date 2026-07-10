@@ -9,6 +9,7 @@ entirely and talks to each provider directly with the operator's own keys:
   * Anthropic  -> `anthropic.AsyncAnthropic`
   * OpenAI     -> `openai.AsyncOpenAI`
   * Gemini     -> `google.genai` async client
+  * Groq       -> OpenAI-compatible chat completions
 
 It exposes the exact same shapes the rest of the codebase already imports, so
 call sites do not change beyond their import path:
@@ -121,6 +122,13 @@ async def _openrouter_key() -> Optional[str]:
     )
 
 
+async def _groq_key() -> Optional[str]:
+    return (
+        os.environ.get('GROQ_API_KEY')
+        or await _settings_ai_key('groq_api_key')
+    )
+
+
 async def any_provider_key_available() -> bool:
     """True if a key for any supported provider is configured (env or app
     settings). Used by endpoints that just need *some* model to be usable."""
@@ -129,6 +137,7 @@ async def any_provider_key_available() -> bool:
         or (await _openai_key())
         or (await _gemini_key())
         or (await _openrouter_key())
+        or (await _groq_key())
     )
 
 
@@ -150,6 +159,8 @@ async def available_providers() -> set[str]:
         provs.add('gemini')
     if await _openrouter_key():
         provs.add('openrouter')
+    if await _groq_key():
+        provs.add('groq')
     return provs
 
 
@@ -254,7 +265,7 @@ async def providers_health() -> dict:
     """
     configured = await available_providers()
     out: dict = {}
-    for prov in ('anthropic', 'openai', 'gemini', 'openrouter'):
+    for prov in ('anthropic', 'openai', 'gemini', 'openrouter', 'groq'):
         entry = _PROVIDER_HEALTH.get(prov)
         # expire stale
         if entry and time.time() >= entry.get('until', 0):
@@ -321,6 +332,7 @@ _TEXT_MODEL_BY_PROVIDER = [
     ('openai', 'gpt-4o'),
     ('openrouter', 'anthropic/claude-sonnet-4'),
     ('gemini', 'gemini-2.5-flash'),
+    ('groq', 'llama-3.3-70b-versatile'),
 ]
 
 
@@ -427,6 +439,8 @@ class LlmChat:
             return await self._gemini(text, images, stream=False)  # type: ignore[return-value]
         if provider == 'openrouter':
             return await self._openrouter(text, images, stream=False)  # type: ignore[return-value]
+        if provider == 'groq':
+            return await self._groq(text, images, stream=False)  # type: ignore[return-value]
         raise ProviderKeyMissing(f'Unknown provider: {provider}')
 
     # ------------------------------------------------------------------
@@ -448,6 +462,9 @@ class LlmChat:
                 yield ev
         elif provider == 'openrouter':
             async for ev in await self._openrouter(text, images, stream=True):  # type: ignore[misc]
+                yield ev
+        elif provider == 'groq':
+            async for ev in await self._groq(text, images, stream=True):  # type: ignore[misc]
                 yield ev
         else:
             raise ProviderKeyMissing(f'Unknown provider: {provider}')
@@ -553,8 +570,22 @@ class LlmChat:
         )
         return await self._openai_compatible(client, text, images, stream=stream)
 
+    # ==================================================================
+    # Groq — OpenAI-compatible, fast open-model inference.
+    # ==================================================================
+    async def _groq(self, text: str, images: list, *, stream: bool):
+        key = self._override_key('groq') or await _groq_key()
+        if not key:
+            raise ProviderKeyMissing(
+                'No Groq API key configured. Add one in Operator → My Keys '
+                '(groq_api_key) or set GROQ_API_KEY.'
+            )
+        from openai import AsyncOpenAI
+        client = AsyncOpenAI(api_key=key, base_url='https://api.groq.com/openai/v1')
+        return await self._openai_compatible(client, text, images, stream=stream)
+
     # ------------------------------------------------------------------
-    # Shared OpenAI-compatible chat-completions path (OpenAI + OpenRouter).
+    # Shared OpenAI-compatible chat-completions path (OpenAI + OpenRouter + Groq).
     # ------------------------------------------------------------------
     async def _openai_compatible(self, client, text: str, images: list, *, stream: bool):
         user_content: list = [{'type': 'text', 'text': text}]

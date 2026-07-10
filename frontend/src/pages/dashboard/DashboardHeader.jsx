@@ -89,6 +89,7 @@ const _GROUP_TO_HEALTH_KEY = {
   Anthropic: 'anthropic',
   Gemini: 'gemini',
   OpenRouter: 'openrouter',
+  Groq: 'groq',
 };
 
 function providerStatus(health, groupName) {
