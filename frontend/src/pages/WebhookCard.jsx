@@ -18,6 +18,7 @@ export default function WebhookCard({ projectId, repo }) {
   const [info, setInfo] = useState(null);
   const [loading, setLoading] = useState(true);
   const [rotating, setRotating] = useState(false);
+  const [installing, setInstalling] = useState(false);
   const [revealedSecret, setRevealedSecret] = useState('');
   const [show, setShow] = useState(false);
   const [copied, setCopied] = useState(null);
@@ -48,6 +49,21 @@ export default function WebhookCard({ projectId, repo }) {
       toast.error(e?.response?.data?.detail || 'Rotate failed');
     } finally {
       setRotating(false);
+    }
+  };
+
+
+  const install = async () => {
+    setInstalling(true);
+    try {
+      const { data } = await api.post(`/operator/deploy/${projectId}/webhook/install`);
+      toast.success(`GitHub webhook ${data.action || 'installed'} — pushes now auto-deploy`);
+      setRevealedSecret('');
+      await load();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Automatic webhook install failed');
+    } finally {
+      setInstalling(false);
     }
   };
 
@@ -83,12 +99,23 @@ export default function WebhookCard({ projectId, repo }) {
           <div>
             <h2 className="text-sm font-bold uppercase tracking-wider text-tbc-200">GitHub push webhook</h2>
             <p className="mt-1 text-xs text-tbc-200/60">
-              When set up on the repo, every push to <code className="rounded bg-ink-950 px-1">main</code> triggers
-              a deploy automatically. Pair with <span className="font-semibold text-emerald-300">Auto-promote</span> for
-              a fully hands-off pipeline.
+              Click <span className="font-semibold text-emerald-300">Auto-install</span> to create the GitHub webhook from inside the app.
+              After that, every push to the selected branch triggers a deploy automatically. Pair with
+              <span className="font-semibold text-emerald-300"> Auto-promote</span> for a fully hands-off pipeline.
             </p>
           </div>
         </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button
+            type="button"
+            onClick={install}
+            disabled={installing}
+            data-testid="webhook-install-btn"
+            className="bg-emerald-500 text-ink-950 font-semibold hover:bg-emerald-400"
+          >
+            {installing ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : <Github className="mr-1.5 h-3 w-3" />}
+            Auto-install
+          </Button>
         {githubUrl && (
           <a
             href={githubUrl}
@@ -102,6 +129,7 @@ export default function WebhookCard({ projectId, repo }) {
             <ExternalLink className="h-3 w-3" />
           </a>
         )}
+        </div>
       </div>
 
       <div className="mt-4 space-y-3">

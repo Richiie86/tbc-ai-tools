@@ -1700,8 +1700,13 @@ async def _project_health(project: dict, settings: dict) -> dict:
     Health buttons and the AI surface so an autonomous agent can decide
     whether to re-deploy after a failure.
     """
-    domain = project.get('domain') or ''
-    url = domain if domain.startswith('http') else f'https://{domain}'
+    target = (project.get('domain') or project.get('last_deployment_url') or '').strip()
+    if not target:
+        raise HTTPException(
+            412,
+            'No domain or deployment URL is available yet. Run Preview or Deploy first, then Health can check it.',
+        )
+    url = target if target.startswith('http') else f'https://{target}'
     started = datetime.now(timezone.utc)
     http_status: Optional[int] = None
     error: Optional[str] = None
@@ -1734,7 +1739,7 @@ async def _project_health(project: dict, settings: dict) -> dict:
     )
     return {
         'project_id': project['id'],
-        'domain': project.get('domain'),
+        'domain': project.get('domain') or project.get('last_deployment_url'),
         'ok': ok,
         'http_status': http_status,
         'latency_ms': latency_ms,
@@ -1815,12 +1820,12 @@ async def op_project_fix(
 
     gh_token = settings.get('github_token') or os.environ.get('GITHUB_TOKEN')
     if not gh_token:
-        raise HTTPException(503, 'github_token not set in Operator → Security.')
+        raise HTTPException(503, 'github_token not set in Operator → My Keys.')
 
     from llm_router import resolve_text_model
     resolved = await resolve_text_model()
     if not resolved:
-        raise HTTPException(503, 'No AI provider key configured — add one in Operator → Security.')
+        raise HTTPException(503, 'No AI provider key configured — add one in Operator → My Keys.')
     provider, model = resolved
 
     from app_builder_ext import (
@@ -1977,7 +1982,7 @@ async def op_self_deploy(
     if not project:
         raise HTTPException(
             503,
-            'self_repo not configured. Set it in Operator → Security (e.g. "tbctools/platform").',
+            'self_repo not configured. Set it in Operator → My Keys (e.g. "tbctools/platform").',
         )
     settings = await get_settings_doc()
     return await _trigger_deploy(

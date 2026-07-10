@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import html
 import json
 import logging
 import os
@@ -144,6 +145,100 @@ def _load_template(stack: str) -> dict[str, str]:
             except Exception:
                 continue
     return files
+
+
+def _is_meaningful_generated_file(path: str, content: str) -> bool:
+    """True when an AI-generated file contains actual app-specific UI/code.
+
+    The template baseline is intentionally safe, but deploying only that baseline
+    creates the "empty shell" the operator complained about. This guard lets us
+    detect a thin model response and inject a real fallback page before deploy.
+    """
+    p = (path or '').lower().strip()
+    if p not in {'app/page.tsx', 'app/globals.css', 'index.html', 'style.css'}:
+        return bool(content and len(content.strip()) > 120)
+    text = (content or '').lower()
+    shell_markers = (
+        'your ai-built app is live',
+        'your ai-built site is live',
+        'generated and deployed by tbc ai tools',
+    )
+    return bool(content and len(content.strip()) > 180 and not any(m in text for m in shell_markers))
+
+
+def _fallback_generated_files(prompt: str, app_name: str, stack: str) -> list[dict]:
+    """Deterministic non-empty app when the model returns only a shell.
+
+    This keeps the builder from shipping a generic template. The result is still
+    simple, but it is a complete branded landing page based on the user's prompt,
+    with clear sections and CTAs instead of an empty starter card.
+    """
+    safe_name = html.escape(re.sub(r'[^a-zA-Z0-9 ._-]+', '', app_name or 'AI Built App').strip() or 'AI Built App')
+    safe_prompt = html.escape((prompt or 'A useful web app').replace('`', "'").strip()[:900])
+    if stack == 'static':
+        return [
+            {'path': 'index.html', 'content': f'''<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{safe_name}</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main class="page">
+      <section class="hero">
+        <p class="eyebrow">AI-built launch page</p>
+        <h1>{safe_name}</h1>
+        <p class="lead">{safe_prompt}</p>
+        <div class="actions">
+          <a href="#features">Explore features</a>
+          <a href="mailto:hello@example.com" class="secondary">Contact us</a>
+        </div>
+      </section>
+      <section id="features" class="grid">
+        <article><h2>Fast start</h2><p>Clear onboarding and a focused first screen for users.</p></article>
+        <article><h2>Built to ship</h2><p>Deploy-ready structure with responsive styling.</p></article>
+        <article><h2>Easy to extend</h2><p>Replace these sections with your real product flows as you iterate.</p></article>
+      </section>
+    </main>
+  </body>
+</html>'''},
+            {'path': 'style.css', 'content': '''body{margin:0;font-family:Inter,system-ui,sans-serif;background:#08111f;color:#e5f4ff}.page{min-height:100vh;padding:64px 24px}.hero{max-width:960px;margin:0 auto 48px;padding:48px;border:1px solid rgba(56,189,248,.25);border-radius:28px;background:linear-gradient(135deg,rgba(14,165,233,.18),rgba(15,23,42,.9))}.eyebrow{color:#38bdf8;text-transform:uppercase;letter-spacing:.16em;font-size:12px;font-weight:700}h1{font-size:clamp(40px,8vw,88px);line-height:.95;margin:16px 0}.lead{font-size:20px;max-width:760px;color:#cbd5e1}.actions{display:flex;gap:14px;flex-wrap:wrap;margin-top:28px}.actions a{background:#38bdf8;color:#06111f;padding:12px 18px;border-radius:999px;text-decoration:none;font-weight:800}.actions .secondary{background:transparent;color:#e5f4ff;border:1px solid rgba(226,232,240,.35)}.grid{max-width:960px;margin:auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px}.grid article{background:#0f172a;border:1px solid rgba(148,163,184,.18);border-radius:20px;padding:24px}.grid h2{color:#7dd3fc;margin-top:0}'''}
+        ]
+    return [
+        {'path': 'app/page.tsx', 'content': f'''const features = [
+  ['Fast start', 'A focused first screen that explains the product immediately.'],
+  ['Built to ship', 'Responsive UI and deploy-ready structure for Vercel.'],
+  ['Easy to extend', 'Keep chatting to add real workflows, forms, payments, dashboards, and data.'],
+]
+
+export default function Page() {{
+  return (
+    <main className="page">
+      <section className="hero">
+        <p className="eyebrow">AI-built web app</p>
+        <h1>{safe_name}</h1>
+        <p className="lead">{safe_prompt}</p>
+        <div className="actions">
+          <a href="#features">Explore features</a>
+          <a className="secondary" href="mailto:hello@example.com">Contact us</a>
+        </div>
+        <div id="features" className="grid">
+          {{features.map(([title, text]) => (
+            <article key={{title}}>
+              <h2>{{title}}</h2>
+              <p>{{text}}</p>
+            </article>
+          ))}}
+        </div>
+      </section>
+    </main>
+  )
+}}
+'''},
+        {'path': 'app/globals.css', 'content': '''*{box-sizing:border-box}body{margin:0;background:#020617;color:#f8fafc;font-family:Inter,system-ui,sans-serif}.page{min-height:100vh;padding:64px 24px}.hero{max-width:1040px;margin:0 auto;padding:56px;border:1px solid rgba(56,189,248,.25);border-radius:30px;background:linear-gradient(135deg,rgba(14,165,233,.18),rgba(15,23,42,.96))}.eyebrow{color:#38bdf8;text-transform:uppercase;letter-spacing:.18em;font-size:12px;font-weight:800}h1{font-size:clamp(42px,8vw,92px);line-height:.95;margin:18px 0;color:#fff}.lead{font-size:20px;line-height:1.7;max-width:780px;color:#cbd5e1}.actions{display:flex;gap:14px;flex-wrap:wrap;margin-top:30px}.actions a{background:#38bdf8;color:#06111f;padding:12px 18px;border-radius:999px;text-decoration:none;font-weight:900}.actions .secondary{background:transparent;color:#f8fafc;border:1px solid rgba(226,232,240,.35)}.grid{margin-top:56px;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px}.grid article{border:1px solid rgba(148,163,184,.18);border-radius:20px;background:rgba(15,23,42,.74);padding:24px}.grid h2{color:#bae6fd;margin:0 0 8px}.grid p{color:#94a3b8;line-height:1.6;margin:0}'''}
+    ]
 
 
 def _merge_and_sanitize(base: dict[str, str], generated: list) -> tuple[dict[str, str], list[dict]]:
@@ -523,7 +618,14 @@ async def _run_pipeline(
     description = (parsed.get('description') or app_name)[:280]
 
     baseline = _load_template(stack)
-    final_files, rejected = _merge_and_sanitize(baseline, parsed.get('files'))
+    generated_files = parsed.get('files') or []
+    if not any(
+        _is_meaningful_generated_file(str(f.get('path') or ''), str(f.get('content') or ''))
+        for f in generated_files if isinstance(f, dict)
+    ):
+        generated_files = list(generated_files) + _fallback_generated_files(prompt, app_name, stack)
+        yield step('generate', 'AI output was too thin, so I added a complete non-empty starter app instead of deploying a shell.')
+    final_files, rejected = _merge_and_sanitize(baseline, generated_files)
     if not final_files:
         yield step('error', 'No safe files to write after sanitizing the AI output.')
         return

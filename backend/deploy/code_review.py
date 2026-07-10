@@ -412,18 +412,32 @@ async def _second_opinion(snapshot: dict, first_review: dict, llm_key: str) -> d
         + "\n\nReturn the second-opinion JSON now."
     )
     # Second opinion runs over the same snapshot + the first reviewer's
-    # verdict. Uses a VALID model id (see _SECOND_OPINION_MODEL) — keeps the
-    # pass on the operator's own Anthropic key when set.
-    chat = LlmChat(
-        api_key=llm_key,
-        session_id=f'code-review-second-{datetime.now(timezone.utc).timestamp():.0f}',
-        system_message=_SECOND_OPINION_PROMPT,
-        max_tokens=2048,
-    ).with_model('anthropic', _SECOND_OPINION_MODEL)
-    try:
-        raw = await chat.send_message(UserMessage(text=user_msg))
-    except Exception as e:
-        return {'verdict': 'review_skipped', 'summary': f'Second-opinion failed: {str(e)[:200]}', 'concerns': [], 'reviewer_model': _SECOND_OPINION_MODEL}
+    # verdict. Prefer Anthropic when configured, but fall back to any configured
+    # provider so OpenRouter/Groq-only setups still get a second pass.
+    from llm_router import ordered_text_models, record_provider_error, record_provider_ok
+    chain = await ordered_text_models(primary=('anthropic', _SECOND_OPINION_MODEL))
+    if not chain:
+        return {'verdict': 'review_skipped', 'summary': 'Second-opinion skipped: no configured AI provider.', 'concerns': [], 'reviewer_model': 'none'}
+    raw = None
+    reviewer_model = None
+    last_error = None
+    for provider, reviewer_model in chain:
+        chat = LlmChat(
+            api_key=llm_key,
+            session_id=f'code-review-second-{datetime.now(timezone.utc).timestamp():.0f}',
+            system_message=_SECOND_OPINION_PROMPT,
+            max_tokens=2048,
+        ).with_model(provider, reviewer_model)
+        try:
+            raw = await chat.send_message(UserMessage(text=user_msg))
+            record_provider_ok(provider)
+            break
+        except Exception as e:
+            last_error = str(e)[:200]
+            record_provider_error(provider, e)
+            continue
+    if raw is None:
+        return {'verdict': 'review_skipped', 'summary': f'Second-opinion failed: {last_error}', 'concerns': [], 'reviewer_model': reviewer_model or 'none'}
     parsed = _extract_json(raw or '') or {}
     return {
         'verdict': parsed.get('verdict') or 'review_skipped',
@@ -547,33 +561,44 @@ async def run_code_review(project: dict, settings: dict) -> dict:
 
     # Pick whichever provider the operator actually has a key for (Anthropic,
     # OpenAI, Gemini, OpenRouter or Groq) so Code Review works with ANY key.
-    from llm_router import resolve_text_model
-    resolved = await resolve_text_model()
-    if not resolved:
+    # Try the configured providers in order instead of failing permanently on
+    # the first one (for example, direct Anthropic out of credits while
+    # OpenRouter still has balance).
+    from llm_router import ordered_text_models, record_provider_error, record_provider_ok
+    attempts = await ordered_text_models()
+    if not attempts:
         raise HTTPException(
             503,
             'No AI provider key configured. Add an OpenAI, Anthropic, Gemini, '
             'OpenRouter or Groq key in Operator → My Keys.',
         )
-    provider, model = resolved
     llm_key = ''  # legacy placeholder — llm_router resolves the provider key itself
+    raw = None
+    last_error = None
+    provider = model = None
 
     # Give the reviewer enough output budget to return a full JSON findings
     # array. The old 4096 default truncated the response mid-object on any
     # non-trivial repo, so json.loads failed and we fell back to the
     # "LLM returned non-JSON output" path — which then got hard-gated to
     # do_not_ship by the second opinion. 8192 comfortably fits the schema.
-    chat = LlmChat(
-        api_key=llm_key,
-        session_id=f'code-review-{project["id"]}',
-        system_message=_SYSTEM_PROMPT,
-        max_tokens=8192,
-    ).with_model(provider, model)  # uses whichever provider key the operator has
-
-    try:
-        raw = await chat.send_message(UserMessage(text=prompt))
-    except Exception as e:
-        raise HTTPException(502, f'LLM error: {str(e)[:300]}')
+    for provider, model in attempts:
+        chat = LlmChat(
+            api_key=llm_key,
+            session_id=f'code-review-{project["id"]}',
+            system_message=_SYSTEM_PROMPT,
+            max_tokens=8192,
+        ).with_model(provider, model)
+        try:
+            raw = await chat.send_message(UserMessage(text=prompt))
+            record_provider_ok(provider)
+            break
+        except Exception as e:
+            last_error = str(e)[:300]
+            record_provider_error(provider, e)
+            continue
+    if raw is None:
+        raise HTTPException(502, f'LLM error: {last_error or "all configured providers failed"}')
 
     # Robust JSON parse: tolerates code fences, surrounding prose, trailing
     # commas, and truncated output (see _extract_json).
@@ -593,6 +618,8 @@ async def run_code_review(project: dict, settings: dict) -> dict:
     review['ref'] = snapshot['ref']
     review['files_sampled'] = [f['path'] for f in snapshot['files']]
     review['reviewed_at'] = datetime.now(timezone.utc).isoformat()
+    review['reviewer_provider'] = provider
+    review['reviewer_model'] = model
 
     # Cross-AI second opinion — Claude audits GPT-4o's verdict. Catches
     # hallucinations + security regressions the primary reviewer missed.

@@ -231,16 +231,12 @@ async def deploy_preflight(op: dict = Depends(get_current_operator)):
     return {'ok': warning is None, 'python_warning': warning}
 
 
-@router.post('/trigger')
-async def trigger_deploy(op: dict = Depends(get_current_operator)):
-    """Trigger a redeploy on Render.
+async def trigger_render_deploy(*, source: str = 'manual') -> dict:
+    """Trigger a Render redeploy using the saved service/API key or deploy hook.
 
-    Prefers the API (key + service id) so we can report a deploy id/status;
-    falls back to the deploy hook URL if that's all that's configured.
-
-    A bad Python pin in render.yaml is surfaced as a non-blocking `warning`
-    in the response — the deploy still proceeds so a manual deploy is never
-    prevented, but the operator is told exactly what will likely fail.
+    Shared by the Server tab and the GitHub push webhook so backend deploys can
+    happen automatically after a merge/push instead of requiring a dashboard
+    click. Returns the same public shape as the HTTP endpoint.
     """
     cfg = await _get_config()
     api_key = await _get_render_api_key()
@@ -271,11 +267,12 @@ async def trigger_deploy(op: dict = Depends(get_current_operator)):
                 {'_id': _CONFIG_ID},
                 {'$set': {'last_deploy_at': _now_iso(),
                           'last_deploy_id': deploy_id,
-                          'last_deploy_status': status}},
+                          'last_deploy_status': status,
+                          'last_deploy_source': source}},
                 upsert=True,
             )
             return {'ok': True, 'method': 'api', 'deploy_id': deploy_id,
-                    'status': status, 'warning': py_warning}
+                    'status': status, 'warning': py_warning, 'source': source}
         except HTTPException:
             raise
         except Exception as e:
@@ -291,16 +288,23 @@ async def trigger_deploy(op: dict = Depends(get_current_operator)):
             await db.app_deploy_config.update_one(
                 {'_id': _CONFIG_ID},
                 {'$set': {'last_deploy_at': _now_iso(),
-                          'last_deploy_status': 'triggered (hook)'}},
+                          'last_deploy_status': 'triggered (hook)',
+                          'last_deploy_source': source}},
                 upsert=True,
             )
             return {'ok': True, 'method': 'hook', 'status': 'triggered',
-                    'warning': py_warning}
+                    'warning': py_warning, 'source': source}
         except Exception as e:
             logger.warning('Render hook deploy failed: %s', e)
             raise HTTPException(502, 'Deploy hook call failed. Check the URL.')
 
     raise HTTPException(409, 'Add a Render API key in My Keys and pick a service, or set a deploy hook URL first.')
+
+
+@router.post('/trigger')
+async def trigger_deploy(op: dict = Depends(get_current_operator)):
+    """Trigger a redeploy on Render from the Server tab."""
+    return await trigger_render_deploy(source='operator-ui')
 
 
 @router.get('/status')

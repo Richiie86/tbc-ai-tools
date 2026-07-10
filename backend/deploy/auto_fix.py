@@ -152,10 +152,8 @@ async def request_patches(project: dict, review: dict, settings: dict) -> dict:
             'github_token not configured — auto-fix needs `Contents: Write` to commit patches. '
             'Set it in Operator → Security.',
         )
-    from llm_router import _openai_key
+    from llm_router import ordered_text_models, record_provider_error, record_provider_ok
     llm_key = ''  # legacy placeholder — llm_router uses the provider key
-    if not await _openai_key():
-        raise HTTPException(503, 'No OpenAI API key configured for auto-fix (Operator → Security).')
 
     paths = _findings_to_paths(review)
     if not paths:
@@ -184,15 +182,27 @@ async def request_patches(project: dict, review: dict, settings: dict) -> dict:
         "Return the JSON patch object now."
     )
 
-    chat = LlmChat(
-        api_key=llm_key,
-        session_id=f'auto-fix-{project["id"]}-{datetime.now(timezone.utc).timestamp():.0f}',
-        system_message=_SYSTEM_PROMPT,
-    ).with_model('openai', 'gpt-4o')
-    try:
-        raw = await chat.send_message(UserMessage(text=prompt))
-    except Exception as e:
-        raise HTTPException(502, f'LLM error during auto-fix: {str(e)[:300]}')
+    chain = await ordered_text_models()
+    if not chain:
+        raise HTTPException(503, 'No AI provider key configured for auto-fix (Operator → My Keys).')
+    raw = None
+    last_error = None
+    for provider, model in chain:
+        chat = LlmChat(
+            api_key=llm_key,
+            session_id=f'auto-fix-{project["id"]}-{datetime.now(timezone.utc).timestamp():.0f}',
+            system_message=_SYSTEM_PROMPT,
+        ).with_model(provider, model)
+        try:
+            raw = await chat.send_message(UserMessage(text=prompt))
+            record_provider_ok(provider)
+            break
+        except Exception as e:
+            last_error = str(e)[:300]
+            record_provider_error(provider, e)
+            continue
+    if raw is None:
+        raise HTTPException(502, f'LLM error during auto-fix: {last_error or "all configured providers failed"}')
 
     text = (raw or '').strip()
     if text.startswith('```'):

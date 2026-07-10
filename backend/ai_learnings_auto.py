@@ -64,8 +64,6 @@ async def propose_learning_from_session(
     learnings by model and render per-model maturity.
     """
     try:
-        if not api_key:
-            return
         if random.random() > _SAMPLE_RATE:
             return
         # Trim history to last 6 turns for cost control.
@@ -76,16 +74,30 @@ async def propose_learning_from_session(
             f"[{m.get('role', '?')}]: {(m.get('content') or '')[:1000]}"
             for m in recent
         )
-        # Use a cheap/fast model regardless of which one the user picked
-        # for the main conversation — the operator pays once per main
-        # reply, NOT once per extraction.
-        from llm_router import LlmChat, UserMessage
-        chat = LlmChat(
-            api_key=api_key,
-            session_id=f'autolearn:{session_id}',
-            system_message=EXTRACTOR_PROMPT,
-        ).with_model('gemini', 'gemini-3-flash-preview')
-        raw = await chat.send_message(UserMessage(text=convo_text))
+        # Use any configured provider; the old code required a legacy api_key
+        # argument that is always empty in the current router, so auto-learning
+        # never actually ran. Keep the proposal disabled until operator approval.
+        from llm_router import LlmChat, UserMessage, ordered_text_models
+        chain = await ordered_text_models()
+        if not chain:
+            return
+        raw = None
+        last_error = None
+        for provider, model in chain:
+            try:
+                chat = LlmChat(
+                    api_key='',
+                    session_id=f'autolearn:{session_id}',
+                    system_message=EXTRACTOR_PROMPT,
+                ).with_model(provider, model)
+                raw = await chat.send_message(UserMessage(text=convo_text))
+                break
+            except Exception as e:  # noqa: BLE001
+                last_error = str(e)[:160]
+                continue
+        if raw is None:
+            logger.warning('Auto-learning extraction failed on all providers: %s', last_error)
+            return
         text = (raw if isinstance(raw, str) else getattr(raw, 'text', '') or str(raw)).strip()
         # Strip code-fences / quotes the model sometimes adds.
         text = text.strip('`"\' \n')

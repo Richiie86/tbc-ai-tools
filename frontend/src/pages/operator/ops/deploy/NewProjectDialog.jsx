@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Rocket, Loader2, Globe } from 'lucide-react';
+import { Rocket, Loader2, Globe, Github } from 'lucide-react';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from '../../../../components/ui/dialog';
@@ -8,10 +8,10 @@ import { Input } from '../../../../components/ui/input';
 import { Label } from '../../../../components/ui/label';
 
 /**
- * Operator-facing "create a deploy project" dialog. Lets a human name a
- * project up-front and (optionally) paste any custom domain — the domain is
- * attached to Vercel and auto-pointed via Porkbun DNS on the first Deploy,
- * so the project goes live on THAT domain directly (not a *.vercel.app URL).
+ * Operator-facing "create a deploy project" dialog. Lets a human add their
+ * own GitHub repo, then launch it with Preview/Deploy from the project row.
+ * A custom domain can be added now or later; Vercel still gives a vercel.app
+ * URL when no custom domain is set.
  */
 export function NewProjectDialog({ open, onOpenChange, onCreate, busy }) {
   const [name, setName] = useState('');
@@ -25,7 +25,7 @@ export function NewProjectDialog({ open, onOpenChange, onCreate, busy }) {
   }, [open]);
 
   const submit = () => {
-    if (!name.trim()) return;
+    if (!name.trim() || !repo.trim()) return;
     onCreate({
       projectName: name.trim(),
       repo: repo.trim(),
@@ -46,9 +46,8 @@ export function NewProjectDialog({ open, onOpenChange, onCreate, busy }) {
             New deploy project
           </DialogTitle>
           <DialogDescription className="text-tbc-200/70">
-            Name your project and (optionally) paste the domain you want it to
-            deploy to — any registrar. When Porkbun is connected we point the
-            domain&apos;s DNS straight at Vercel so it goes live on that domain.
+            Add your GitHub repo, then launch it from the project row with Preview or Deploy.
+            A custom domain is optional and can be added later.
           </DialogDescription>
         </DialogHeader>
 
@@ -69,6 +68,24 @@ export function NewProjectDialog({ open, onOpenChange, onCreate, busy }) {
             />
           </div>
           <div className="space-y-1.5">
+            <Label htmlFor="np-repo" className="text-xs uppercase tracking-wider text-tbc-200/70">
+              GitHub repo <span className="text-rose-400">*</span>
+            </Label>
+            <div className="flex items-center gap-1.5">
+              <Github className="h-3.5 w-3.5 shrink-0 text-tbc-300" />
+              <Input
+                id="np-repo"
+                data-testid="new-project-repo"
+                value={repo}
+                onChange={(e) => setRepo(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && !busy) submit(); }}
+                placeholder="Richiie86/my-app"
+                className="border-tbc-900/60 bg-ink-900 font-mono text-sm text-tbc-100"
+              />
+            </div>
+            <p className="text-[11px] text-tbc-200/50">This is the code Vercel will build when you click Preview or Deploy.</p>
+          </div>
+          <div className="space-y-1.5">
             <Label htmlFor="np-domain" className="text-xs uppercase tracking-wider text-tbc-200/70">
               Domain <span className="text-tbc-200/40">(optional — can add later)</span>
             </Label>
@@ -85,33 +102,18 @@ export function NewProjectDialog({ open, onOpenChange, onCreate, busy }) {
               />
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="np-repo" className="text-xs uppercase tracking-wider text-tbc-200/70">
-                Repo <span className="text-tbc-200/40">(optional)</span>
-              </Label>
-              <Input
-                id="np-repo"
-                data-testid="new-project-repo"
-                value={repo}
-                onChange={(e) => setRepo(e.target.value)}
-                placeholder="owner/repo"
-                className="border-tbc-900/60 bg-ink-900 font-mono text-sm text-tbc-100"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="np-ref" className="text-xs uppercase tracking-wider text-tbc-200/70">
-                Branch <span className="text-tbc-200/40">(optional)</span>
-              </Label>
-              <Input
-                id="np-ref"
-                data-testid="new-project-ref"
-                value={gitRef}
-                onChange={(e) => setGitRef(e.target.value)}
-                placeholder="main"
-                className="border-tbc-900/60 bg-ink-900 font-mono text-sm text-tbc-100"
-              />
-            </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="np-ref" className="text-xs uppercase tracking-wider text-tbc-200/70">
+              Branch <span className="text-tbc-200/40">(optional)</span>
+            </Label>
+            <Input
+              id="np-ref"
+              data-testid="new-project-ref"
+              value={gitRef}
+              onChange={(e) => setGitRef(e.target.value)}
+              placeholder="main"
+              className="border-tbc-900/60 bg-ink-900 font-mono text-sm text-tbc-100"
+            />
           </div>
         </div>
 
@@ -127,11 +129,11 @@ export function NewProjectDialog({ open, onOpenChange, onCreate, busy }) {
           <Button
             data-testid="new-project-create"
             onClick={submit}
-            disabled={busy || !name.trim()}
+            disabled={busy || !name.trim() || !repo.trim()}
             className="bg-tbc-500 text-ink-950 hover:bg-tbc-400 font-semibold"
           >
             {busy ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : <Rocket className="mr-1.5 h-3 w-3" />}
-            Create project
+            Create launch project
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -57,6 +57,11 @@ export function ProjectRow({ project, onDeployed }) {
   // Lives here in the row (not the hook) since it's pure dialog state.
   const [promoteConfirmText, setPromoteConfirmText] = useState('');
 
+  const canLaunch = !!project.repo;
+  const launchTitle = project.repo
+    ? 'Deploy to Vercel; custom domain can be added later'
+    : 'Add a GitHub repo first';
+
   // Inline rename + delete. Kept local to the row (like the domain editor)
   // so operators can rename or remove a project without leaving the Ops tab.
   const [renaming, setRenaming] = useState(false);
@@ -286,8 +291,8 @@ export function ProjectRow({ project, onDeployed }) {
             size="sm"
             data-testid={`deploy-${project.id}`}
             onClick={() => a.trigger('deploy')}
-            disabled={a.busy !== null || !project.domain}
-            title={!project.domain ? 'Set a domain first' : 'Deploy production'}
+            disabled={a.busy !== null || !canLaunch}
+            title={launchTitle}
             className="bg-tbc-500 text-ink-950 hover:bg-tbc-400 font-semibold"
           >
             {a.busy === 'deploy' ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : <Rocket className="mr-1.5 h-3 w-3" />}
@@ -297,7 +302,8 @@ export function ProjectRow({ project, onDeployed }) {
             size="sm"
             data-testid={`preview-${project.id}`}
             onClick={() => a.trigger('preview')}
-            disabled={a.busy !== null || !project.domain}
+            disabled={a.busy !== null || !canLaunch}
+            title={launchTitle}
             variant="outline"
             className="border-tbc-900/60 bg-ink-900 text-tbc-100 hover:bg-ink-950"
           >
