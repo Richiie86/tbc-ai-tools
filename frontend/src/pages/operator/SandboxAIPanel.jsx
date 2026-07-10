@@ -26,7 +26,7 @@ import {
 export default function SandboxAIPanel({ openFile, draft, onApplyToEditor, branch }) {
   const [collapsed, setCollapsed] = useState(true);
   const [models, setModels] = useState([]);
-  const [model, setModel] = useState('claude-sonnet-4-6');
+  const [model, setModel] = useState('claude-sonnet-4-5-20250929');
   const [instruction, setInstruction] = useState('');
   const [proposing, setProposing] = useState(false);
   const [proposal, setProposal] = useState(null); // { files:[{path,new_content,reason}], notes, model, session_id }

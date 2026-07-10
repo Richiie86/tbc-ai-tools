@@ -502,6 +502,28 @@ def _review_finding_is_false_positive(finding: dict, snapshot: dict) -> bool:
     return False
 
 
+def _review_concern_is_false_positive(concern: str, snapshot: dict) -> bool:
+    text = str(concern or '').lower()
+    sampled = {str(f.get('path') or '').lower() for f in snapshot.get('files') or []}
+    if not text.strip():
+        return True
+    if '.env.example' in text and any(m in text for m in ('secret', 'production')):
+        return True
+    if 'python' in text and ('3.12.7' in text or 'version pin' in text or 'needs verification' in text):
+        return True
+    if ('frontend deployment' in text or 'missing frontend' in text) and (
+        'frontend/vercel.json' in sampled or 'frontend/package.json' in sampled
+    ):
+        return True
+    if 'truncat' in text or 'incomplete file' in text:
+        return True
+    if 'model id' in text or 'model identifier' in text or 'model validation' in text:
+        return True
+    if 'requirements' in text and 'suspicious' in text:
+        return True
+    return False
+
+
 def _sanitize_review(review: dict, snapshot: dict) -> dict:
     findings = review.get('findings') or []
     if not isinstance(findings, list):
@@ -720,15 +742,21 @@ async def run_code_review(project: dict, settings: dict) -> dict:
         review['verdict'] = 'review_incomplete'
         review['review_incomplete'] = True
     elif second.get('verdict') == 'do_not_ship' and review.get('verdict') != 'do_not_ship':
-        # A second opinion may still repeat a known false-positive category in
-        # prose. Only promote when the sanitized primary review still has a real
-        # high-severity or missing-file blocker.
-        has_blocker = any(
+        # Promote when either reviewer has a real blocker after filtering known
+        # false positives. This preserves the second opinion as an independent
+        # safety gate while preventing the old placeholder/truncation/model-id
+        # hallucinations from trapping deploys in a do_not_ship loop.
+        primary_blocker = any(
             str(f.get('severity', '')).lower() == 'high'
             for f in (review.get('findings') or []) if isinstance(f, dict)
         ) or bool(review.get('missing_files'))
-        if has_blocker:
+        second_concerns = [
+            c for c in (second.get('concerns') or [])
+            if not _review_concern_is_false_positive(c, snapshot)
+        ]
+        if primary_blocker or second_concerns:
             review['verdict_promoted_by'] = 'second_opinion'
+            review['second_opinion_actionable_concerns'] = second_concerns
             review['verdict'] = 'do_not_ship'
         else:
             review['second_opinion_not_promoted'] = True

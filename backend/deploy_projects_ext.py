@@ -872,7 +872,7 @@ async def _create_fix_review_chat(project: dict, review: dict, user_id: Optional
         from models import ChatSession, ChatMessage  # direct import — no cycle
     except Exception:
         return None
-    DEFAULT_MODEL = 'claude-opus-4-7'  # mirror server.py; safe constant copy
+    DEFAULT_MODEL = 'claude-sonnet-4-5-20250929'  # mirror server.py; safe constant copy
 
     findings = review.get('findings') or []
     missing = review.get('missing_files') or []

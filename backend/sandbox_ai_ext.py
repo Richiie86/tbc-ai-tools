@@ -13,7 +13,7 @@ Endpoints (all operator-only):
       body: {
         instruction: str,           # what the AI should do
         files: [{ path, content }], # context the AI can edit
-        model: 'claude-sonnet-4-6' | 'gpt-5.4' | 'gemini-3.1-pro-preview',
+        model: 'claude-sonnet-4-5-20250929' | 'gpt-4.1' | 'gemini-2.5-flash',
         edit_mode: 'single' | 'multi',  # caps the proposal scope
         project_id?: str,           # optional — for session re-use
       }
@@ -61,14 +61,15 @@ router = APIRouter(prefix='/api/operator/sandbox/ai', tags=['sandbox-ai'])
 # the operator from pasting a random model id that the universal key
 # doesn't cover. `(provider, model_id, display_name)`.
 SUPPORTED_MODELS: list[tuple[str, str, str]] = [
-    ('anthropic', 'claude-sonnet-4-6',      'Claude Sonnet 4.6 (best for code)'),
-    ('anthropic', 'claude-opus-4-7',        'Claude Opus 4.7 (deepest reasoning)'),
-    ('openai',    'gpt-5.4',                'GPT-5.4 (OpenAI default)'),
-    ('openai',    'gpt-5.4-mini',           'GPT-5.4 mini (fast/cheap)'),
-    ('gemini',    'gemini-3.1-pro-preview', 'Gemini 3.1 Pro (Google)'),
-    ('gemini',    'gemini-3-flash-preview', 'Gemini 3 Flash (fastest)'),
+    ('anthropic', 'claude-sonnet-4-5-20250929', 'Claude Sonnet 4.5 (best for code)'),
+    ('anthropic', 'claude-haiku-4-5-20251001',  'Claude Haiku 4.5 (fast/cheap)'),
+    ('openai',    'gpt-4.1',                    'GPT-4.1 (OpenAI)'),
+    ('openai',    'gpt-4o-mini',                'GPT-4o Mini (fast/cheap)'),
+    ('gemini',    'gemini-2.5-pro',             'Gemini 2.5 Pro (Google)'),
+    ('gemini',    'gemini-2.5-flash',           'Gemini 2.5 Flash (fastest)'),
     ('openrouter', 'anthropic/claude-sonnet-4', 'Claude Sonnet 4 (OpenRouter)'),
     ('openrouter', 'openai/gpt-4o-mini', 'GPT-4o Mini (OpenRouter)'),
+    ('openrouter', 'google/gemini-2.5-flash', 'Gemini 2.5 Flash (OpenRouter)'),
     ('groq', 'llama-3.3-70b-versatile', 'Llama 3.3 70B (Groq)'),
 ]
 _MODEL_MAP = {m: (p, display) for p, m, display in SUPPORTED_MODELS}
@@ -132,7 +133,7 @@ class FileCtx(BaseModel):
 class ProposeBody(BaseModel):
     instruction: str = Field(min_length=2, max_length=8_000)
     files: list[FileCtx] = Field(default_factory=list, max_length=12)
-    model: str = Field(default='claude-sonnet-4-6')
+    model: str = Field(default='claude-sonnet-4-5-20250929')
     edit_mode: Literal['single', 'multi'] = 'single'
     project_id: Optional[str] = None
     session_id: Optional[str] = None
@@ -211,7 +212,7 @@ async def list_models(_op: dict = Depends(get_current_operator)):
         if not configured or p in configured
     ]
     return {
-        'default': models[0]['id'] if models else 'claude-sonnet-4-6',
+        'default': models[0]['id'] if models else 'claude-sonnet-4-5-20250929',
         'models': models,
     }
 
