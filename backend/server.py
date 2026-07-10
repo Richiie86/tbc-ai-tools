@@ -1900,16 +1900,26 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
                 ).model_dump())
             await db.chat_sessions.update_one(
                 {'id': session_id},
-                {'$set': {'updated_at': datetime.now(timezone.utc)}},
+                {'$set': {
+                    'model': req.model or routed_model or DEFAULT_MODEL,
+                    'updated_at': datetime.now(timezone.utc),
+                }},
             )
             yield 'data: ' + json.dumps({'type': 'done', 'session_id': session_id}) + '\n\n'
             return
 
         full_response = ''
-        # Build the model attempt list: primary first, then any fallbacks
-        # not already equal to the primary (de-duped, order preserved).
+        # Build the model attempt list. Explicit user picks are authoritative:
+        # try ONLY that model and surface its real error if it fails. Automatic
+        # mode may use the cross-provider fallback chain because the user asked
+        # the system to choose for them. This prevents "I picked Gemini/OpenAI
+        # but the answer came from Claude".
         primary = routed_model
-        attempts = [primary] + [m for m in CHAT_FALLBACK_CHAIN if m != primary]
+        attempts = (
+            [primary] + [m for m in CHAT_FALLBACK_CHAIN if m != primary]
+            if auto_kind is not None
+            else [primary]
+        )
         # Which providers can we actually reach? App keys + this user's BYOK
         # keys. Used to (a) refuse an explicit pick on an unconfigured provider
         # with a clear message instead of silently answering as Claude, and
@@ -2025,9 +2035,15 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
                     break
                 # else fall through to next model in the chain
         if not ok and not full_response.strip():
+            message = last_error or 'All chat models failed. Please try again.'
+            if auto_kind is None:
+                message = (
+                    'The selected model failed and no fallback was used because you chose it explicitly. '
+                    f'Provider error: {message}'
+                )
             err = json.dumps({
                 'type': 'error',
-                'message': last_error or 'All chat models failed. Please try again.',
+                'message': message,
                 'attempted': attempts,
             })
             yield f'data: {err}\n\n'
@@ -2039,7 +2055,10 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
         # Update session
         await db.chat_sessions.update_one(
             {'id': session_id},
-            {'$set': {'updated_at': datetime.now(timezone.utc)}},
+            {'$set': {
+                'model': req.model or routed_model or DEFAULT_MODEL,
+                'updated_at': datetime.now(timezone.utc),
+            }},
         )
         # Decrement credits (non-operator). BYOK-served messages are free —
         # the user paid their own provider, so we don't spend an app credit.
