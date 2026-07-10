@@ -319,7 +319,7 @@ async def resolve_text_model() -> Optional[tuple]:
 _TEXT_MODEL_BY_PROVIDER = [
     ('anthropic', 'claude-sonnet-4-5-20250929'),
     ('openai', 'gpt-4o'),
-    ('openrouter', 'anthropic/claude-3.5-sonnet'),
+    ('openrouter', 'anthropic/claude-sonnet-4'),
     ('gemini', 'gemini-2.5-flash'),
 ]
 

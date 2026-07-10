@@ -464,10 +464,21 @@ DEFAULT_MODEL = 'claude-opus-4-7'
 # tokens we try the next entry. Picking a *different provider* every step
 # so we recover from one-provider outages (which is the common case).
 # Kept short to bound latency and cost.
+#
+# CRITICAL: this MUST include OpenRouter slugs (ids with a "/"), because an
+# operator can be entirely out of direct Anthropic/OpenAI credit while their
+# OpenRouter key still has balance — OpenRouter bills separately and reaches
+# the same models. Without an OpenRouter link here, a chat could never recover
+# when the direct providers are down, which reads to the user as "no AI is
+# working" even though a healthy provider is configured. The slugs below are
+# verified-live OpenRouter model ids; direct Gemini uses the stable
+# gemini-2.5-flash id (the gemini-3 *preview* ids can hang ~30s / 404).
 CHAT_FALLBACK_CHAIN: list[str] = [
-    'claude-sonnet-4-6',         # Anthropic
-    'gpt-4.1',                   # OpenAI
-    'gemini-3-flash-preview',    # Google
+    'claude-sonnet-4-6',            # Anthropic (direct)
+    'gpt-4.1',                      # OpenAI (direct)
+    'gemini-2.5-flash',             # Google (direct, stable id)
+    'anthropic/claude-sonnet-4',    # OpenRouter → Claude (works when direct Anthropic is out of credit)
+    'openai/gpt-4o-mini',           # OpenRouter → GPT (cheap, reliable last resort)
 ]
 
 
