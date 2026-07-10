@@ -443,7 +443,7 @@ async def stream_agentic_edit(session: dict, instruction: str, *, is_operator: b
     settings = await get_settings_doc()
     gh_token = settings.get('github_token') or os.environ.get('GITHUB_TOKEN')
     if not gh_token:
-        yield 'I can\'t reach GitHub — no token is configured in Operator → Security.'
+        yield 'I can\'t reach GitHub — no token is configured in Operator → My Keys.'
         return
     # Build a preference-ordered provider chain for AUTO-FAILOVER. The model the
     # user picked (passed in by server.py, validated against configured keys) is
@@ -453,7 +453,7 @@ async def stream_agentic_edit(session: dict, instruction: str, *, is_operator: b
     primary = (provider, model) if (provider and model) else None
     chain = await ordered_text_models(primary)
     if not chain:
-        yield 'No AI provider key is configured, so I can\'t generate the fix. Add a key in Operator → Security.'
+        yield 'No AI provider key is configured, so I can\'t generate the fix. Add a key in Operator → My Keys.'
         return
 
     repo = project['repo']
@@ -700,7 +700,7 @@ async def _apply_proposal_stream(proposal: dict, *, is_operator: bool):
     settings = await get_settings_doc()
     gh_token = settings.get('github_token') or os.environ.get('GITHUB_TOKEN')
     if not gh_token:
-        yield "I can't reach GitHub — no token is configured in Operator → Security."
+        yield "I can't reach GitHub — no token is configured in Operator → My Keys."
         return
 
     repo = proposal['repo']

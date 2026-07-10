@@ -486,10 +486,7 @@ async def run_rca(error_id: str, _op: dict = Depends(get_current_operator)):
     if not doc:
         raise HTTPException(404, 'Error not found')
 
-    from llm_router import any_provider_key_available
     api_key = ''  # legacy placeholder — llm_router uses per-provider keys
-    if not await any_provider_key_available():
-        raise HTTPException(503, 'No AI provider key configured (Operator → Security).')
 
     # Operator-configurable RCA model — falls back to claude-sonnet (the
     # iter17-validated default) when no setting is present. Set via
@@ -506,10 +503,22 @@ async def run_rca(error_id: str, _op: dict = Depends(get_current_operator)):
         'gpt-4.1': 'openai',
         'gemini-3.1-pro-preview': 'gemini',
         'gemini-3-flash-preview': 'gemini',
+        'llama-3.3-70b-versatile': 'groq',
+        'llama-3.1-8b-instant': 'groq',
+        'gemma2-9b-it': 'groq',
     }
-    if rca_model_id not in _rca_provider_map:
-        rca_model_id = 'claude-sonnet-4-6'
-    rca_provider = _rca_provider_map[rca_model_id]
+    if rca_model_id.startswith('openrouter/'):
+        rca_provider, rca_model_id = 'openrouter', rca_model_id.split('/', 1)[1]
+    elif '/' in rca_model_id:
+        rca_provider = 'openrouter'
+    elif rca_model_id in _rca_provider_map:
+        rca_provider = _rca_provider_map[rca_model_id]
+    else:
+        from llm_router import ordered_text_models
+        chain = await ordered_text_models()
+        if not chain:
+            raise HTTPException(503, 'No AI provider key configured (Operator → My Keys).')
+        rca_provider, rca_model_id = chain[0]
 
     prompt = (
         f"Error message: {doc.get('message', '')}\n\n"

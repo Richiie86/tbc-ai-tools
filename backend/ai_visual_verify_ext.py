@@ -204,9 +204,9 @@ async def run_visual_verify(plan_id: str, *, fallback_url: Optional[str] = None)
     if not plan_doc:
         return {'ok': False, 'reason': 'plan_not_found'}
 
-    from llm_router import _openai_key
+    from llm_router import resolve_vision_model
     llm_key = ''  # legacy placeholder — llm_router uses the provider key
-    if not await _openai_key():
+    if not await resolve_vision_model():
         return {'ok': False, 'reason': 'no_llm_key'}
 
     url = await _resolve_preview_url(plan_doc) if plan_doc.get('branch') else None
@@ -284,7 +284,7 @@ async def trigger_visual_verify(plan_id: str, op: dict = Depends(get_current_ope
         if reason == 'plan_not_found':
             raise HTTPException(404, 'Plan not found')
         if reason == 'no_llm_key':
-            raise HTTPException(503, 'No OpenAI API key configured (Operator → Security).')
+            raise HTTPException(503, 'No vision-capable AI provider key configured (Operator → My Keys).')
         if reason == 'no_preview_url':
             raise HTTPException(409, 'No preview deployment URL yet — wait for Vercel to build.')
         if reason == 'screenshot_failed':

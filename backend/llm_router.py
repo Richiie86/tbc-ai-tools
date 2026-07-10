@@ -476,7 +476,7 @@ class LlmChat:
         key = self._override_key('anthropic') or await _anthropic_key()
         if not key:
             raise ProviderKeyMissing(
-                'No Anthropic API key configured. Add one in Operator → Security '
+                'No Anthropic API key configured. Add one in Operator → My Keys '
                 '(anthropic_api_key) or set ANTHROPIC_API_KEY.'
             )
         from anthropic import AsyncAnthropic
@@ -539,7 +539,7 @@ class LlmChat:
         key = self._override_key('openai') or await _openai_key()
         if not key:
             raise ProviderKeyMissing(
-                'No OpenAI API key configured. Add one in Operator → Security '
+                'No OpenAI API key configured. Add one in Operator → My Keys '
                 '(openai_api_key) or set OPENAI_API_KEY.'
             )
         from openai import AsyncOpenAI
@@ -555,7 +555,7 @@ class LlmChat:
         key = self._override_key('openrouter') or await _openrouter_key()
         if not key:
             raise ProviderKeyMissing(
-                'No OpenRouter API key configured. Add one in Operator → Security '
+                'No OpenRouter API key configured. Add one in Operator → My Keys '
                 '(openrouter_api_key) or set OPENROUTER_API_KEY.'
             )
         from openai import AsyncOpenAI
@@ -650,7 +650,7 @@ class LlmChat:
         key = self._override_key('gemini') or await _gemini_key()
         if not key:
             raise ProviderKeyMissing(
-                'No Gemini API key configured. Add one in Operator → Security '
+                'No Gemini API key configured. Add one in Operator → My Keys '
                 '(gemini_api_key) or set GEMINI_API_KEY.'
             )
         from google import genai

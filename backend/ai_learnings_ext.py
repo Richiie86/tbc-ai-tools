@@ -160,9 +160,9 @@ async def digest(
     button so the operator gets a one-paragraph personality changelog for
     sharing / archiving.
 
-    Uses a small LLM call (Gemini Flash) to
-    summarise — falls back to a deterministic bullet list if the LLM is
-    unreachable so the endpoint never fails in CI.
+    Uses any configured small/fast LLM to summarise — falls back to a
+    deterministic bullet list if no provider is reachable so the endpoint
+    never fails in CI.
     """
     from datetime import timedelta
     import os
@@ -181,21 +181,20 @@ async def digest(
         }
 
     bullets = '\n'.join(f'- {d.get("text", "").strip()}' for d in docs)
-    from llm_router import _gemini_key
     api_key = ''  # legacy placeholder — llm_router uses the provider key
-    if not await _gemini_key():
-        # Deterministic fallback — keep the endpoint useful even without
-        # a Gemini key configured (e.g. CI).
-        return {
-            'weeks': weeks,
-            'count': len(docs),
-            'markdown': f'## AI personality changelog — last {weeks} week(s)\n\n{bullets}',
-            'fallback': True,
-        }
     try:
         from llm_router import (
-            LlmChat, UserMessage, TextDelta, StreamDone,
+            LlmChat, UserMessage, TextDelta, StreamDone, ordered_text_models,
         )
+        chain = await ordered_text_models()
+        if not chain:
+            return {
+                'weeks': weeks,
+                'count': len(docs),
+                'markdown': f'## AI personality changelog — last {weeks} week(s)\n\n{bullets}',
+                'fallback': True,
+            }
+        provider, model = chain[-1] if len(chain) > 1 else chain[0]
         chat = LlmChat(
             api_key=api_key,
             session_id=f'digest-{uuid.uuid4()}',
@@ -205,7 +204,7 @@ async def digest(
                 'Keep it under 250 words. Use "## What your AI learned this week" '
                 'as the H2 title, then 2-3 thematic sub-bullets.'
             ),
-        ).with_model('gemini', 'gemini-3-flash-preview')
+        ).with_model(provider, model)
         full = ''
         async for ev in chat.stream_message(UserMessage(text=(
             f'These are the {len(docs)} new learnings approved in the last '

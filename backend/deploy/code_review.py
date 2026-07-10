@@ -412,18 +412,32 @@ async def _second_opinion(snapshot: dict, first_review: dict, llm_key: str) -> d
         + "\n\nReturn the second-opinion JSON now."
     )
     # Second opinion runs over the same snapshot + the first reviewer's
-    # verdict. Uses a VALID model id (see _SECOND_OPINION_MODEL) — keeps the
-    # pass on the operator's own Anthropic key when set.
-    chat = LlmChat(
-        api_key=llm_key,
-        session_id=f'code-review-second-{datetime.now(timezone.utc).timestamp():.0f}',
-        system_message=_SECOND_OPINION_PROMPT,
-        max_tokens=2048,
-    ).with_model('anthropic', _SECOND_OPINION_MODEL)
-    try:
-        raw = await chat.send_message(UserMessage(text=user_msg))
-    except Exception as e:
-        return {'verdict': 'review_skipped', 'summary': f'Second-opinion failed: {str(e)[:200]}', 'concerns': [], 'reviewer_model': _SECOND_OPINION_MODEL}
+    # verdict. Prefer Anthropic when configured, but fall back to any configured
+    # provider so OpenRouter/Groq-only setups still get a second pass.
+    from llm_router import ordered_text_models, record_provider_error, record_provider_ok
+    chain = await ordered_text_models(primary=('anthropic', _SECOND_OPINION_MODEL))
+    if not chain:
+        return {'verdict': 'review_skipped', 'summary': 'Second-opinion skipped: no configured AI provider.', 'concerns': [], 'reviewer_model': 'none'}
+    raw = None
+    reviewer_model = None
+    last_error = None
+    for provider, reviewer_model in chain:
+        chat = LlmChat(
+            api_key=llm_key,
+            session_id=f'code-review-second-{datetime.now(timezone.utc).timestamp():.0f}',
+            system_message=_SECOND_OPINION_PROMPT,
+            max_tokens=2048,
+        ).with_model(provider, reviewer_model)
+        try:
+            raw = await chat.send_message(UserMessage(text=user_msg))
+            record_provider_ok(provider)
+            break
+        except Exception as e:
+            last_error = str(e)[:200]
+            record_provider_error(provider, e)
+            continue
+    if raw is None:
+        return {'verdict': 'review_skipped', 'summary': f'Second-opinion failed: {last_error}', 'concerns': [], 'reviewer_model': reviewer_model or 'none'}
     parsed = _extract_json(raw or '') or {}
     return {
         'verdict': parsed.get('verdict') or 'review_skipped',

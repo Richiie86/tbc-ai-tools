@@ -1820,12 +1820,12 @@ async def op_project_fix(
 
     gh_token = settings.get('github_token') or os.environ.get('GITHUB_TOKEN')
     if not gh_token:
-        raise HTTPException(503, 'github_token not set in Operator → Security.')
+        raise HTTPException(503, 'github_token not set in Operator → My Keys.')
 
     from llm_router import resolve_text_model
     resolved = await resolve_text_model()
     if not resolved:
-        raise HTTPException(503, 'No AI provider key configured — add one in Operator → Security.')
+        raise HTTPException(503, 'No AI provider key configured — add one in Operator → My Keys.')
     provider, model = resolved
 
     from app_builder_ext import (
@@ -1982,7 +1982,7 @@ async def op_self_deploy(
     if not project:
         raise HTTPException(
             503,
-            'self_repo not configured. Set it in Operator → Security (e.g. "tbctools/platform").',
+            'self_repo not configured. Set it in Operator → My Keys (e.g. "tbctools/platform").',
         )
     settings = await get_settings_doc()
     return await _trigger_deploy(

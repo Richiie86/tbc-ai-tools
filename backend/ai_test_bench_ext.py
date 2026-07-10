@@ -50,6 +50,9 @@ TEST_MODELS: list[dict] = [
     {'id': 'gpt-4.1',                  'display': 'GPT-4.1',               'provider': 'openai'},
     {'id': 'gemini-3.1-pro-preview',   'display': 'Gemini 3.1 Pro',        'provider': 'gemini'},
     {'id': 'gemini-3-flash-preview',   'display': 'Gemini 3 Flash',        'provider': 'gemini'},
+    {'id': 'anthropic/claude-sonnet-4', 'display': 'Claude Sonnet 4 (OpenRouter)', 'provider': 'openrouter'},
+    {'id': 'openai/gpt-4o-mini',        'display': 'GPT-4o Mini (OpenRouter)',     'provider': 'openrouter'},
+    {'id': 'llama-3.3-70b-versatile',   'display': 'Llama 3.3 70B (Groq)',         'provider': 'groq'},
 ]
 
 PROBE_TIMEOUT_S = 30.0  # per-probe ceiling; each model has 3 probes.
@@ -110,15 +113,9 @@ async def _run_probe(
 
 
 async def _any_provider_key() -> bool:
-    """True if at least one provider key (Anthropic/OpenAI/Gemini) is
-    available from env or operator settings. Probes route per-provider via
-    llm_router, so no single 'universal' key is needed anymore."""
-    from llm_router import _anthropic_key, _openai_key, _gemini_key
-    return bool(
-        (await _anthropic_key())
-        or (await _openai_key())
-        or (await _gemini_key())
-    )
+    """True if at least one provider key is available from env or operator settings."""
+    from llm_router import any_provider_key_available
+    return await any_provider_key_available()
 
 
 async def _get_llm_key() -> str:
@@ -128,8 +125,8 @@ async def _get_llm_key() -> str:
     if not await _any_provider_key():
         raise HTTPException(
             503,
-            'No AI provider key configured. Add an Anthropic, OpenAI, or '
-            'Gemini key in Operator → Security.',
+            'No AI provider key configured. Add Anthropic, OpenAI, Gemini, '
+            'OpenRouter, or Groq in Operator → My Keys.',
         )
     return ''
 
@@ -222,8 +219,11 @@ async def list_models(_op: dict = Depends(get_current_operator)):
     result attached (so the table has a status the moment the tab opens
     — no double round-trip needed).
     """
+    from llm_router import available_providers
+    configured = await available_providers()
+    visible_models = [m for m in TEST_MODELS if not configured or m['provider'] in configured]
     # Pull last run per model in one go (sort + dedupe in Python — cheap
-    # for ~8 rows; saves writing a Mongo aggregation pipeline).
+    # for the curated rows; saves writing a Mongo aggregation pipeline).
     cursor = db.ai_model_tests.find({}).sort('created_at', -1).limit(200)
     last_by_model: dict[str, dict] = {}
     async for d in cursor:
@@ -236,7 +236,7 @@ async def list_models(_op: dict = Depends(get_current_operator)):
     return {
         'models': [
             {**m, 'last_test': last_by_model.get(m['id'])}
-            for m in TEST_MODELS
+            for m in visible_models
         ],
     }
 
@@ -340,9 +340,12 @@ async def _nightly_drift_alert() -> dict:
         if d['model'] not in prev_by_model:
             prev_by_model[d['model']] = d
 
-    # Run every model in parallel.
+    from llm_router import available_providers
+    configured = await available_providers()
+    run_models = [m for m in TEST_MODELS if not configured or m['provider'] in configured]
+    # Run every configured model.
     new_results: list[dict] = []
-    for m in TEST_MODELS:
+    for m in run_models:
         try:
             new_results.append(await _run_one_model(m['id'], api_key))
         except Exception as e:
