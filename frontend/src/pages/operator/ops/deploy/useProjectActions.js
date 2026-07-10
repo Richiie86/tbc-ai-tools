@@ -89,6 +89,89 @@ export function useProjectActions(project, onDeployed) {
     }
   };
 
+
+  const parseAutopilotFrames = (buffer) => {
+    const frames = [];
+    const parts = buffer.split('\n\n');
+    const remainder = parts.pop() || '';
+    for (const part of parts) {
+      const lines = part.split('\n');
+      const type = (lines.find((l) => l.startsWith('event:')) || '').slice(6).trim();
+      const dataLine = lines.find((l) => l.startsWith('data:'));
+      if (!type || !dataLine) continue;
+      try {
+        frames.push({ type, data: JSON.parse(dataLine.slice(5).trim()) });
+      } catch {
+        frames.push({ type, data: { raw: dataLine.slice(5).trim() } });
+      }
+    }
+    return { frames, remainder };
+  };
+
+  const runSelfHealingDeploy = async () => {
+    const base = api.defaults.baseURL || '';
+    const resp = await fetch(`${base}/operator/deploy/${project.id}/autopilot`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        target: 'production',
+        bypass_review: false,
+        watch_timeout_s: 120,
+        auto_fix_max_iterations: 3,
+      }),
+    });
+    if (!resp.ok || !resp.body) {
+      const detail = await resp.text();
+      throw new Error(`Autopilot failed to start: ${resp.status} ${detail.slice(0, 160)}`);
+    }
+    toast.message('Self-healing deploy started: review → auto-fix → deploy → health check');
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let finalState = null;
+    let blocked = null;
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const parsed = parseAutopilotFrames(buffer);
+      buffer = parsed.remainder;
+      for (const item of parsed.frames) {
+        if (item.type === 'review_done') {
+          const verdict = item.data?.verdict || 'unknown';
+          toast.message(`Code review: ${verdict}`);
+        } else if (item.type === 'auto_fix_start') {
+          toast.message(`AI auto-fix iteration ${item.data?.iteration || ''} started`);
+        } else if (item.type === 'deploy_ready') {
+          finalState = item.data?.state || finalState;
+        } else if (item.type === 'health_check') {
+          if (item.data?.ok) toast.success('Health check passed after deploy');
+          else toast.error(`Health check failed: ${item.data?.error || item.data?.http_status || 'unknown'}`);
+        } else if (item.type === 'gate_blocked') {
+          blocked = item.data;
+        } else if (item.type === 'loop_error') {
+          throw new Error(item.data?.message || 'Autopilot failed');
+        }
+      }
+    }
+    if (blocked) {
+      setGateBlock({
+        review: { verdict: blocked.verdict, findings: blocked.findings || [] },
+        fix_chat_session_id: blocked.fix_chat_session_id,
+        target: 'production',
+      });
+      throw new Error('AI review still blocked deployment after auto-fix attempts. Open the fix chat for the remaining findings.');
+    }
+    if (finalState && finalState !== 'READY') {
+      throw new Error(`Deployment did not reach READY (state=${finalState}).`);
+    }
+    toast.success('Self-healing deploy completed successfully');
+    setGateBlock(null);
+    onDeployed();
+  };
+
   // --- deploy / preview / redeploy / health / download dispatcher -------
   const trigger = async (kind) => {
     setBusy(kind);
@@ -136,13 +219,16 @@ export function useProjectActions(project, onDeployed) {
         toast.success('Download started');
         return;
       } else {
-        const target = kind === 'preview' ? 'preview' : 'production';
-        await runDeploy(target, false);
+        if (kind === 'deploy') {
+          await runSelfHealingDeploy();
+        } else {
+          await runDeploy('preview', false);
+        }
         return;
       }
       onDeployed();
     } catch (e) {
-      toast.error(e?.response?.data?.detail || `${kind} failed`);
+      toast.error(e?.response?.data?.detail || e?.message || `${kind} failed`);
     } finally {
       setBusy(null);
     }
