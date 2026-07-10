@@ -356,8 +356,8 @@ function KeysCard({ keysStatus, onSaved }) {
 // ---------- Main section ------------------------------------------------
 /**
  * Ops-tab "Vercel deploy" section: keys management + project list + per-row
- * Deploy/Redeploy/Preview buttons. Projects themselves are created by the AI
- * agent via POST /api/projects — the operator just consumes them here.
+ * Deploy/Redeploy/Preview buttons. Operators can create launchable projects
+ * directly in-app, and external AI agents can still POST to /api/projects.
  */
 export function OpsDeploySection() {
   const [keysStatus, setKeysStatus] = useState(null);
@@ -428,8 +428,8 @@ export function OpsDeploySection() {
           <div>
             <h3 className="text-base font-bold text-tbc-100">Vercel deploys</h3>
             <p className="text-xs text-tbc-200/60">
-              Paste your Vercel token to power the Deploy/Redeploy/Preview buttons.
-              Projects in the list come from your AI agent calling{' '}
+              Add your own GitHub repo with <span className="font-semibold text-tbc-300">New project</span>, then launch it with Preview or Deploy.
+              AI agents can also create projects through{' '}
               <code className="rounded bg-ink-950 px-1 text-[10px] text-tbc-300">POST /api/projects</code>.
             </p>
           </div>

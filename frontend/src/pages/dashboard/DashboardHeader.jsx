@@ -63,6 +63,7 @@ export function DashboardHeader({
             switch AI / pick Auto without scrolling), credits, and the live
             app-update status. Pinned outside the scroll strip. */}
         <div className="flex shrink-0 items-center gap-2">
+          <div className="hidden text-[10px] font-semibold uppercase tracking-wider text-slate-500 sm:block">AI model</div>
           <ModelPicker models={models} model={model} setModel={setModel} />
           <CreditsBadge user={user} testid="dashboard-credits-badge" />
           {/* Live app-update status — green = latest, amber = checking,
@@ -140,7 +141,7 @@ function ModelPicker({ models, model, setModel }) {
 
   return (
     <Select value={model} onValueChange={setModel}>
-      <SelectTrigger className="h-9 w-[140px] min-w-0 border-slate-700 bg-slate-900 text-slate-100 sm:w-[230px]">
+      <SelectTrigger data-testid="dashboard-ai-model-picker" className="h-9 w-[150px] min-w-0 border-slate-700 bg-slate-900 text-slate-100 sm:w-[250px]">
         {/* min-w-0 + overflow-hidden on the inner flex, plus truncate on the
             value, so a long model label (e.g. "Claude Opus 4.7 (recommended)")
             clips inside the pill instead of spilling over the credits badge. */}
