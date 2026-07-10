@@ -18,6 +18,7 @@ import secrets
 from typing import Optional
 
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Request
+import httpx
 
 from auth_utils import get_current_operator
 from db import db
@@ -63,6 +64,98 @@ async def rotate_project_webhook_secret(
         'secret': fresh,           # one-time reveal — operator must copy it now
         'masked': '••••' + fresh[-4:],
         'project_id': project_id,
+    }
+
+
+
+
+@router.post('/operator/deploy/{project_id}/webhook/install')
+async def install_project_webhook(
+    project_id: str,
+    request: Request,
+    _op: dict = Depends(get_current_operator),
+):
+    """Create or update the GitHub push webhook automatically.
+
+    Uses the GitHub token saved in My Keys. The token needs repository webhook
+    administration permission (classic: `admin:repo_hook`; fine-grained:
+    Webhooks read/write for the repository). This removes the old manual copy
+    URL/secret flow when the token has permission.
+    """
+    project = await db.deploy_projects.find_one({'id': project_id})
+    if not project:
+        raise HTTPException(404, 'Project not found')
+    repo = (project.get('repo') or '').strip()
+    if not repo or '/' not in repo:
+        raise HTTPException(409, 'Add a GitHub repo to this project before installing a webhook.')
+
+    settings = await db.settings.find_one({'_id': 'payment_settings'}) or {}
+    token = (settings.get('github_token') or '').strip()
+    if not token:
+        raise HTTPException(503, 'GitHub token not set in Operator → My Keys.')
+
+    secret = project.get('github_webhook_secret')
+    if not secret:
+        secret = 'whsec_' + secrets.token_urlsafe(28)
+        await db.deploy_projects.update_one(
+            {'id': project_id}, {'$set': {'github_webhook_secret': secret}},
+        )
+
+    base = str(request.url).split('/api/')[0].rstrip('/')
+    hook_url = f'{base}/api/webhooks/github'
+    headers = {
+        'Authorization': f'Bearer {token}',
+        'Accept': 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+    }
+    body = {
+        'name': 'web',
+        'active': True,
+        'events': ['push'],
+        'config': {
+            'url': hook_url,
+            'content_type': 'json',
+            'secret': secret,
+            'insecure_ssl': '0',
+        },
+    }
+
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        # Prefer updating an existing hook for the same URL so repeated clicks
+        # keep the setup idempotent. If listing is forbidden, try create.
+        existing_id = None
+        hooks = await client.get(f'https://api.github.com/repos/{repo}/hooks', headers=headers)
+        if hooks.status_code == 200:
+            for h in hooks.json() or []:
+                cfg = h.get('config') or {}
+                if cfg.get('url') == hook_url:
+                    existing_id = h.get('id')
+                    break
+        if existing_id:
+            resp = await client.patch(
+                f'https://api.github.com/repos/{repo}/hooks/{existing_id}',
+                headers=headers, json=body,
+            )
+            action = 'updated'
+        else:
+            resp = await client.post(f'https://api.github.com/repos/{repo}/hooks', headers=headers, json=body)
+            action = 'created'
+
+    if resp.status_code not in (200, 201):
+        msg = resp.text[:300]
+        if resp.status_code in (401, 403):
+            raise HTTPException(403, 'GitHub token cannot manage webhooks for this repo. Add webhook write/admin permission in GitHub, then try again.')
+        raise HTTPException(502, f'GitHub webhook install failed: {msg}')
+
+    return {
+        'ok': True,
+        'action': action,
+        'repo': repo,
+        'webhook_url': hook_url,
+        'secret_set': True,
+        'secret_masked': '••••' + secret[-4:],
+        'github_hook_id': (resp.json() or {}).get('id'),
+        'events': ['push'],
     }
 
 
@@ -137,6 +230,7 @@ async def github_push_webhook(
 
     deployed = []
     skipped = []
+    render_deploy = None
     for proj in matches:
         secret = proj.get('github_webhook_secret')
         if not _verify_signature(secret, raw_body, x_hub_signature_256):
@@ -161,6 +255,17 @@ async def github_push_webhook(
                 'deployment_id': res.get('deployment_id'),
                 'url': res.get('url'),
             })
+            # Platform repo pushes should also deploy the Render backend. Vercel
+            # handles the frontend via its Git integration; this closes the
+            # backend half of the automation when Render's own autoDeploy is not
+            # connected or when the operator relies on a saved deploy hook.
+            if repo_full.lower() == 'richiie86/tbc-ai-tools' and branch == 'main':
+                try:
+                    from deploy_ext import trigger_render_deploy
+                    render_deploy = await trigger_render_deploy(source='github-webhook')
+                except Exception as re:
+                    logger.warning('Render auto-deploy after GitHub push failed: %s', str(re)[:200])
+                    render_deploy = {'ok': False, 'error': str(re)[:200]}
         except Exception as e:
             logger.error('Webhook deploy failed for %s: %s', proj['id'], str(e)[:200])
             skipped.append({'project_id': proj['id'], 'reason': str(e)[:200]})
@@ -170,4 +275,5 @@ async def github_push_webhook(
         'matched': len(matches),
         'deployed': deployed,
         'skipped': skipped,
+        'render_deploy': render_deploy,
     }
