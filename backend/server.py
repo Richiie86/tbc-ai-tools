@@ -439,26 +439,37 @@ async def _build_session_deploy_context(session_id: Optional[str]) -> str:
 
 # Supported models -> provider mapping
 MODEL_PROVIDERS = {
-    # OpenAI
-    'gpt-5.4':       ('openai', 'gpt-5.4'),
-    'gpt-5.4-mini':  ('openai', 'gpt-5.4-mini'),
-    'gpt-5':         ('openai', 'gpt-5'),
-    'gpt-5-mini':    ('openai', 'gpt-5-mini'),
+    # OpenAI. Legacy gpt-5.4 ids are kept as aliases so old sessions do not
+    # break, but they route to stable OpenAI model ids.
+    'gpt-5.4':       ('openai', 'gpt-4.1'),
+    'gpt-5.4-mini':  ('openai', 'gpt-4o-mini'),
+    'gpt-5':         ('openai', 'gpt-4.1'),
+    'gpt-5-mini':    ('openai', 'gpt-4o-mini'),
     'gpt-4.1':       ('openai', 'gpt-4.1'),
+    'gpt-4o-mini':   ('openai', 'gpt-4o-mini'),
     'o3':            ('openai', 'o3'),
-    # Anthropic
-    'claude-sonnet-4-6':        ('anthropic', 'claude-sonnet-4-6'),
-    'claude-opus-4-7':          ('anthropic', 'claude-opus-4-7'),
+    # Anthropic. Legacy future ids route to the stable Sonnet/Haiku ids.
+    'claude-sonnet-4-6':          ('anthropic', 'claude-sonnet-4-5-20250929'),
+    'claude-opus-4-7':            ('anthropic', 'claude-sonnet-4-5-20250929'),
     'claude-sonnet-4-5-20250929': ('anthropic', 'claude-sonnet-4-5-20250929'),
     'claude-haiku-4-5-20251001':  ('anthropic', 'claude-haiku-4-5-20251001'),
-    # Gemini
-    'gemini-3.1-pro-preview':    ('gemini', 'gemini-3.1-pro-preview'),
-    'gemini-3-flash-preview':    ('gemini', 'gemini-3-flash-preview'),
-    'gemini-2.5-pro':            ('gemini', 'gemini-2.5-pro'),
-    'gemini-2.5-flash':          ('gemini', 'gemini-2.5-flash'),
+    # Gemini. Legacy preview ids route to stable Gemini 2.5 ids.
+    'gemini-3.1-pro-preview':     ('gemini', 'gemini-2.5-pro'),
+    'gemini-3-flash-preview':     ('gemini', 'gemini-2.5-flash'),
+    'gemini-2.5-pro':             ('gemini', 'gemini-2.5-pro'),
+    'gemini-2.5-flash':           ('gemini', 'gemini-2.5-flash'),
 }
 
-DEFAULT_MODEL = 'claude-opus-4-7'
+DEFAULT_MODEL = 'auto'
+
+# Browser localStorage and existing chat sessions may still carry these old ids.
+# Treat them as Automatic so one dead/out-of-credit provider does not block the
+# whole chat before the cross-provider fallback chain gets a chance to run.
+LEGACY_UNSTABLE_MODEL_IDS = {
+    'gpt-5.4', 'gpt-5.4-mini', 'gpt-5', 'gpt-5-mini',
+    'claude-opus-4-7', 'claude-sonnet-4-6',
+    'gemini-3.1-pro-preview', 'gemini-3-flash-preview',
+}
 
 # Ordered fallback chain — when a chat stream errors before producing any
 # tokens we try the next entry. Picking a *different provider* every step
@@ -474,17 +485,20 @@ DEFAULT_MODEL = 'claude-opus-4-7'
 # verified-live OpenRouter model ids; direct Gemini uses the stable
 # gemini-2.5-flash id (the gemini-3 *preview* ids can hang ~30s / 404).
 CHAT_FALLBACK_CHAIN: list[str] = [
-    'claude-sonnet-4-6',            # Anthropic (direct)
+    'claude-sonnet-4-5-20250929',   # Anthropic (direct, stable Sonnet id)
     'gpt-4.1',                      # OpenAI (direct)
     'gemini-2.5-flash',             # Google (direct, stable id)
     'anthropic/claude-sonnet-4',    # OpenRouter → Claude (works when direct Anthropic is out of credit)
     'openai/gpt-4o-mini',           # OpenRouter → GPT (cheap, reliable last resort)
+    'google/gemini-2.5-flash',      # OpenRouter → Gemini fallback
 ]
 
 
 def resolve_model(name: Optional[str]):
     """Return (provider, model_name) tuple for a given model id."""
     key = (name or DEFAULT_MODEL).strip()
+    if key == 'auto':
+        key = 'claude-sonnet-4-5-20250929'
     if key in MODEL_PROVIDERS:
         return MODEL_PROVIDERS[key]
     # OpenRouter model ids are "vendor/model" slugs (they contain a slash),
@@ -503,7 +517,7 @@ def resolve_model(name: Optional[str]):
         return ('openai', key)
     if key.startswith(('llama', 'mixtral', 'gemma')):
         return ('groq', key)
-    return MODEL_PROVIDERS[DEFAULT_MODEL]
+    return MODEL_PROVIDERS['claude-sonnet-4-5-20250929']
 
 
 # ===== STARTUP =====
@@ -1751,6 +1765,12 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
     # Append the deploy guardrail LAST so it takes precedence over any operator
     # learning that may have drifted into instructing a pre-flight checklist.
     effective_prompt += _DEPLOY_GUARDRAIL
+    # Existing sessions/browsers can still submit retired preview/future model
+    # ids. Route those through Automatic instead of treating them as explicit
+    # picks, so the fallback chain can choose a configured working provider.
+    if req.model in LEGACY_UNSTABLE_MODEL_IDS:
+        req.model = AUTO_MODEL_ID
+
     # The chat instance is built per-attempt inside `event_generator` so the
     # fallback chain can switch providers cleanly. We resolve the *primary*
     # model up front purely as a validation step. The special "auto" id is not
@@ -2125,20 +2145,15 @@ async def list_models():
     """
     providers = {
         'OpenAI': [
-            {'id': 'gpt-5', 'label': 'GPT-5'},
-            {'id': 'gpt-5-mini', 'label': 'GPT-5 Mini'},
             {'id': 'gpt-4.1', 'label': 'GPT-4.1'},
+            {'id': 'gpt-4o-mini', 'label': 'GPT-4o Mini'},
             {'id': 'o3', 'label': 'o3 (reasoning)'},
         ],
         'Anthropic': [
-            {'id': 'claude-opus-4-7', 'label': 'Claude Opus 4.7 (recommended)'},
-            {'id': 'claude-sonnet-4-6', 'label': 'Claude Sonnet 4.6'},
-            {'id': 'claude-sonnet-4-5-20250929', 'label': 'Claude Sonnet 4.5'},
+            {'id': 'claude-sonnet-4-5-20250929', 'label': 'Claude Sonnet 4.5 (recommended)'},
             {'id': 'claude-haiku-4-5-20251001', 'label': 'Claude Haiku 4.5'},
         ],
         'Gemini': [
-            {'id': 'gemini-3.1-pro-preview', 'label': 'Gemini 3.1 Pro (recommended)'},
-            {'id': 'gemini-3-flash-preview', 'label': 'Gemini 3 Flash'},
             {'id': 'gemini-2.5-pro', 'label': 'Gemini 2.5 Pro'},
             {'id': 'gemini-2.5-flash', 'label': 'Gemini 2.5 Flash'},
         ],

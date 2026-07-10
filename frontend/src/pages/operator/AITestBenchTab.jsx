@@ -194,6 +194,7 @@ function ModelCard({ model, running, onRun }) {
                 <Zap className="h-3 w-3" />
                 {t.avg_latency_ms} ms avg
               </div>
+              {status === 'fail' && <FailureSummary test={t} />}
               <div className="mt-0.5 text-[10px] text-tbc-200/40">
                 {t.created_at ? new Date(t.created_at).toLocaleString() : '—'}
               </div>
@@ -247,6 +248,19 @@ function ModelCard({ model, running, onRun }) {
           </ul>
         </details>
       )}
+    </div>
+  );
+}
+
+
+function FailureSummary({ test }) {
+  const failed = (test?.probes || []).filter((p) => !p.pass);
+  const first = failed.find((p) => p.error) || failed[0];
+  if (!first) return null;
+  const label = first.error || `${failed.length} probe${failed.length === 1 ? '' : 's'} failed`;
+  return (
+    <div className="mt-1 max-w-[13rem] truncate rounded border border-red-500/30 bg-red-950/30 px-1.5 py-0.5 text-[10px] text-red-200" title={label}>
+      {first.name}: {label}
     </div>
   );
 }

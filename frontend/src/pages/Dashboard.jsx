@@ -22,6 +22,16 @@ import DnsStatusSidebar from './dashboard/DnsStatusSidebar';
 import { useStickToBottom } from './dashboard/useStickToBottom';
 import { useChatSessionsCrud } from './dashboard/useChatSessionsCrud';
 
+const LEGACY_UNSTABLE_MODELS = new Set([
+  'gpt-5.4', 'gpt-5.4-mini', 'gpt-5', 'gpt-5-mini',
+  'claude-opus-4-7', 'claude-sonnet-4-6',
+  'gemini-3.1-pro-preview', 'gemini-3-flash-preview',
+]);
+
+function normalizeStoredModel(value) {
+  return value && !LEGACY_UNSTABLE_MODELS.has(value) ? value : 'auto';
+}
+
 export default function Dashboard({ variant = 'tbc1' }) {
   const { user, logout, refresh } = useAuth();
   const { sessionId: paramSession } = useParams();
@@ -40,8 +50,8 @@ export default function Dashboard({ variant = 'tbc1' }) {
   // switches instead of snapping back to the Claude default. Read the stored
   // value synchronously on mount; a dedicated effect writes it back on change.
   const [model, setModel] = useState(() => {
-    try { return localStorage.getItem('tbc.chat.model') || 'claude-opus-4-7'; }
-    catch { return 'claude-opus-4-7'; }
+    try { return normalizeStoredModel(localStorage.getItem('tbc.chat.model')); }
+    catch { return 'auto'; }
   });
   const [models, setModels] = useState({ providers: {} });
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -83,9 +93,9 @@ export default function Dashboard({ variant = 'tbc1' }) {
         setMessages(data.messages || []);
         // Prefer the model the session was last used with; otherwise fall back
         // to the operator's saved preference (not a hardcoded Claude default).
-        let stored = 'claude-opus-4-7';
-        try { stored = localStorage.getItem('tbc.chat.model') || stored; } catch { /* private mode */ }
-        setModel(data.session?.model || stored);
+        let stored = 'auto';
+        try { stored = normalizeStoredModel(localStorage.getItem('tbc.chat.model')); } catch { /* private mode */ }
+        setModel(normalizeStoredModel(data.session?.model || stored));
         // Restore any un-answered Allow/Build gate so it survives a reload.
         try {
           const { data: pd } = await getPendingProposals(id);
@@ -117,7 +127,10 @@ export default function Dashboard({ variant = 'tbc1' }) {
       // explicit model preference the operator has already saved, and never
       // override a model they're viewing in an existing session.
       let hasStoredPref = false;
-      try { hasStoredPref = !!localStorage.getItem('tbc.chat.model'); } catch { /* private mode */ }
+      try {
+        const storedModel = localStorage.getItem('tbc.chat.model');
+        hasStoredPref = !!storedModel && !LEGACY_UNSTABLE_MODELS.has(storedModel);
+      } catch { /* private mode */ }
       if (r.data?.auto_default && r.data?.auto?.id && !currentId && !hasStoredPref) {
         setModel(r.data.auto.id);
       }
