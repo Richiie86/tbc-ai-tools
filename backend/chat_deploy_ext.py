@@ -246,8 +246,9 @@ async def _redeploy_linked(project: dict) -> dict:
             {'$set': {'last_deployment_state': state,
                       'last_deployment_url': deploy_url, 'updated_at': _now()}},
         )
+    deploy_ok = state == 'READY'
     return {
-        'ok': True,
+        'ok': deploy_ok,
         'provisioned': False,
         'project_id': project['id'],
         'repo': project.get('repo'),
@@ -255,7 +256,7 @@ async def _redeploy_linked(project: dict) -> dict:
         'domain': project.get('domain') or '',
         'state': state,
         'credits_charged': 0,
-        'message': 'Redeploy triggered — your live app will update in a moment.',
+        'message': 'Redeploy completed.' if deploy_ok else f'Redeploy did not reach READY (state={state or "UNKNOWN"}).',
     }
 
 
@@ -361,15 +362,20 @@ async def chat_apply(
         committed = await _commit_files(client, gh_token, repo, branch, changed)
 
     redeploy = await _redeploy_linked(project)
+    deploy_ok = bool(redeploy.get('ok'))
     return {
-        'ok': True,
+        'ok': deploy_ok,
         'changed': list(changed.keys()),
         'committed': committed,
         'notes': (parsed.get('notes') or '')[:500],
-        'redeployed': True,
+        'redeployed': deploy_ok,
         'deploy_url': redeploy.get('deploy_url'),
         'state': redeploy.get('state'),
-        'message': f'Updated {committed} file(s) and redeployed your live app.',
+        'message': (
+            f'Updated {committed} file(s) and redeployed your live app.'
+            if deploy_ok else
+            f'Updated {committed} file(s), but deploy did not reach READY (state={redeploy.get("state") or "UNKNOWN"}).'
+        ),
     }
 
 
@@ -763,14 +769,20 @@ async def _apply_proposal_stream(proposal: dict, *, is_operator: bool):
     if is_operator and project:
         yield (f'Approved — committed {committed} file(s). Deploying your live app now; '
                f'I\'ll wait for the build…\n\n')
+        final_state = None
         try:
             async for prog in _redeploy_linked_streaming(project):
+                if isinstance(prog, dict) and prog.get('__event__') == 'deploy_done':
+                    final_state = (prog.get('state') or '').upper()
                 yield prog
         except Exception as e:  # noqa: BLE001
             yield (f'Committed {committed} file(s), but the deploy hit a snag: '
                    f'{str(e)[:160]}. Tap **Redeploy now** to retry.')
             return
-        yield '\nYour app is live with the change.'
+        if final_state == 'READY':
+            yield '\nYour app is live with the change.'
+        else:
+            yield f'\nCommitted {committed} file(s), but the deploy did not reach READY (state={final_state or "UNKNOWN"}). Review the deployment before launch.'
     else:
         yield (f'Approved — I committed {committed} file(s) to your app. '
                f'Tap **Deploy** to push it live when you\'re ready.')
