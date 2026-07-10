@@ -7,7 +7,7 @@ code". This module gives every project a `/suggestions` endpoint that:
 
   1. Samples the repo (reuses `fetch_repo_snapshot` from
      `deploy.code_review`).
-  2. Asks GPT-4o to play "senior staff engineer doing a casual code
+  2. Asks the best configured AI provider to play "senior staff engineer doing a casual code
      review" and produce 3–5 short, actionable suggestions with a
      priority dot (high/medium/low) and a 1-paragraph prompt the AI
      Build pipeline can use to implement the suggestion.
@@ -23,7 +23,7 @@ Both share the snapshot logic so credits don't double-bill.
 
 Costs / safety
 --------------
-- One GPT-4o call per click, ≤ ~4 KB context (suggestion list, not full
+- One configured-provider AI call per click, ≤ ~4 KB context (suggestion list, not full
   diffs).
 - Operator-only endpoint.
 - Cached per repo+ref for 30 minutes so refreshing the tab doesn't
@@ -143,10 +143,7 @@ async def run_suggestions(
         raise HTTPException(412, 'Project has no GitHub repo configured.')
 
     settings = await db.settings.find_one({'_id': 'payment_settings'}) or {}
-    from llm_router import _openai_key
     llm_key = ''  # legacy placeholder — llm_router uses the provider key
-    if not await _openai_key():
-        raise HTTPException(503, 'No OpenAI API key configured (Operator → Security).')
     gh_token = settings.get('github_token') or os.environ.get('GITHUB_TOKEN')
 
     # 30-minute cache — same key shape as the code review module so
@@ -164,7 +161,7 @@ async def run_suggestions(
     # Reuse the same repo snapshot logic the code review uses — exactly
     # one source of truth for "what files do we look at".
     from deploy.code_review import fetch_repo_snapshot
-    from llm_router import LlmChat, UserMessage
+    from llm_router import LlmChat, UserMessage, ordered_text_models, record_provider_error, record_provider_ok
     snapshot = await fetch_repo_snapshot(repo, project.get('gitRef'), gh_token)
     if not snapshot['files']:
         raise HTTPException(502, f"Could not sample repo {repo}@{snapshot['ref']}")
@@ -177,11 +174,6 @@ async def run_suggestions(
         file_lines.append(f"--- {f['path']} ({len(f.get('content') or '')} bytes) ---\n{head}")
     context = '\n\n'.join(file_lines)
 
-    chat = LlmChat(
-        api_key=llm_key,
-        session_id=f'suggestions-{project_id}-{datetime.now(timezone.utc).timestamp():.0f}',
-        system_message=_SYSTEM_PROMPT,
-    ).with_model('openai', 'gpt-4o')
     msg = UserMessage(text=(
         f"Repo: {repo}\nBranch: {snapshot['ref']}\n"
         f"Files sampled: {snapshot['file_count']}\n\n"
@@ -189,11 +181,29 @@ async def run_suggestions(
         f"Project name (operator-facing): {project.get('projectName') or 'this app'}\n"
         f"Return your STRICT JSON suggestions now."
     ))
-    try:
-        raw = await chat.send_message(msg)
-    except Exception as e:
-        logger.warning('Suggestions LLM failed for %s: %s', repo, e)
-        raise HTTPException(502, f'Suggestion model failed: {str(e)[:200]}') from e
+    chain = await ordered_text_models()
+    if not chain:
+        raise HTTPException(503, 'No AI provider key configured (Operator → My Keys).')
+    raw = None
+    reviewer_provider = reviewer_model = None
+    last_error = None
+    for reviewer_provider, reviewer_model in chain:
+        chat = LlmChat(
+            api_key=llm_key,
+            session_id=f'suggestions-{project_id}-{datetime.now(timezone.utc).timestamp():.0f}',
+            system_message=_SYSTEM_PROMPT,
+        ).with_model(reviewer_provider, reviewer_model)
+        try:
+            raw = await chat.send_message(msg)
+            record_provider_ok(reviewer_provider)
+            break
+        except Exception as e:
+            last_error = str(e)[:200]
+            record_provider_error(reviewer_provider, e)
+            logger.warning('Suggestions LLM failed for %s on %s: %s', repo, reviewer_provider, last_error)
+            continue
+    if raw is None:
+        raise HTTPException(502, f'Suggestion model failed on every configured provider: {last_error or "unknown"}')
 
     parsed = _parse_json(raw or '')
     body = _coerce_suggestions(parsed)
@@ -202,7 +212,8 @@ async def run_suggestions(
         'project_id': project_id,
         'repo': repo,
         'ref': snapshot['ref'],
-        'reviewer_model': 'gpt-4o',
+        'reviewer_provider': reviewer_provider,
+        'reviewer_model': reviewer_model,
         'files_sampled': [f['path'] for f in snapshot['files']],
         'reviewed_at': datetime.now(timezone.utc).isoformat(),
     }

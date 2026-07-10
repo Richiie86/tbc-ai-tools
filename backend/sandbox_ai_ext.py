@@ -67,6 +67,9 @@ SUPPORTED_MODELS: list[tuple[str, str, str]] = [
     ('openai',    'gpt-5.4-mini',           'GPT-5.4 mini (fast/cheap)'),
     ('gemini',    'gemini-3.1-pro-preview', 'Gemini 3.1 Pro (Google)'),
     ('gemini',    'gemini-3-flash-preview', 'Gemini 3 Flash (fastest)'),
+    ('openrouter', 'anthropic/claude-sonnet-4', 'Claude Sonnet 4 (OpenRouter)'),
+    ('openrouter', 'openai/gpt-4o-mini', 'GPT-4o Mini (OpenRouter)'),
+    ('groq', 'llama-3.3-70b-versatile', 'Llama 3.3 70B (Groq)'),
 ]
 _MODEL_MAP = {m: (p, display) for p, m, display in SUPPORTED_MODELS}
 
@@ -200,11 +203,16 @@ async def _record_session(operator: dict, session_id: str, body: ProposeBody,
 @router.get('/models')
 async def list_models(_op: dict = Depends(get_current_operator)):
     """Return the dropdown options — used by the SandboxTab model picker."""
+    from llm_router import available_providers
+    configured = await available_providers()
+    models = [
+        {'id': m, 'provider': p, 'display': d}
+        for (p, m, d) in SUPPORTED_MODELS
+        if not configured or p in configured
+    ]
     return {
-        'default': 'claude-sonnet-4-6',
-        'models': [
-            {'id': m, 'provider': p, 'display': d} for (p, m, d) in SUPPORTED_MODELS
-        ],
+        'default': models[0]['id'] if models else 'claude-sonnet-4-6',
+        'models': models,
     }
 
 
@@ -218,10 +226,11 @@ async def propose(body: ProposeBody, op: dict = Depends(get_current_operator)):
     if body.edit_mode == 'single' and len(body.files) > 1:
         raise HTTPException(400, 'edit_mode=single but multiple files provided — switch to multi')
 
-    from llm_router import any_provider_key_available
+    from llm_router import available_providers
     api_key = ''  # legacy placeholder — llm_router uses per-provider keys
-    if not await any_provider_key_available():
-        raise HTTPException(503, 'No AI provider key is configured on the backend (Operator → Security).')
+    configured = await available_providers()
+    if not configured:
+        raise HTTPException(503, 'No AI provider key is configured on the backend (Operator → My Keys).')
 
     # Build the prompt — the model sees the instruction first, then each
     # file body fenced with the path so it can reference them by name.
@@ -236,6 +245,8 @@ async def propose(body: ProposeBody, op: dict = Depends(get_current_operator)):
 
     session_id = body.session_id or str(uuid.uuid4())
     provider, _ = _MODEL_MAP[body.model]
+    if provider not in configured:
+        raise HTTPException(503, f'{provider} key is not configured. Add it in Operator → My Keys or pick a configured model.')
     # Lazy import — keeps provider SDKs out of the import path when unused.
     from llm_router import LlmChat, UserMessage
     chat = LlmChat(
@@ -272,8 +283,8 @@ async def propose(body: ProposeBody, op: dict = Depends(get_current_operator)):
         nc = entry.get('new_content')
         if not p or nc is None:
             continue
-        if p not in valid_paths:
-            logger.info('LLM tried to edit out-of-scope path %r — dropping', p)
+        if p not in valid_paths and body.edit_mode == 'single':
+            logger.info('LLM tried to edit out-of-scope path %r in single-file mode — dropping', p)
             continue
         files_out.append({
             'path': p,
