@@ -26,8 +26,12 @@ html, body {
    (Sized lucide icons use explicit width/height so this only caps overflow.) */
 img, video, canvas, iframe { max-width: 100%; height: auto; }
 
-/* Long unbroken strings (URLs, tokens, IDs) wrap instead of overflowing. */
-p, li, span, a, h1, h2, h3, h4, td, th, dd, dt { overflow-wrap: anywhere; }
+/* Long unbroken strings (URLs, tokens, IDs) should wrap only when needed.
+   Do NOT apply `overflow-wrap:anywhere` globally to spans/links/headings: when
+   a flex/grid child is briefly narrow (Operator → Ops deploy rows), it breaks
+   normal labels into one-character vertical columns. Use break-word on text
+   containers and explicit `break-all` only where token/URL components need it. */
+p, li, td, th, dd, dt { overflow-wrap: break-word; word-break: normal; }
 
 /* Comfortable tap targets on touch devices without disturbing desktop. */
 @media (hover: none) and (pointer: coarse) {
