@@ -507,6 +507,13 @@ async def open_pr(req: OpenPRRequest, user: dict = Depends(get_current_operator)
         raise HTTPException(409, f'Plan already shipped as {doc.get("pr_url")}')
     if not doc.get('files'):
         raise HTTPException(422, 'Plan has no actionable files (likely refused or all blocked).')
+    review = doc.get('review') or {}
+    if review.get('verdict') == 'do_not_ship':
+        raise HTTPException(412, {
+            'error': 'review_blocked',
+            'message': 'AI Build review returned do_not_ship. Fix the concerns before opening a PR.',
+            'review': review,
+        })
 
     settings = await db.settings.find_one({'_id': 'payment_settings'}) or {}
     gh_token = settings.get('github_token') or os.environ.get('GITHUB_TOKEN')
@@ -600,19 +607,12 @@ async def open_pr(req: OpenPRRequest, user: dict = Depends(get_current_operator)
     import asyncio as _asyncio
     _asyncio.create_task(_schedule_visual_verify(req.plan_id))
 
-    # Also kick off the automated pytest run when the operator has opted
-    # in via auto-fix `auto_run_tests`. Same fire-and-forget pattern —
-    # the test verdict is stamped on the plan doc and the auto-merge
-    # sweep uses it as a third gating signal alongside text review +
-    # visual verify. Operator explicitly asked for the AIs to "run the
-    # comprehensive testing agent" automatically; this is that wiring.
-    try:
-        cfg = await db.app_settings.find_one({'_id': 'auto_fix'}) or {}
-    except Exception:
-        cfg = {}
-    if cfg.get('auto_run_tests'):
-        from ai_build_tests_ext import run_tests_for_plan
-        _asyncio.create_task(run_tests_for_plan(req.plan_id))
+    # Always kick off the automated pytest run for AI-authored PRs. The verdict
+    # is stamped on the plan doc and auto-merge/review UIs can treat failures as
+    # blockers. Fire-and-forget: PR creation returns immediately, tests finish in
+    # the background.
+    from ai_build_tests_ext import run_tests_for_plan
+    _asyncio.create_task(run_tests_for_plan(req.plan_id))
 
     return {
         'pr_url': pr.get('html_url'),

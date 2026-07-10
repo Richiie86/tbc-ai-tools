@@ -40,7 +40,7 @@ router = APIRouter(prefix='/api/operator/ai-brain', tags=['ai-brain'])
 # Mirror of server.py:DEFAULT_MODEL. Kept local to avoid a circular import
 # (server.py imports this module to mount the router). If the server default
 # changes, update this too — it only drives the "active" badge in the UI.
-DEFAULT_MODEL = 'claude-opus-4-7'
+DEFAULT_MODEL = 'claude-sonnet-4-5-20250929'
 
 
 # Canonical AI buckets. The app runs four providers plus a "shared" pool:
@@ -149,7 +149,7 @@ async def maturity(_op: dict = Depends(get_current_operator)):
     })
     # Per-bucket breakdown of the *exact* model identifiers behind each card,
     # so the UI can expand a card and show which concrete models contributed
-    # (e.g. the "other" card unpacks into gemini-3-flash-preview, o3, …).
+    # (e.g. the "other" card unpacks into gemini-2.5-flash, o3, …).
     # Keyed bucket → raw model id → {total, pending}.
     detail: dict[str, dict[str, dict]] = defaultdict(lambda: defaultdict(lambda: {'total': 0, 'pending': 0}))
 

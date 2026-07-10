@@ -495,14 +495,12 @@ async def run_rca(error_id: str, _op: dict = Depends(get_current_operator)):
     rca_model_id = (settings.get('rca_model') or '').strip()
     # Map model id to its provider.
     _rca_provider_map = {
-        'claude-opus-4-7': 'anthropic',
-        'claude-sonnet-4-6': 'anthropic',
+        'claude-sonnet-4-5-20250929': 'anthropic',
         'claude-haiku-4-5-20251001': 'anthropic',
-        'gpt-5.4': 'openai',
-        'gpt-5.4-mini': 'openai',
         'gpt-4.1': 'openai',
-        'gemini-3.1-pro-preview': 'gemini',
-        'gemini-3-flash-preview': 'gemini',
+        'gpt-4o-mini': 'openai',
+        'gemini-2.5-pro': 'gemini',
+        'gemini-2.5-flash': 'gemini',
         'llama-3.3-70b-versatile': 'groq',
         'llama-3.1-8b-instant': 'groq',
         'gemma2-9b-it': 'groq',

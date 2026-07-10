@@ -268,6 +268,38 @@ def _merge_and_sanitize(base: dict[str, str], generated: list) -> tuple[dict[str
     return final, rejected
 
 
+def _validate_generated_app(files: dict[str, str], stack: str) -> tuple[bool, list[str]]:
+    """Deterministic preflight before creating a repo/deployment.
+
+    This catches the most common AI generation mistakes without spending another
+    LLM call: malformed package.json, missing entry files, empty shells, and
+    dangerous placeholder/secrets files. It is intentionally conservative — if
+    this fails, we stop before creating a repo or burning a Vercel build.
+    """
+    problems: list[str] = []
+    names = {p.lower() for p in files}
+    if any(p.endswith('.env') or p.endswith('.env.local') for p in names):
+        problems.append('AI output included an .env file; secrets must be configured in the host dashboard.')
+    package_text = files.get('package.json')
+    if package_text:
+        try:
+            json.loads(package_text)
+        except Exception as e:  # noqa: BLE001
+            problems.append(f'package.json is invalid JSON: {e}')
+    if stack == 'nextjs':
+        if 'package.json' not in files:
+            problems.append('Next.js app is missing package.json.')
+        if not any(p in files for p in ('app/page.tsx', 'app/page.jsx', 'pages/index.tsx', 'pages/index.jsx')):
+            problems.append('Next.js app is missing a page entrypoint.')
+    elif stack == 'static':
+        if 'index.html' not in files:
+            problems.append('Static app is missing index.html.')
+    source_text = '\n'.join(files.values()).lower()
+    if 'todo: implement' in source_text or ('coming soon' in source_text and len(source_text) < 2000):
+        problems.append('Generated app still looks like a placeholder instead of a complete launchable app.')
+    return not problems, problems
+
+
 async def _create_private_repo(client: httpx.AsyncClient, token: str, slug: str, description: str) -> dict:
     """Create a private repo under the configured owner with an initial commit
     (auto_init) so `main` exists and we can commit files onto it. Returns the
@@ -632,6 +664,12 @@ async def _run_pipeline(
     yield step('generate', f'Prepared {len(final_files)} files ({stack}).',
                stack=stack, slug=slug, file_count=len(final_files), rejected=rejected)
 
+    ok, preflight_problems = _validate_generated_app(final_files, stack)
+    yield step('self_check', 'Running deterministic app preflight checks…', passed=ok, problems=preflight_problems)
+    if not ok:
+        yield step('error', 'Generated app failed preflight checks; no repo or deployment was created.', problems=preflight_problems)
+        return
+
     # ── 2. create repo + commit ──────────────────────────────────────────
     yield step('repo', f'Creating private repo {GITHUB_OWNER}/{slug}…')
     async with httpx.AsyncClient(timeout=30.0) as client:
@@ -681,10 +719,16 @@ async def _run_pipeline(
     if ready.get('url'):
         u = ready['url']
         deploy_url = f'https://{u}' if not u.startswith('http') else u
-    if ready_state == 'ERROR':
-        yield step('error', f'Deployment failed on Vercel. Repo: {repo_html}', repo_url=repo_html)
+    if ready_state != 'READY':
+        yield step(
+            'error',
+            f'Deployment did not reach READY (state={ready_state or "UNKNOWN"}). Repo: {repo_html}',
+            repo_url=repo_html,
+            deploy_url=deploy_url,
+            deployment_state=ready_state,
+        )
         return
-    yield step('deployed', f'Deployment {ready_state.lower() or "queued"}.', deploy_url=deploy_url)
+    yield step('deployed', 'Deployment ready.', deploy_url=deploy_url)
 
     # ── 4. optional domain ───────────────────────────────────────────────
     domain_clean = (domain or '').strip().replace('https://', '').replace('http://', '').strip('/')
