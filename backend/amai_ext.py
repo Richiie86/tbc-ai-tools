@@ -10,7 +10,7 @@ and shows an estimated cost per request / per 100 requests at every level.
 
 Design guarantees (so nothing silently gets worse)
 --------------------------------------------------
-* The default tier is ``max`` → ``claude-opus-4-7`` — exactly what the app
+* The default tier is ``max`` → ``claude-sonnet-4-5-20250929`` — exactly what the app
   used before this feature existed. If the operator never touches the dial,
   behaviour is unchanged.
 * The chosen tier only sets the *default model for NEW chat sessions*. Existing
@@ -44,7 +44,7 @@ router = APIRouter(prefix='/api/operator/amai', tags=['amai'])
 
 # Mirror of server.py:DEFAULT_MODEL, kept local to avoid a circular import
 # (server.py imports this module to mount the router).
-DEFAULT_MODEL = 'claude-opus-4-7'
+DEFAULT_MODEL = 'claude-sonnet-4-5-20250929'
 
 # ─── Cost model ───────────────────────────────────────────────────────────
 # Approximate Anthropic list prices in USD per 1,000,000 tokens. These are
@@ -52,9 +52,11 @@ DEFAULT_MODEL = 'claude-opus-4-7'
 # one place so they're trivial to update when prices change.
 _PRICES = {
     # model id                     input $/Mtok  output $/Mtok
-    'claude-opus-4-7':            (15.0, 75.0),
-    'claude-sonnet-4-6':          (3.0, 15.0),
+    'claude-sonnet-4-5-20250929': (3.0, 15.0),
     'claude-haiku-4-5-20251001':  (1.0, 5.0),
+    'gpt-4.1':                    (2.0, 8.0),
+    'gpt-4o-mini':                (0.15, 0.6),
+    'gemini-2.5-flash':           (0.3, 2.5),
 }
 
 # A "typical" request for estimation: system prompt + _CORE_KNOWLEDGE + a bit
@@ -69,14 +71,14 @@ _TIERS = [
     {
         'id': 'max',
         'label': 'Max',
-        'model': 'claude-opus-4-7',
+        'model': 'claude-sonnet-4-5-20250929',
         'percent_min': 67,
         'blurb': 'Best reasoning & code quality. Same as your current setup.',
     },
     {
         'id': 'balanced',
         'label': 'Balanced',
-        'model': 'claude-sonnet-4-6',
+        'model': 'gpt-4.1',
         'percent_min': 34,
         'blurb': 'Strong all-rounder at a fraction of the cost.',
     },
@@ -154,7 +156,7 @@ def _percent_to_tier(percent: int) -> dict:
 # no one having to think about model choice.
 AUTO_MODEL_ID = 'auto'
 
-_BEST_MODEL = 'claude-opus-4-7'
+_BEST_MODEL = 'claude-sonnet-4-5-20250929'
 _CHEAP_MODEL = 'claude-haiku-4-5-20251001'
 
 # Keyword signals grouped by task kind. Checked against the lower-cased msg.

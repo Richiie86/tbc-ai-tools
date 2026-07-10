@@ -42,17 +42,20 @@ router = APIRouter(prefix='/api/operator/ai-tests', tags=['ai-tests'])
 # every click would be slow + expensive. The operator can extend this
 # list later if needed.
 TEST_MODELS: list[dict] = [
-    {'id': 'claude-opus-4-7',          'display': 'Claude Opus 4.7',       'provider': 'anthropic'},
-    {'id': 'claude-sonnet-4-6',        'display': 'Claude Sonnet 4.6',     'provider': 'anthropic'},
-    {'id': 'claude-haiku-4-5-20251001','display': 'Claude Haiku 4.5',      'provider': 'anthropic'},
-    {'id': 'gpt-5.4',                  'display': 'GPT-5.4',               'provider': 'openai'},
-    {'id': 'gpt-5.4-mini',             'display': 'GPT-5.4 mini',          'provider': 'openai'},
-    {'id': 'gpt-4.1',                  'display': 'GPT-4.1',               'provider': 'openai'},
-    {'id': 'gemini-3.1-pro-preview',   'display': 'Gemini 3.1 Pro',        'provider': 'gemini'},
-    {'id': 'gemini-3-flash-preview',   'display': 'Gemini 3 Flash',        'provider': 'gemini'},
-    {'id': 'anthropic/claude-sonnet-4', 'display': 'Claude Sonnet 4 (OpenRouter)', 'provider': 'openrouter'},
-    {'id': 'openai/gpt-4o-mini',        'display': 'GPT-4o Mini (OpenRouter)',     'provider': 'openrouter'},
-    {'id': 'llama-3.3-70b-versatile',   'display': 'Llama 3.3 70B (Groq)',         'provider': 'groq'},
+    # Keep this list to stable, currently-supported model ids. The previous
+    # entries used future/preview ids (gpt-5.4, claude-opus-4-7,
+    # gemini-3-flash-preview, etc.) that turn a healthy provider key into a
+    # hard FAIL on every probe.
+    {'id': 'claude-sonnet-4-5-20250929', 'display': 'Claude Sonnet 4.5',        'provider': 'anthropic'},
+    {'id': 'claude-haiku-4-5-20251001',  'display': 'Claude Haiku 4.5',         'provider': 'anthropic'},
+    {'id': 'gpt-4.1',                    'display': 'GPT-4.1',                 'provider': 'openai'},
+    {'id': 'gpt-4o-mini',                'display': 'GPT-4o Mini',             'provider': 'openai'},
+    {'id': 'gemini-2.5-pro',             'display': 'Gemini 2.5 Pro',          'provider': 'gemini'},
+    {'id': 'gemini-2.5-flash',           'display': 'Gemini 2.5 Flash',        'provider': 'gemini'},
+    {'id': 'anthropic/claude-sonnet-4',   'display': 'Claude Sonnet 4 (OpenRouter)', 'provider': 'openrouter'},
+    {'id': 'openai/gpt-4o-mini',          'display': 'GPT-4o Mini (OpenRouter)',     'provider': 'openrouter'},
+    {'id': 'google/gemini-2.5-flash',     'display': 'Gemini 2.5 Flash (OpenRouter)', 'provider': 'openrouter'},
+    {'id': 'llama-3.3-70b-versatile',     'display': 'Llama 3.3 70B (Groq)',         'provider': 'groq'},
 ]
 
 PROBE_TIMEOUT_S = 30.0  # per-probe ceiling; each model has 3 probes.
@@ -261,16 +264,19 @@ async def run_one(
 
 @router.post('/run-all')
 async def run_all(_op: dict = Depends(get_current_operator)):
-    """Fan-out across every TEST_MODELS entry in parallel. Returns the new
-    state of `/models` so the UI can update in one round-trip."""
+    """Fan-out across configured providers only. Returns the new state of
+    `/models` so the UI can update in one round-trip."""
     api_key = await _get_llm_key()
+    from llm_router import available_providers
+    configured = await available_providers()
+    run_models = [m for m in TEST_MODELS if not configured or m['provider'] in configured]
     results = await asyncio.gather(*[
-        _run_one_model(m['id'], api_key) for m in TEST_MODELS
+        _run_one_model(m['id'], api_key) for m in run_models
     ], return_exceptions=True)
     # Surface any per-model exceptions as failed rows rather than 500-ing
     # the whole batch — operator probably still wants to see partial results.
     out = []
-    for m, r in zip(TEST_MODELS, results):
+    for m, r in zip(run_models, results):
         if isinstance(r, Exception):
             out.append({
                 **m,

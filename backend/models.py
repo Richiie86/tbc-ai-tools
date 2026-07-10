@@ -122,7 +122,7 @@ class Attachment(BaseModel):
 class ChatSendRequest(BaseModel):
     session_id: Optional[str] = None
     message: str
-    model: Optional[str] = 'gpt-5.4'
+    model: Optional[str] = 'auto'
     variant: Optional[Literal['tbc1', 'tbc2']] = 'tbc1'
     attachments: Optional[List[Attachment]] = None
 
@@ -140,7 +140,7 @@ class ChatSession(BaseModel):
     id: str = Field(default_factory=_uid)
     user_id: str
     title: str = 'New Chat'
-    model: str = 'gpt-5.4'
+    model: str = 'auto'
     variant: Literal['tbc1', 'tbc2'] = 'tbc1'
     created_at: datetime = Field(default_factory=_now)
     updated_at: datetime = Field(default_factory=_now)
@@ -148,7 +148,7 @@ class ChatSession(BaseModel):
 
 class CreateSessionRequest(BaseModel):
     title: Optional[str] = 'New Chat'
-    model: Optional[str] = 'gpt-5.4'
+    model: Optional[str] = 'auto'
     variant: Optional[Literal['tbc1', 'tbc2']] = 'tbc1'
 
 
