@@ -126,7 +126,7 @@ async def _standalone_health_check(project: dict) -> dict:
         async with httpx.AsyncClient(
             timeout=httpx.Timeout(10.0, connect=5.0),
             follow_redirects=True,
-            limits=httpx.Limits(max_redirects=5)
+            max_redirects=5,
         ) as client:
             response = await client.get(url, headers={
                 'User-Agent': 'TBC-Health-Check/1.0'
