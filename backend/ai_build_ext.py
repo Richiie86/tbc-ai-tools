@@ -118,6 +118,8 @@ _SYSTEM_PROMPT = (
     "- Output the COMPLETE new contents of each file, NOT a diff.\n"
     "- Keep the change focused — maximum 12 files per request.\n"
     "- Behaviour-preserving on existing routes — no breaking changes.\n"
+    "- This repo is React CRA frontend + FastAPI backend. NEVER create Next.js `app/api/*`, `auth.js`, `middleware.js`, `lib/dbConnect.js`, Vercel AI SDK route handlers, or GitHub Actions deployment workflows unless the operator explicitly asks to migrate stacks.\n"
+    "- Deployment fixes must use the existing FastAPI deploy pipeline (`backend/deploy_projects_ext.py`, `backend/vercel_api_ext.py`, `backend/deploy_ext.py`) and existing React CRA UI. Vercel project creation/reconciliation should be automatic in that pipeline.\n"
     "- For new React pages, add a data-testid on the page wrapper.\n"
     "- For new FastAPI endpoints, always prefix with /api and add the router "
     "to server.py via app.include_router.\n"
