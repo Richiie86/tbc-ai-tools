@@ -4,8 +4,9 @@ import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { toast } from 'sonner';
 import {
-  KeyRound, Save, Loader2, ShieldCheck, ShieldAlert, Eye, EyeOff,
+  KeyRound, Loader2, ShieldCheck, ShieldAlert, Eye, EyeOff,
   RotateCw, CheckCircle2, XCircle, Github, Cloud, Sparkles, Bot, Server, Zap, Globe,
+  Info,
 } from 'lucide-react';
 
 export const KIND_META = {
@@ -104,7 +105,10 @@ const daysSince = (iso) => {
  *      the provider's identity endpoint so we fail fast on expired tokens.
  *   2. One-click Save that persists the new value, auto-clears the input,
  *      and stamps `*_rotated_at`.
- *   3. "Rotated N days ago" badge that turns amber > 60 d, red > 90 d.
+ *   3. "Key rotated N days ago" badge that turns amber > 60 d, red > 90 d.
+ *
+ * Important: rotation means replacing the secret value. It is separate from
+ * app deployment status; deployments are shown in the sync status card.
  */
 export default function SecretsCard({ settings, onChanged }) {
   return (
@@ -116,8 +120,8 @@ export default function SecretsCard({ settings, onChanged }) {
         <div className="flex-1">
           <h3 className="text-base font-bold text-tbc-100">Rotation-ready secrets</h3>
           <p className="text-xs text-tbc-200/60">
-            Paste a fresh Vercel or GitHub token whenever the old one expires.
-            Test before save so we never persist a dead token.
+            Paste a fresh token only when you want to replace that secret.
+            App updates and deploys do not rotate keys; check the deployment sync card for that.
           </p>
         </div>
       </div>
@@ -237,7 +241,7 @@ export function SecretRow({ kind, isSet, masked, rotatedAt, onChanged }) {
                     'bg-emerald-500/15 text-emerald-300'
                   }`}
                 >
-                  Rotated {rotAge === 0 ? 'today' : `${rotAge}d ago`}
+                  Key rotated {rotAge === 0 ? 'today' : `${rotAge}d ago`}
                 </span>
               )}
             </>
@@ -259,6 +263,14 @@ export function SecretRow({ kind, isSet, masked, rotatedAt, onChanged }) {
       >
         Get a fresh token →
       </a>
+
+
+      <div className="mt-2 flex items-start gap-1.5 rounded-md border border-sky-500/20 bg-sky-500/5 px-2 py-1.5 text-[10px] text-sky-100/80">
+        <Info className="mt-0.5 h-3 w-3 shrink-0" />
+        <span>
+          This timestamp is for secret replacement only. It does not update when GitHub, Vercel, or Render deploys.
+        </span>
+      </div>
 
       {/* Paste field + actions */}
       <div className="mt-3 flex items-center gap-2">
@@ -307,7 +319,7 @@ export function SecretRow({ kind, isSet, masked, rotatedAt, onChanged }) {
           className="bg-tbc-500 text-ink-950 font-semibold hover:bg-tbc-400"
         >
           {saving ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <RotateCw className="mr-1 h-3.5 w-3.5" />}
-          {isSet ? 'Rotate' : 'Save'}
+          {isSet ? 'Replace key' : 'Save key'}
         </Button>
         {isSet && (
           <Button
