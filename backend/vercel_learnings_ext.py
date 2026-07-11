@@ -28,6 +28,7 @@ import os
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
+from urllib.parse import urlencode
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
@@ -43,11 +44,22 @@ router = APIRouter(prefix='/api/operator/ai-learnings/vercel', tags=['ai-learnin
 # ---------------------------------------------------------------- helpers
 
 
-async def _vercel_token() -> Optional[str]:
-    """Returns the operator's Vercel API token from settings (set in
-    Operator → Security). Without it we can't query Vercel."""
+async def _vercel_settings() -> dict:
+    """Resolve the Vercel token and team scope from Operator settings/env.
+
+    The importer must use the same team the deploy pipeline uses; otherwise it
+    can ingest stale personal-scope deployments and teach the AIs old commits.
+    """
     s = await db.settings.find_one({'_id': 'payment_settings'}) or {}
-    return s.get('vercel_token') or os.environ.get('VERCEL_TOKEN')
+    return {
+        'token': s.get('vercel_token') or os.environ.get('VERCEL_TOKEN'),
+        'team_id': (s.get('vercel_team_id') or os.environ.get('VERCEL_TEAM_ID') or '').strip(),
+    }
+
+
+async def _vercel_token() -> Optional[str]:
+    """Returns the operator's Vercel API token from settings/env."""
+    return (await _vercel_settings()).get('token')
 
 
 def _stable_id(text: str) -> str:
@@ -157,48 +169,74 @@ async def import_vercel_telemetry(
     limit: int = 30,
     op: dict = Depends(get_current_operator),
 ) -> dict:
-    """Fetch the operator's recent Vercel deployments and convert each
-    into an AI Learning the brain can reference. Captures:
-      • State (READY / ERROR / CANCELED)
-      • Branch + commit SHA + duration
-      • Error message for failed builds (so the AI learns failure modes)
+    """Fetch recent Vercel deployments and write one current-state learning.
 
-    Idempotent — same deployment ingested twice updates nothing because
-    the stable-id hash dedupes."""
-    token = await _vercel_token()
+    Older versions inserted one enabled learning per deployment forever. Since
+    chat prompts read enabled learnings, old commit SHAs stayed in the AI Brain
+    and made every model think the platform was still on an ancient build. This
+    importer now disables old telemetry rows and replaces them with a single
+    up-to-date snapshot for the configured Vercel team.
+    """
+    settings = await _vercel_settings()
+    token = settings.get('token')
     if not token:
         raise HTTPException(503, 'vercel_token not configured in Operator → Security')
-    items: list[str] = []
+
+    rows: list[str] = []
     refs: list[str] = []
     limit = max(1, min(limit, 100))
+    params = {'limit': str(limit)}
+    if settings.get('team_id'):
+        params['teamId'] = settings['team_id']
+
+    url = f'https://api.vercel.com/v6/deployments?{urlencode(params)}'
     async with httpx.AsyncClient(timeout=20) as cl:
-        r = await cl.get(
-            f'https://api.vercel.com/v6/deployments?limit={limit}',
-            headers={'Authorization': f'Bearer {token}'},
-        )
+        r = await cl.get(url, headers={'Authorization': f'Bearer {token}'})
         if r.status_code != 200:
             raise HTTPException(502, f'Vercel API: {r.status_code} {r.text[:200]}')
-        for d in r.json().get('deployments', []):
+        deployments = sorted(
+            r.json().get('deployments', []),
+            key=lambda d: d.get('createdAt') or 0,
+            reverse=True,
+        )
+        for d in deployments[:limit]:
             state = d.get('readyState') or d.get('state') or 'UNKNOWN'
             meta = d.get('meta') or {}
             branch = meta.get('githubCommitRef', '-')
-            sha = (meta.get('githubCommitSha') or '')[:7] or '-'
+            sha = (meta.get('githubCommitSha') or '')[:8] or '-'
             name = d.get('name') or d.get('url') or '?'
+            target = d.get('target') or 'preview'
             created_ms = d.get('createdAt') or 0
             built_ms = d.get('buildingAt') or created_ms
             ready_ms = d.get('ready') or 0
             dur_s = max(0, (ready_ms - built_ms) / 1000) if ready_ms and built_ms else 0
-            line = (
-                f'Vercel {state} · {name} · branch={branch} · sha={sha} · '
-                f'build={dur_s:.0f}s · {datetime.fromtimestamp(created_ms/1000, tz=timezone.utc).date()}'
-            )
-            items.append(line)
+            date = datetime.fromtimestamp(created_ms / 1000, tz=timezone.utc).isoformat() if created_ms else 'unknown-date'
+            rows.append(f'{name} {target} {state}: branch={branch} sha={sha} build={dur_s:.0f}s at={date}')
             refs.append(d.get('uid') or d.get('id') or '')
-    result = await _insert_learnings(
-        items,
-        source='vercel_deployments',
-        source_ref=','.join(r for r in refs if r)[:500],
-        op_email=op.get('email'),
+
+    now = datetime.now(timezone.utc)
+    await db.ai_learnings.update_many(
+        {'source': 'vercel_deployments', 'id': {'$ne': 'vercel-current-deployments'}},
+        {'$set': {'enabled': False, 'archived': True, 'updated_at': now, 'archive_reason': 'superseded_by_current_vercel_snapshot'}},
     )
-    logger.info('Operator %s imported %d Vercel telemetry items: %s', op.get('email'), len(items), result)
-    return {**result, 'total_fetched': len(items)}
+
+    text = (
+        'Current Vercel deployment snapshot for the operator workspace. Use this over older deployment memories. '
+        + ' | '.join(rows[:20])
+    )
+    await db.ai_learnings.update_one(
+        {'id': 'vercel-current-deployments'},
+        {'$set': {
+            'text': text[:1500],
+            'enabled': True,
+            'updated_at': now,
+            'created_by_email': op.get('email'),
+            'source': 'vercel_deployments',
+            'source_ref': ','.join(r for r in refs if r)[:500],
+            'auto_proposed': True,
+        }, '$setOnInsert': {'id': 'vercel-current-deployments', 'created_at': now}},
+        upsert=True,
+    )
+    result = {'updated_snapshot': True, 'total_fetched': len(rows), 'team_scoped': bool(settings.get('team_id'))}
+    logger.info('Operator %s refreshed Vercel telemetry snapshot: %s', op.get('email'), result)
+    return result
