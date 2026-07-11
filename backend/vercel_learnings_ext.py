@@ -5,7 +5,7 @@ AI Learnings collection so the AI Brain skill-map absorbs it:
 
   1. `seed-design`   — one-shot curated pack of ~20 design-system learnings
                        (Tailwind, accessibility, layout heuristics) drawn
-                       from the same vocabulary Vercel's v0 uses internally.
+                       from modern Vercel UI vocabulary and Tailwind/Radix patterns.
   2. `import-vercel` — live pull of the operator's recent deployments,
                        build outcomes and function errors via the Vercel
                        API; each becomes one learning entry.
@@ -107,7 +107,7 @@ async def _insert_learnings(
 
 # ---------------------------------------------------------------- 1. Design pack
 #
-# Curated from Vercel's design system + v0 prompts + Tailwind/Radix
+# Curated from Vercel design guidance + Tailwind/Radix
 # best-practice docs. Operator can tweak any of these from the AI
 # Learnings tab after ingest. Kept ≤120 chars each so they fit cleanly
 # in the SkillBucket cards we render in the AI Brain grid.

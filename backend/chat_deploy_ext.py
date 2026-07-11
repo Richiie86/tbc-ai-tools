@@ -1,9 +1,9 @@
-"""Emergent-style Deploy + Iterate for chat sessions.
+"""TBCTools Deploy + Iterate for chat sessions.
 
 The user's ask: from a chat session, click **Deploy** → the chat becomes a
 **live app** (auto GitHub repo + Vercel project + production deploy + optional
 domain), then **keep editing in the same chat and re-deploy to overwrite** the
-live app — exactly like emergent.app.
+live app — through the native TBCTools GitHub + Vercel pipeline.
 
 This module wires the chat surface to the origination engine that already
 exists in `app_builder_ext.py` (plan → repo → commit → git-linked Vercel
