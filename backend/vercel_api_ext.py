@@ -36,6 +36,40 @@ VERCEL_TOKEN_MISSING_DETAIL = (
 )
 
 
+
+
+def _vercel_error_detail(action: str, response: httpx.Response) -> str:
+    """Return a stable, actionable Vercel error string for common statuses.
+
+    Keeps frontend toasts string-compatible while making 400/404/409/429/5xx
+    failures clear enough for the autonomous deploy loop to decide whether to
+    retry, reconcile, or ask for credentials.
+    """
+    try:
+        err = response.json().get('error', {})
+    except Exception:
+        err = {'message': response.text[:300]}
+    msg = err.get('message') or err.get('code') or response.text[:200] or 'Vercel error'
+    code = err.get('code') or 'vercel_error'
+    status = response.status_code
+    if status == 400:
+        hint = 'bad request — check project settings, git ref, or payload shape'
+    elif status == 401:
+        hint = 'unauthorized — replace the Vercel token in My Keys'
+    elif status == 403:
+        hint = 'forbidden — token/team does not have access to this project'
+    elif status == 404:
+        hint = 'not found — the app will try to recreate/relink the Vercel project when possible'
+    elif status == 409:
+        hint = 'conflict — the target may already exist or already be current'
+    elif status == 429:
+        hint = 'rate limited — retry after Vercel allows more requests'
+    elif status >= 500:
+        hint = 'Vercel service error — retry shortly'
+    else:
+        hint = 'request failed'
+    return f'{action}: HTTP {status} ({code}) — {msg}. Next: {hint}.'
+
 def vercel_team_qs(settings: dict) -> dict:
     """Resolve the Vercel team/workspace scope from (in order):
       1. The operator-managed `settings.vercel_team_id` row in Mongo.
@@ -121,12 +155,7 @@ async def vercel_create_deployment(
             json=payload,
         )
     if r.status_code >= 400:
-        try:
-            err = r.json().get('error', {})
-        except Exception:
-            err = {'message': r.text[:300]}
-        msg = err.get('message') or err.get('code') or 'Vercel error'
-        raise HTTPException(502, f'Vercel deploy: {msg}')
+        raise HTTPException(502, _vercel_error_detail('Vercel deploy', r))
     return r.json()
 
 
@@ -177,7 +206,7 @@ async def vercel_attach_domain(
         if code in {'domain_already_exists', 'domain_already_in_use'} and \
                 'this project' in msg.lower():
             return {'already_attached': True, 'name': name, 'message': msg}
-        raise HTTPException(502, f'Vercel attach domain: {msg}')
+        raise HTTPException(502, _vercel_error_detail('Vercel attach domain', r))
     body = r.json()
     return {'attached': True, 'name': name, 'verified': body.get('verified', False), 'raw': body}
 
@@ -207,12 +236,7 @@ async def vercel_redeploy(
             json={'name': name_slug, 'deploymentId': deployment_id, 'target': 'production'},
         )
     if r.status_code >= 400:
-        try:
-            err = r.json().get('error', {})
-        except Exception:
-            err = {'message': r.text[:300]}
-        msg = err.get('message') or err.get('code') or 'Vercel error'
-        raise HTTPException(502, f'Vercel redeploy: {msg}')
+        raise HTTPException(502, _vercel_error_detail('Vercel redeploy', r))
     return r.json()
 
 
@@ -229,11 +253,7 @@ async def vercel_get_deployment(settings: dict, deployment_id: str) -> dict:
             headers={'Authorization': f'Bearer {token}'},
         )
     if r.status_code >= 400:
-        try:
-            err = r.json().get('error', {})
-        except Exception:
-            err = {'message': r.text[:300]}
-        raise HTTPException(502, f"Vercel get-deployment: {err.get('message') or err.get('code')}")
+        raise HTTPException(502, _vercel_error_detail('Vercel get-deployment', r))
     return r.json()
 
 
@@ -388,10 +408,7 @@ async def vercel_promote_to_production(
         # a 200 with an `already_production` flag instead of a hard error.
         if 'already the current production' in msg.lower() or 'already production' in msg.lower():
             return {'already_production': True, 'message': msg}
-        raise HTTPException(
-            502,
-            f"Vercel promote: {msg}",
-        )
+        raise HTTPException(502, _vercel_error_detail('Vercel promote', r))
     # Vercel sometimes returns 200 with empty body — wrap defensively.
     try:
         return r.json() if r.content else {}
@@ -452,8 +469,7 @@ async def vercel_ensure_project(
         existing = await vercel_find_project_id(settings, name_slug)
         if existing:
             return {'id': existing, 'name': name_slug, 'created': False}
-    msg = err.get('message') or code or 'failed'
-    raise HTTPException(502, f'Vercel create project: {msg}')
+    raise HTTPException(502, _vercel_error_detail('Vercel create project', r))
 
 
 async def vercel_list_deployments(
@@ -483,9 +499,5 @@ async def vercel_list_deployments(
             headers={'Authorization': f'Bearer {token}'},
         )
     if r.status_code >= 400:
-        try:
-            err = r.json().get('error', {})
-        except Exception:
-            err = {'message': r.text[:300]}
-        raise HTTPException(502, f"Vercel list-deployments: {err.get('message') or err.get('code')}")
+        raise HTTPException(502, _vercel_error_detail('Vercel list-deployments', r))
     return r.json().get('deployments', [])
