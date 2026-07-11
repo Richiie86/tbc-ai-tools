@@ -1112,6 +1112,14 @@ async def _trigger_deploy(
             )
 
     name_slug = _slugify(project['projectName'])
+    # Ensure the backing Vercel project exists before every deploy. This makes
+    # the Deploy button self-healing for fresh rows, cloned rows, or stale
+    # Vercel project ids instead of forcing the operator/AI to add projects
+    # manually in the Vercel dashboard.
+    if not project.get('vercel_project_id'):
+        healed_id = await _reconcile_vercel_project(project, settings, name_slug, git_ref)
+        if healed_id:
+            project['vercel_project_id'] = healed_id
     try:
         res = await vercel_create_deployment(
             settings, project, target, git_ref, name_slug=name_slug,
