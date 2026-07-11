@@ -35,7 +35,7 @@ export default function ProposalGate({ proposal, sessionId, onDone }) {
     is_platform: isPlatform, will_deploy: willDeploy, will_pr: willPr,
   } = proposal || {};
 
-  const allowLabel = willPr ? 'Allow & Open PR' : willDeploy ? 'Allow & Build' : 'Allow & Save';
+  const allowLabel = willPr ? 'Allow, Merge & Deploy' : willDeploy ? 'Allow & Build' : 'Allow & Save';
   const AllowIcon = willPr ? GitPullRequest : willDeploy ? Rocket : CheckCircle2;
 
   async function approve() {

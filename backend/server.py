@@ -1837,12 +1837,18 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
     # agent rather than replying "tap the Fix problem button".
     is_operator = db_user.get('role') == 'operator'
     agentic_edit = False
-    if not req.attachments and task_kind == 'code':
+    if not req.attachments:
         try:
             from chat_deploy_ext import looks_like_edit_request
             sess_link = await db.chat_sessions.find_one(
                 {'id': session_id}, {'deploy_project_id': 1},
             )
+            # Do not gate this on `task_kind == "code"`. Long operator
+            # instructions often classify as `plan` (or contain review/planning
+            # words) even when they explicitly say "fix/implement/open a PR".
+            # If a chat is linked to a deploy project and the text is imperative,
+            # route it through the real proposal → commit/PR → deploy pipeline
+            # instead of letting the LLM merely claim it did the work.
             if (sess_link and sess_link.get('deploy_project_id')
                     and looks_like_edit_request(req.message)):
                 agentic_edit = True
