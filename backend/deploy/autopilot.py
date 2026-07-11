@@ -91,49 +91,116 @@ async def _resolve_max_iters(project_id: str, requested: int) -> int:
 async def _standalone_health_check(project: dict) -> dict:
     """Standalone health check that doesn't create circular imports.
     
-    Performs a simple HTTP GET to the project's URL to verify it's accessible.
-    Returns {ok: bool, status?: int, error?: str, response_time?: float}.
+    Performs a comprehensive HTTP check to verify the project is accessible.
+    Returns {ok: bool, status?: int, error?: str, response_time?: float, details?: dict}.
     """
     import time
     
     # Determine the URL to check
     url = None
+    url_source = None
+    
     if project.get('domain'):
         url = f"https://{project['domain']}"
+        url_source = 'domain'
     elif project.get('last_deployment_url'):
         url = project['last_deployment_url']
         if not url.startswith('http'):
             url = f"https://{url}"
+        url_source = 'deployment_url'
     
     if not url:
-        return {'ok': False, 'error': 'No URL configured for health check'}
+        return {
+            'ok': False, 
+            'error': 'No URL configured for health check',
+            'details': {
+                'project_id': project.get('id'),
+                'domain': project.get('domain'),
+                'last_deployment_url': project.get('last_deployment_url'),
+                'vercel_project_id': project.get('vercel_project_id')
+            }
+        }
     
     try:
         start_time = time.time()
-        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
-            response = await client.get(url)
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(10.0, connect=5.0),
+            follow_redirects=True,
+            max_redirects=5,
+        ) as client:
+            response = await client.get(url, headers={
+                'User-Agent': 'TBC-Health-Check/1.0'
+            })
+        
         response_time = round((time.time() - start_time) * 1000, 2)  # ms
         
         # Consider 2xx and 3xx as healthy
         ok = 200 <= response.status_code < 400
+        
         result = {
             'ok': ok,
             'status': response.status_code,
             'response_time': response_time,
-            'url': url
+            'url': url,
+            'url_source': url_source,
+            'details': {
+                'content_type': response.headers.get('content-type'),
+                'content_length': response.headers.get('content-length'),
+                'server': response.headers.get('server'),
+                'final_url': str(response.url) if response.url != url else None,
+                'redirect_count': len(response.history)
+            }
         }
         
         if not ok:
-            result['error'] = f'HTTP {response.status_code}'
+            result['error'] = f'HTTP {response.status_code}: {response.reason_phrase}'
+            # Try to get more details from response body for common errors
+            try:
+                body_preview = (await response.aread())[:500].decode('utf-8', errors='ignore')
+                if body_preview:
+                    result['details']['body_preview'] = body_preview
+            except Exception:
+                pass
             
         return result
         
-    except httpx.TimeoutException:
-        return {'ok': False, 'error': 'Request timeout (10s)', 'url': url}
-    except httpx.ConnectError:
-        return {'ok': False, 'error': 'Connection failed', 'url': url}
+    except httpx.TimeoutException as e:
+        return {
+            'ok': False, 
+            'error': f'Request timeout: {str(e)}',
+            'url': url,
+            'url_source': url_source,
+            'details': {'timeout_seconds': 10.0, 'error_type': 'timeout'}
+        }
+    except httpx.ConnectError as e:
+        return {
+            'ok': False, 
+            'error': f'Connection failed: {str(e)}',
+            'url': url,
+            'url_source': url_source,
+            'details': {'error_type': 'connection', 'raw_error': str(e)}
+        }
+    except httpx.HTTPStatusError as e:
+        return {
+            'ok': False,
+            'error': f'HTTP error {e.response.status_code}: {e.response.reason_phrase}',
+            'status': e.response.status_code,
+            'url': url,
+            'url_source': url_source,
+            'details': {'error_type': 'http_status', 'raw_error': str(e)}
+        }
     except Exception as e:
-        return {'ok': False, 'error': f'Health check failed: {str(e)[:200]}', 'url': url}
+        return {
+            'ok': False, 
+            'error': f'Health check failed: {str(e)}',
+            'url': url,
+            'url_source': url_source,
+            'details': {
+                'error_type': 'unexpected', 
+                'raw_error': str(e),
+                'exception_class': e.__class__.__name__
+            }
+        }
 
 
 async def _react_to_deployment(
@@ -157,15 +224,36 @@ async def _react_to_deployment(
         fresh = await db.deploy_projects.find_one({'id': project_id}) or project
         try:
             health = await _standalone_health_check(fresh)
+            # Log detailed health check results for debugging
+            if not health.get('ok'):
+                logger.warning(
+                    'Health check failed for project %s: %s (details: %s)',
+                    project_id, health.get('error'), health.get('details')
+                )
+            else:
+                logger.info(
+                    'Health check passed for project %s: %sms response time',
+                    project_id, health.get('response_time')
+                )
         except Exception as e:
-            logger.error(f'Health check failed for {project_id}: {e}')
-            health = {'ok': False, 'error': str(e)[:200]}
+            logger.error(f'Health check crashed for {project_id}: {e}')
+            health = {
+                'ok': False, 
+                'error': f'Health check crashed: {str(e)}',
+                'details': {
+                    'error_type': 'health_check_crash',
+                    'exception_class': e.__class__.__name__,
+                    'project_id': project_id
+                }
+            }
+        
         yield _sse('health_check', health)
         yield _sse('loop_complete', {
             'ok': health.get('ok'),
             'state': terminal_state,
             'url': deployment_url,
             'iterations_run': iterations_run,
+            'health_details': health.get('details') if not health.get('ok') else None
         })
     else:
         yield _sse('loop_complete', {
