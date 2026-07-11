@@ -120,19 +120,32 @@ export default function AIBuildTab() {
     }
   };
 
-  const openPR = async () => {
+  const openPR = async ({ autoMerge = false } = {}) => {
     if (!plan?.plan_id) return;
-    if (!window.confirm(`Open a PR with ${plan.files.length} file change${plan.files.length === 1 ? '' : 's'}?\n\nA new branch will be created and a PR opened against ${projectId}. Nothing ships to production until you merge.`)) return;
-    setOpening(true);
+    const fileLabel = `${plan.files.length} file change${plan.files.length === 1 ? '' : 's'}`;
+    const message = autoMerge
+      ? `Ship ${fileLabel} now?\n\nThis creates a GitHub branch + PR, squash-merges it into main, then Vercel/Render deploy from main. Use only when the plan looks correct.`
+      : `Open a PR with ${fileLabel}?\n\nA new branch will be created and a PR opened against ${projectId}. Nothing ships to production until you merge.`;
+    if (!window.confirm(message)) return;
+    setOpening(autoMerge ? 'ship' : 'pr');
     try {
-      const { data } = await api.post('/operator/ai-build/open-pr', { plan_id: plan.plan_id });
-      toast.success(`PR #${data.pr_number} opened`);
+      const { data } = await api.post('/operator/ai-build/open-pr', {
+        plan_id: plan.plan_id,
+        auto_merge: autoMerge,
+      });
+      if (autoMerge && data?.merge?.merged) {
+        toast.success(`Shipped PR #${data.pr_number} → main. Vercel/Render deploys should start automatically.`, { duration: 9000 });
+      } else if (autoMerge) {
+        toast.warning(`PR #${data.pr_number} opened, but GitHub did not merge it automatically. Open it to finish shipping.`, { duration: 10000 });
+      } else {
+        toast.success(`PR #${data.pr_number} opened`);
+      }
       window.open(data.pr_url, '_blank', 'noopener');
       setPlan(null);
       setPrompt('');
       loadHistory();
     } catch (e) {
-      toast.error(e?.response?.data?.detail || 'PR creation failed');
+      toast.error(e?.response?.data?.detail || (autoMerge ? 'Ship failed' : 'PR creation failed'));
     } finally {
       setOpening(false);
     }
@@ -177,7 +190,7 @@ export default function AIBuildTab() {
       {/* SAFETY BANNER */}
       <div className="rounded-xl border border-amber-500/30 bg-amber-500/[0.05] px-4 py-3 text-[12px] text-amber-200/90">
         <ShieldAlert className="mr-1.5 inline h-4 w-4 -mt-0.5" />
-        AI Build opens a <strong>Pull Request</strong> — nothing ships to production until you merge.
+        AI Build can open a <strong>Pull Request</strong> for review, or use <strong>Ship now</strong> to open and squash-merge it immediately so GitHub, Vercel, and Render start from <code>main</code>.
         Auth, payments, schemas, and <code>.env</code> are server-side blocked.
       </div>
 
@@ -329,13 +342,22 @@ export default function AIBuildTab() {
           {plan.files?.length > 0 && (
             <div className="mt-4 flex gap-2">
               <Button
-                onClick={openPR}
+                onClick={() => openPR()}
                 disabled={opening}
                 data-testid="ai-build-open-pr"
                 className="bg-emerald-500 text-ink-950 hover:bg-emerald-400 font-bold"
               >
-                {opening ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <GitBranch className="mr-2 h-4 w-4" />}
-                {opening ? 'Opening PR…' : 'Open PR'}
+                {opening === 'pr' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <GitBranch className="mr-2 h-4 w-4" />}
+                {opening === 'pr' ? 'Opening PR…' : 'Open PR'}
+              </Button>
+              <Button
+                onClick={() => openPR({ autoMerge: true })}
+                disabled={opening}
+                data-testid="ai-build-ship-now"
+                className="bg-amber-500 text-ink-950 hover:bg-amber-400 font-bold"
+              >
+                {opening === 'ship' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Rocket className="mr-2 h-4 w-4" />}
+                {opening === 'ship' ? 'Shipping…' : 'Ship now'}
               </Button>
               <Button
                 variant="outline"

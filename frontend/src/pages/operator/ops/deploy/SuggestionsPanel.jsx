@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Sparkles, Loader2, ChevronRight, Wand2, RefreshCw } from 'lucide-react';
+import { Sparkles, Loader2, ChevronRight, Wand2, RefreshCw, Rocket } from 'lucide-react';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../../../../components/ui/button';
@@ -36,7 +36,7 @@ export function SuggestionsPanel({ project }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
-  const [implementing, setImplementing] = useState(null); // suggestion idx
+  const [implementing, setImplementing] = useState(null); // `${idx}:plan` or `${idx}:ship`
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -65,20 +65,37 @@ export function SuggestionsPanel({ project }) {
     }
   };
 
-  const implement = async (s, idx) => {
-    setImplementing(idx);
+  const implement = async (s, idx, { ship = false } = {}) => {
+    const key = `${idx}:${ship ? 'ship' : 'plan'}`;
+    setImplementing(key);
     try {
       const prompt = `${s.title}\n\n${s.implementation_prompt}`;
       const { data: plan } = await api.post('/operator/ai-build/plan', {
         prompt,
         project_id: project.id,
-        source: 'suggestion',
+        source: ship ? 'suggestion_auto_ship' : 'suggestion',
       });
+      if (ship) {
+        if (!plan?.plan_id || !plan?.files?.length) {
+          throw new Error(plan?.refusal_reason || 'AI Build returned no files to ship');
+        }
+        const { data: shipped } = await api.post('/operator/ai-build/open-pr', {
+          plan_id: plan.plan_id,
+          auto_merge: true,
+        });
+        if (shipped?.merge?.merged) {
+          toast.success(`Shipped PR #${shipped.pr_number} → main. Vercel/Render deploys should start automatically.`, { duration: 9000 });
+        } else {
+          toast.warning(`PR #${shipped?.pr_number || ''} opened, but GitHub did not auto-merge it. Open it to finish shipping.`, { duration: 10000 });
+        }
+        if (shipped?.pr_url) window.open(shipped.pr_url, '_blank', 'noopener');
+        return;
+      }
       toast.success(`Plan drafted (${plan?.files?.length || 0} file${(plan?.files?.length || 0) === 1 ? '' : 's'}) — review it in AI Build`);
       navigate(`/operator?tab=ai-build${plan?.plan_id ? `&plan=${plan.plan_id}` : ''}`);
     } catch (e) {
       const detail = e?.response?.data?.detail;
-      toast.error(typeof detail === 'string' ? detail : 'AI Build planner unavailable');
+      toast.error(typeof detail === 'string' ? detail : (e?.message || 'AI Build planner unavailable'));
     } finally {
       setImplementing(null);
     }
@@ -176,11 +193,23 @@ export function SuggestionsPanel({ project }) {
                     disabled={implementing !== null}
                     className="bg-amber-500 text-ink-950 hover:bg-amber-400 font-semibold"
                   >
-                    {implementing === i
+                    {implementing === `${i}:plan`
                       ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
                       : <Wand2 className="mr-1.5 h-3 w-3" />}
                     Implement this
                     <ChevronRight className="ml-1 h-3 w-3" />
+                  </Button>
+                  <Button
+                    size="sm"
+                    data-testid={`suggestion-ship-${project.id}-${i}`}
+                    onClick={() => implement(s, i, { ship: true })}
+                    disabled={implementing !== null}
+                    className="ml-2 bg-emerald-500 text-ink-950 hover:bg-emerald-400 font-semibold"
+                  >
+                    {implementing === `${i}:ship`
+                      ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
+                      : <Rocket className="mr-1.5 h-3 w-3" />}
+                    Ship now
                   </Button>
                 </div>
               </li>

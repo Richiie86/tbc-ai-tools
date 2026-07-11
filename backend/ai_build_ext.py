@@ -174,6 +174,10 @@ class PlanResponse(BaseModel):
 
 class OpenPRRequest(BaseModel):
     plan_id: str
+    # Operator opt-in: after opening the PR, immediately squash-merge it into
+    # the base branch so GitHub, Vercel, and Render can deploy from main without
+    # a second manual merge step. Default stays safe/manual.
+    auto_merge: bool = False
 
 
 # ─── GitHub helpers (thin httpx wrappers — no shared mutable state) ───────
@@ -493,9 +497,11 @@ async def plan(req: PlanRequest, user: dict = Depends(get_current_operator)):
 async def open_pr(req: OpenPRRequest, user: dict = Depends(get_current_operator)):
     """Apply the saved plan: create a branch, commit each file, open a PR.
 
-    Returns `{pr_url, branch, commits: [...]}` on success. Any GitHub
-    failure mid-commit leaves the branch with partial changes — operator
-    can still inspect the PR or delete the branch.
+    Returns `{pr_url, branch, commits: [...]}` on success. When
+    `auto_merge=true`, also attempts to squash-merge the PR into the base
+    branch so the connected deploy platforms can start from `main` without a
+    second manual GitHub action. Any GitHub failure mid-commit leaves the branch
+    with partial changes — operator can still inspect the PR or delete it.
     """
     # Cap PR-open calls per operator (these also run a cross-AI review LLM pass).
     rate_limit_operator(user, 'ai-build:open-pr', limit=_PR_RATE_LIMIT, window_seconds=_PR_RATE_WINDOW)
@@ -503,7 +509,7 @@ async def open_pr(req: OpenPRRequest, user: dict = Depends(get_current_operator)
     doc = await db.ai_build_plans.find_one({'plan_id': req.plan_id})
     if not doc:
         raise HTTPException(404, 'Plan not found (expired?)')
-    if doc.get('status') == 'opened':
+    if doc.get('status') in ('opened', 'merged'):
         raise HTTPException(409, f'Plan already shipped as {doc.get("pr_url")}')
     if not doc.get('files'):
         raise HTTPException(422, 'Plan has no actionable files (likely refused or all blocked).')
@@ -588,16 +594,63 @@ async def open_pr(req: OpenPRRequest, user: dict = Depends(get_current_operator)
             raise HTTPException(502, f'PR create failed: {pr_resp.text[:300]}')
         pr = pr_resp.json()
 
+        merge_result = {'requested': bool(req.auto_merge), 'merged': False}
+        render_deploy = None
+        if req.auto_merge:
+            merge_resp = await _gh_put(
+                client,
+                f'{GITHUB_API}/repos/{repo}/pulls/{pr.get("number")}/merge',
+                gh_token,
+                {
+                    'merge_method': 'squash',
+                    'commit_title': f'AI Build · {doc["summary"][:64]}',
+                    'commit_message': f'Auto-shipped from AI Build plan {req.plan_id}',
+                },
+            )
+            if merge_resp.status_code in (200, 201):
+                merge_json = merge_resp.json() or {}
+                merge_result = {
+                    'requested': True,
+                    'merged': True,
+                    'sha': merge_json.get('sha'),
+                    'message': merge_json.get('message'),
+                }
+                # For the platform repo, kick Render explicitly. Vercel starts
+                # from the GitHub main-branch push via the Vercel Git connection.
+                if repo.lower() == 'richiie86/tbc-ai-tools' and base_ref == 'main':
+                    try:
+                        from deploy_ext import trigger_render_deploy
+                        render_deploy = await trigger_render_deploy(source='ai-build-auto-merge')
+                    except Exception as e:
+                        logger.warning('Render deploy after AI Build auto-merge failed: %s', str(e)[:200])
+                        render_deploy = {'ok': False, 'error': str(e)[:200]}
+            else:
+                merge_result = {
+                    'requested': True,
+                    'merged': False,
+                    'status_code': merge_resp.status_code,
+                    'error': merge_resp.text[:300],
+                }
+
+    plan_updates = {
+        'status': 'merged' if merge_result.get('merged') else 'opened',
+        'pr_url': pr.get('html_url'),
+        'pr_number': pr.get('number'),
+        'branch': branch,
+        'commits': commits,
+        'opened_at': datetime.now(timezone.utc),
+        'auto_merge': bool(req.auto_merge),
+        'merge_result': merge_result,
+    }
+    if merge_result.get('merged'):
+        plan_updates['merged_at'] = datetime.now(timezone.utc)
+        plan_updates['auto_merged'] = True
+    if render_deploy is not None:
+        plan_updates['render_deploy'] = render_deploy
+
     await db.ai_build_plans.update_one(
         {'plan_id': req.plan_id},
-        {'$set': {
-            'status': 'opened',
-            'pr_url': pr.get('html_url'),
-            'pr_number': pr.get('number'),
-            'branch': branch,
-            'commits': commits,
-            'opened_at': datetime.now(timezone.utc),
-        }},
+        {'$set': plan_updates},
     )
 
     # Kick off visual verification in the background. Vercel needs ~30–90s
@@ -619,6 +672,8 @@ async def open_pr(req: OpenPRRequest, user: dict = Depends(get_current_operator)
         'pr_number': pr.get('number'),
         'branch': branch,
         'commits': commits,
+        'merge': merge_result,
+        'render_deploy': render_deploy,
     }
 
 

@@ -55,6 +55,19 @@ def project_id(op_session):
     return projects[0].get('id')
 
 
+# ─── request models ───────────────────────────────────────────────────────
+class TestOpenPRRequest:
+    def test_auto_merge_defaults_false(self):
+        from ai_build_ext import OpenPRRequest
+        req = OpenPRRequest(plan_id='plan_123')
+        assert req.auto_merge is False
+
+    def test_auto_merge_accepts_true(self):
+        from ai_build_ext import OpenPRRequest
+        req = OpenPRRequest(plan_id='plan_123', auto_merge=True)
+        assert req.auto_merge is True
+
+
 # ─── auth gating ──────────────────────────────────────────────────────────
 class TestAuthGating:
     def test_history_unauth_401(self):
