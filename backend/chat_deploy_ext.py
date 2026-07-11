@@ -701,7 +701,7 @@ async def _apply_proposal_stream(proposal: dict, *, is_operator: bool):
     """Commit an approved proposal (platform → PR; otherwise → main) and, for the
     operator on their own app, deploy + wait. Yields text + structured events."""
     from payments_ext import get_settings_doc
-    from app_builder_ext import GITHUB_API as _GH_API, _commit_files, _gh_get, _gh_post
+    from app_builder_ext import GITHUB_API as _GH_API, _commit_files, _gh_get, _gh_post, _gh_put
 
     settings = await get_settings_doc()
     gh_token = settings.get('github_token') or os.environ.get('GITHUB_TOKEN')
@@ -746,16 +746,69 @@ async def _apply_proposal_stream(proposal: dict, *, is_operator: bool):
                     'title': f'AI fix · {(proposal.get("notes") or "code fix")[:64]}',
                     'head': new_branch, 'base': branch, 'body': pr_body[:60_000],
                 })
-                await db.chat_proposals.update_one({'id': proposal['id']}, {'$set': {'status': 'applied'}})
                 if pr.status_code not in (200, 201):
+                    await db.chat_proposals.update_one(
+                        {'id': proposal['id']},
+                        {'$set': {'status': 'commit_only', 'branch': new_branch}},
+                    )
                     yield f'Committed to `{new_branch}` but couldn\'t open the PR: {pr.text[:160]}'
                     return
                 pj = pr.json()
+
+                merge_result = {'requested': True, 'merged': False}
+                render_deploy = None
+                merge = await _gh_put(
+                    client, f'{_GH_API}/repos/{repo}/pulls/{pj.get("number")}/merge',
+                    gh_token, {
+                        'merge_method': 'squash',
+                        'commit_title': f'AI fix · {(proposal.get("notes") or "code fix")[:64]}',
+                        'commit_message': f'Approved from chat proposal {proposal["id"]}',
+                    },
+                )
+                if merge.status_code in (200, 201):
+                    mj = merge.json() or {}
+                    merge_result = {
+                        'requested': True, 'merged': True,
+                        'sha': mj.get('sha'), 'message': mj.get('message'),
+                    }
+                    try:
+                        from deploy_ext import trigger_render_deploy
+                        render_deploy = await trigger_render_deploy(source='chat-proposal-auto-merge')
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning('Render deploy after chat auto-merge failed: %s', str(e)[:200])
+                        render_deploy = {'ok': False, 'error': str(e)[:200]}
+                    await db.chat_proposals.update_one(
+                        {'id': proposal['id']},
+                        {'$set': {
+                            'status': 'applied', 'pr_url': pj.get('html_url'),
+                            'pr_number': pj.get('number'), 'branch': new_branch,
+                            'merge_result': merge_result, 'render_deploy': render_deploy,
+                            'updated_at': _now(),
+                        }},
+                    )
+                    yield (f'Approved. I opened and merged **PR #{pj.get("number")}** '
+                           f'({committed} file(s)). GitHub main is updated; Vercel will deploy '
+                           f'from the main-branch merge. Render trigger: '
+                           f'{"ok" if (render_deploy or {}).get("ok") else "not configured or failed"}.\n\n'
+                           f'{pj.get("html_url")}')
+                    return
+
+                merge_result = {
+                    'requested': True, 'merged': False,
+                    'status_code': merge.status_code, 'error': merge.text[:300],
+                }
                 await db.chat_proposals.update_one(
-                    {'id': proposal['id']}, {'$set': {'pr_url': pj.get('html_url')}})
+                    {'id': proposal['id']},
+                    {'$set': {
+                        'status': 'opened', 'pr_url': pj.get('html_url'),
+                        'pr_number': pj.get('number'), 'branch': new_branch,
+                        'merge_result': merge_result, 'updated_at': _now(),
+                    }},
+                )
                 yield (f'Approved. I opened **PR #{pj.get("number")}** with the change '
-                       f'({committed} file(s)). Review and merge it to ship — I never '
-                       f'push straight to the live platform.\n\n{pj.get("html_url")}')
+                       f'({committed} file(s)), but GitHub did not merge it automatically '
+                       f'({merge.status_code}). Open the PR to resolve checks/permissions.\n\n'
+                       f'{pj.get("html_url")}')
                 return
 
             committed = await _commit_files(client, gh_token, repo, branch, changed)
