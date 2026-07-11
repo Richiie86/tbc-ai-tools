@@ -9,8 +9,27 @@
  */
 import React from 'react';
 
-const BACKEND = process.env.REACT_APP_BACKEND_URL;
+const BACKEND = (process.env.REACT_APP_BACKEND_URL || 'https://tbctools-api.onrender.com').replace(/\/+$/, '');
 const ENDPOINT = `${BACKEND}/api/runtime-errors`;
+
+function isChunkLoadError(message = '', stack = '') {
+  const text = `${message} ${stack}`;
+  return /ChunkLoadError|Loading chunk \d+ failed|Loading CSS chunk \d+ failed|Failed to fetch dynamically imported module/i.test(text);
+}
+
+function reloadOnceForFreshAssets() {
+  try {
+    const key = 'tbc.chunkReloaded.v1';
+    if (sessionStorage.getItem(key)) return false;
+    sessionStorage.setItem(key, '1');
+    // Use replace() so the broken asset URL is not kept in history.
+    window.location.replace(window.location.href);
+    return true;
+  } catch {
+    window.location.reload();
+    return true;
+  }
+}
 
 // We're inside the app's own error handler — fetch() failures must NEVER
 // throw, or we'd amplify the bug we're trying to report.
@@ -57,6 +76,7 @@ export function installErrorCapture() {
     if (!e?.error && !e?.message) return;
     const stack = e.error?.stack || '';
     if (isExtensionNoise({ filename: e.filename, stack, message: e.message })) return;
+    if (isChunkLoadError(e.message || String(e.error), stack) && reloadOnceForFreshAssets()) return;
     report({
       message: e.message || String(e.error),
       stack,
@@ -76,6 +96,7 @@ export function installErrorCapture() {
     const message = r?.message || (typeof r === 'string' ? r : 'unhandledrejection');
     const stack = r?.stack || '';
     if (isExtensionNoise({ filename: '', stack, message })) return;
+    if (isChunkLoadError(message, stack) && reloadOnceForFreshAssets()) return;
     report({
       message: message.slice(0, 4000),
       stack,
@@ -129,7 +150,7 @@ export class RuntimeErrorBoundary extends React.Component {
         }}
       >
         <div style={{ maxWidth: 520, textAlign: 'center' }}>
-          <div style={{ fontSize: 32, marginBottom: 12 }}>⚠️</div>
+          <div style={{ fontSize: 32, marginBottom: 12 }}>!</div>
           <h2 style={{ margin: 0, fontSize: 20 }}>Something broke on this page.</h2>
           <p style={{ marginTop: 8, color: '#9ca3af', fontSize: 14 }}>
             We logged the error. Open the Operator → Errors tab to inspect it,
