@@ -1727,7 +1727,7 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
     # knowledge. Operator can teach the AI new patterns without a redeploy.
     learnings_cursor = db.ai_learnings.find(
         {'enabled': {'$ne': False}}, {'text': 1},
-    ).sort('created_at', 1).limit(50)
+    ).sort([('updated_at', -1), ('created_at', -1)]).limit(50)
     learnings = [
         d['text'] async for d in learnings_cursor
         if d.get('text') and not _is_bad_deploy_learning(d['text'])
