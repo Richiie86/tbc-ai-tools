@@ -1564,6 +1564,34 @@ async def _trigger_promote(
         )
         target_id = result.get('id') or result.get('uid') or target_id
         fallback_rebuilt = True
+        if not target_id:
+            raise HTTPException(502, 'Vercel fallback deploy started but returned no deployment id.')
+        try:
+            from app_builder_ext import _poll_deployment_ready
+            ready = await _poll_deployment_ready(settings, target_id)
+        except Exception as pe:  # noqa: BLE001
+            logger.warning('Promote fallback poll failed for %s: %s', target_id, str(pe)[:200])
+            ready = {}
+        ready_state = (ready.get('readyState') or ready.get('status') or '').upper()
+        if ready.get('url'):
+            result['url'] = ready['url']
+        if ready_state != 'READY':
+            failed_state = ready_state or 'UNKNOWN'
+            await db.deploy_projects.update_one(
+                {'id': project_id},
+                {'$set': {
+                    'last_deployment_id': target_id,
+                    'last_deployment_url': result.get('url'),
+                    'last_deployment_state': failed_state,
+                    'updated_at': datetime.now(timezone.utc),
+                }},
+            )
+            raise HTTPException(
+                502,
+                f'Vercel fallback production deploy did not reach READY (state={failed_state}). '
+                'It was not marked as known-good; inspect the deployment before retrying.',
+            )
+        result = {**result, **ready, 'readyState': ready_state}
     now = datetime.now(timezone.utc)
     promoted_url = (
         result.get('url')
@@ -1578,12 +1606,10 @@ async def _trigger_promote(
         'last_deployment_state': 'PROMOTED_REBUILT' if fallback_rebuilt else 'PROMOTED',
         'updated_at': now,
     }
-    if not fallback_rebuilt:
-        # Direct Vercel promotion reuses an already READY preview artifact, so
-        # it is safe to record as known-good for future rollback. The fallback
-        # path starts a brand-new production rebuild that may still fail, so it
-        # must not become a rollback target until Vercel marks it READY.
-        update_fields['last_good_deployment_id'] = target_id
+    # Direct promotion reuses an already READY preview artifact. Fallback
+    # promotion waits above until the new production rebuild reaches READY.
+    # Both paths are verified here, so either can safely become known-good.
+    update_fields['last_good_deployment_id'] = target_id
     await db.deploy_projects.update_one(
         {'id': project_id},
         {'$set': update_fields},
