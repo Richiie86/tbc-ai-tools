@@ -77,6 +77,7 @@ export default function PreviewWidget() {
       try {
         const { data } = await api.post(`/operator/deploy/${p.project_id}/promote`, {
           deployment_id: p.deployment_id,
+          git_ref: p.branch,
           auto_tag: autoTag,
           auto_changelog: autoChangelog,
         });
@@ -84,7 +85,9 @@ export default function PreviewWidget() {
         toast.success(
           tag
             ? `Promoted ${p.branch} → ${tag}`
-            : `Promoted ${p.branch} to production`,
+            : data?.fallback_rebuilt
+              ? `Production deploy started for ${p.branch}`
+              : `Promoted ${p.branch} to production`,
           { description: tag ? data.release_tag.url : undefined },
         );
         setPreviews((cur) => cur.filter((x) => x.deployment_id !== p.deployment_id));

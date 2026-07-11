@@ -1250,6 +1250,9 @@ class PromoteRequest(BaseModel):
     # default off — opt-in per promote to avoid surprising the operator.
     auto_tag: bool = False
     auto_changelog: bool = False
+    # Branch/ref that produced the preview. Used as a safe fallback when
+    # Vercel refuses artifact promotion with "Resource cannot be processed".
+    git_ref: Optional[str] = None
 
 
 @ops_router.post('/{project_id}/redeploy')
@@ -1273,7 +1276,9 @@ async def op_promote_project(
     Vercel's promote API and audit-logs the action with the actor email."""
     settings = await get_settings_doc()
     result = await _trigger_promote(
-        project_id, settings, payload.deployment_id if payload else None,
+        project_id, settings,
+        payload.deployment_id if payload else None,
+        git_ref=payload.git_ref if payload else None,
     )
     # ---- optional release-tag + CHANGELOG append --------------------
     # Best-effort: failures are reported alongside the promote result but
@@ -1506,7 +1511,13 @@ async def ai_redeploy_project(
     return await _trigger_redeploy(project_id, settings)
 
 
-async def _trigger_promote(project_id: str, settings: dict, deployment_id: Optional[str] = None) -> dict:
+async def _trigger_promote(
+    project_id: str,
+    settings: dict,
+    deployment_id: Optional[str] = None,
+    *,
+    git_ref: Optional[str] = None,
+) -> dict:
     """Shared promote-to-prod path used by both the AI API and the operator
     endpoints. Promotes the project's last preview (or the supplied
     `deployment_id`) to production via Vercel's promote API, writes an
@@ -1522,9 +1533,37 @@ async def _trigger_promote(project_id: str, settings: dict, deployment_id: Optio
             400,
             'No preview deployment recorded yet. Run Deploy first, then promote.',
         )
-    result = await _vercel_promote_to_production(
-        settings, project.get('vercel_project_id'), target_id,
-    )
+    fallback_rebuilt = False
+    fallback_reason = None
+    try:
+        result = await _vercel_promote_to_production(
+            settings, project.get('vercel_project_id'), target_id,
+        )
+    except HTTPException as e:
+        detail = str(e.detail)
+        # Vercel can reject direct artifact promotion for some git-preview
+        # deployments with "Resource cannot be processed". The operator's
+        # intent is still clear: ship that branch to production. Fall back to a
+        # production deployment from the same git ref instead of leaving the UI
+        # stuck with a red toast.
+        if e.status_code != 502 or 'resource cannot be processed' not in detail.lower():
+            raise
+        fallback_reason = detail
+        ref = git_ref
+        if not ref and target_id:
+            try:
+                dep = await _vercel_get_deployment(settings, target_id)
+                ref = ((dep.get('meta') or {}).get('githubCommitRef')
+                       or dep.get('gitSource', {}).get('ref'))
+            except Exception as de:  # noqa: BLE001
+                logger.warning('Could not read deployment %s for promote fallback: %s', target_id, str(de)[:200])
+        ref = ref or project.get('gitRef') or 'main'
+        result = await vercel_create_deployment(
+            settings, project, 'production', ref,
+            _slugify(project.get('projectName') or project.get('name') or 'project'),
+        )
+        target_id = result.get('id') or result.get('uid') or target_id
+        fallback_rebuilt = True
     now = datetime.now(timezone.utc)
     promoted_url = (
         result.get('url')
@@ -1540,7 +1579,9 @@ async def _trigger_promote(project_id: str, settings: dict, deployment_id: Optio
             # production artifact, and becomes the target for auto-rollback
             # if a later deploy fails.
             'last_good_deployment_id': target_id,
-            'last_deployment_state': 'PROMOTED',
+            'last_deployment_id': target_id,
+            'last_deployment_url': promoted_url,
+            'last_deployment_state': 'PROMOTED_REBUILT' if fallback_rebuilt else 'PROMOTED',
             'updated_at': now,
         }},
     )
@@ -1571,6 +1612,8 @@ async def _trigger_promote(project_id: str, settings: dict, deployment_id: Optio
         'url': promoted_url,
         'production_url': f"https://{project['domain']}" if project.get('domain') else promoted_url,
         'promoted_at': now.isoformat(),
+        'fallback_rebuilt': fallback_rebuilt,
+        'fallback_reason': fallback_reason,
     }
 
 
