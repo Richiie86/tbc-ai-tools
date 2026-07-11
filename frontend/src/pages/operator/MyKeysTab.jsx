@@ -5,7 +5,7 @@ import { Input } from '../../components/ui/input';
 import { toast } from 'sonner';
 import {
   KeyRound, Loader2, Wand2, Eye, EyeOff, CheckCircle2, XCircle,
-  Plus, ChevronDown, ShieldCheck, ArrowDown,
+  Plus, ChevronDown, ShieldCheck, ArrowDown, Rocket, Server, GitBranch, RefreshCw,
 } from 'lucide-react';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -49,22 +49,46 @@ const PRETTY = {
 
 export default function MyKeysTab() {
   const [settings, setSettings] = useState(null);
+  const [deploySync, setDeploySync] = useState(null);
   const [loading, setLoading] = useState(true);
   // When Smart Paste can't recognise a key, we pre-fill the Custom keys form
   // with the pasted value so the operator can just name it and save.
   const [customPrefill, setCustomPrefill] = useState('');
+
+  const loadDeploySync = useCallback(async () => {
+    try {
+      const [projectsRes, renderCfgRes, renderStatusRes] = await Promise.allSettled([
+        api.get('/operator/deploy/projects'),
+        api.get('/operator/render-deploy/config'),
+        api.get('/operator/render-deploy/status'),
+      ]);
+      const projects = projectsRes.status === 'fulfilled'
+        ? (Array.isArray(projectsRes.value.data) ? projectsRes.value.data : (projectsRes.value.data?.projects || []))
+        : [];
+      const self = projects.find((p) => (p.id === 'tbctools-self')
+        || String(p.repo || '').toLowerCase() === 'richiie86/tbc-ai-tools'
+        || String(p.projectName || '').toLowerCase().includes('tbc ai tools'));
+      const renderCfg = renderCfgRes.status === 'fulfilled' ? renderCfgRes.value.data : null;
+      const renderStatus = renderStatusRes.status === 'fulfilled' ? renderStatusRes.value.data : null;
+      setDeploySync({ self, renderCfg, renderStatus, loaded: true });
+    } catch (e) {
+      console.warn('Deploy sync load failed', e);
+      setDeploySync({ loaded: false });
+    }
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const { data } = await api.get('/operator/settings');
       setSettings(data);
+      loadDeploySync();
     } catch {
       toast.error('Failed to load keys');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [loadDeploySync]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -119,6 +143,8 @@ export default function MyKeysTab() {
           toast.message('Add it as a Custom key below — just give it a name.');
         }}
       />
+
+      <DeploymentSyncCard sync={deploySync} onRefresh={loadDeploySync} />
 
       {/* Your keys — sorted list of everything already added */}
       <div className="rounded-xl border border-tbc-500/30 bg-gradient-to-br from-tbc-500/[0.04] via-ink-900/60 to-ink-900/60 p-5">
@@ -229,6 +255,87 @@ function AddSpecificKey({ settings, missing, row }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+
+function fmtTime(iso) {
+  if (!iso) return 'Never recorded';
+  try { return new Date(iso).toLocaleString(); } catch { return String(iso); }
+}
+
+function statusTone(status) {
+  const s = String(status || '').toUpperCase();
+  if (['READY', 'PROMOTED', 'LIVE', 'SUCCEEDED', 'SUCCESS', 'DEPLOYED'].some((v) => s.includes(v))) return 'emerald';
+  if (['ERROR', 'FAILED', 'CANCELED'].some((v) => s.includes(v))) return 'rose';
+  if (s) return 'amber';
+  return 'slate';
+}
+
+function StatusPill({ value }) {
+  const tone = statusTone(value);
+  const cls = tone === 'emerald' ? 'bg-emerald-500/15 text-emerald-300'
+    : tone === 'rose' ? 'bg-rose-500/15 text-rose-300'
+      : tone === 'amber' ? 'bg-amber-500/15 text-amber-300'
+        : 'bg-slate-500/15 text-slate-300';
+  return <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${cls}`}>{value || 'unknown'}</span>;
+}
+
+function DeploymentSyncCard({ sync, onRefresh }) {
+  const self = sync?.self;
+  const renderCfg = sync?.renderCfg;
+  const renderStatus = sync?.renderStatus;
+  const renderConfigured = !!(renderCfg?.api_key_set && renderCfg?.service_id) || !!renderCfg?.hook_set;
+  const renderState = renderStatus?.status || renderCfg?.last_deploy_status;
+
+  return (
+    <div className="rounded-xl border border-sky-500/30 bg-gradient-to-br from-sky-500/[0.06] via-ink-900/60 to-ink-900/60 p-5" data-testid="deploy-sync-card">
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <span className="grid h-9 w-9 place-items-center rounded-lg bg-sky-500/15 text-sky-200"><Rocket className="h-4 w-4" /></span>
+          <div>
+            <h3 className="text-base font-bold text-tbc-100">Deployment sync status</h3>
+            <p className="text-xs text-tbc-200/60">
+              This is the app update status. It is separate from key rotation timestamps above.
+            </p>
+          </div>
+        </div>
+        <Button type="button" size="sm" variant="outline" onClick={onRefresh} className="border-tbc-900/60 bg-ink-900 text-tbc-100 hover:bg-ink-950">
+          <RefreshCw className="mr-1.5 h-3 w-3" /> Refresh
+        </Button>
+      </div>
+      <div className="grid gap-3 md:grid-cols-2">
+        <div className="rounded-lg border border-tbc-900/60 bg-ink-950/50 p-3">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-tbc-100"><GitBranch className="h-3.5 w-3.5 text-tbc-300" /> GitHub → Vercel</span>
+            <StatusPill value={self?.last_deployment_state} />
+          </div>
+          <div className="space-y-1 text-[11px] text-tbc-200/70">
+            <p>Repo: <code className="rounded bg-ink-900 px-1 text-tbc-300">{self?.repo || 'not linked'}</code></p>
+            <p>Last deploy: {fmtTime(self?.last_deployed_at || self?.updated_at)}</p>
+            {self?.last_deployment_url && (
+              <a className="inline-block max-w-full truncate text-tbc-300 hover:text-tbc-200" href={`https://${String(self.last_deployment_url).replace(/^https?:\/\//, '')}`} target="_blank" rel="noreferrer">
+                {String(self.last_deployment_url).replace(/^https?:\/\//, '')}
+              </a>
+            )}
+            {!self && <p className="text-amber-300">The self project row was not found yet. Open Ops → Deploy once to initialize it.</p>}
+          </div>
+        </div>
+        <div className="rounded-lg border border-tbc-900/60 bg-ink-950/50 p-3">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-tbc-100"><Server className="h-3.5 w-3.5 text-tbc-300" /> Render backend</span>
+            <StatusPill value={renderConfigured ? (renderState || 'configured') : 'not configured'} />
+          </div>
+          <div className="space-y-1 text-[11px] text-tbc-200/70">
+            <p>Service: <code className="rounded bg-ink-900 px-1 text-tbc-300">{renderCfg?.service_name || renderCfg?.service_id || 'not selected'}</code></p>
+            <p>Last trigger: {fmtTime(renderCfg?.last_deploy_at)}</p>
+            {!renderConfigured && (
+              <p className="text-amber-300">Add a Render API key and select a service in Operator → Server to deploy the backend automatically.</p>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
