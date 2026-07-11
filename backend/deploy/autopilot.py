@@ -19,6 +19,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
+import httpx
 from fastapi import Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -27,7 +28,6 @@ from deploy_projects_ext import (
     SELF_PROJECT_ID,
     _create_fix_review_chat,
     _ensure_self_project,
-    _project_health,
     _record_deployment,
     _require_ai_api_key,
     _slugify,
@@ -88,6 +88,54 @@ async def _resolve_max_iters(project_id: str, requested: int) -> int:
     return max(0, min(iters, MAX_ALLOWED))
 
 
+async def _standalone_health_check(project: dict) -> dict:
+    """Standalone health check that doesn't create circular imports.
+    
+    Performs a simple HTTP GET to the project's URL to verify it's accessible.
+    Returns {ok: bool, status?: int, error?: str, response_time?: float}.
+    """
+    import time
+    
+    # Determine the URL to check
+    url = None
+    if project.get('domain'):
+        url = f"https://{project['domain']}"
+    elif project.get('last_deployment_url'):
+        url = project['last_deployment_url']
+        if not url.startswith('http'):
+            url = f"https://{url}"
+    
+    if not url:
+        return {'ok': False, 'error': 'No URL configured for health check'}
+    
+    try:
+        start_time = time.time()
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+            response = await client.get(url)
+        response_time = round((time.time() - start_time) * 1000, 2)  # ms
+        
+        # Consider 2xx and 3xx as healthy
+        ok = 200 <= response.status_code < 400
+        result = {
+            'ok': ok,
+            'status': response.status_code,
+            'response_time': response_time,
+            'url': url
+        }
+        
+        if not ok:
+            result['error'] = f'HTTP {response.status_code}'
+            
+        return result
+        
+    except httpx.TimeoutException:
+        return {'ok': False, 'error': 'Request timeout (10s)', 'url': url}
+    except httpx.ConnectError:
+        return {'ok': False, 'error': 'Connection failed', 'url': url}
+    except Exception as e:
+        return {'ok': False, 'error': f'Health check failed: {str(e)[:200]}', 'url': url}
+
+
 async def _react_to_deployment(
     project_id: str,
     project: dict,
@@ -108,7 +156,7 @@ async def _react_to_deployment(
         )
         fresh = await db.deploy_projects.find_one({'id': project_id}) or project
         try:
-            health = await _project_health(fresh, settings)
+            health = await _standalone_health_check(fresh)
         except Exception as e:
             logger.error(f'Health check failed for {project_id}: {e}')
             health = {'ok': False, 'error': str(e)[:200]}
