@@ -1570,20 +1570,23 @@ async def _trigger_promote(
         or result.get('alias', [None])[0] if isinstance(result.get('alias'), list)
         else result.get('url')
     ) or project.get('last_deployment_url')
+    update_fields = {
+        'last_promoted_at': now,
+        'last_promoted_deployment_id': target_id,
+        'last_deployment_id': target_id,
+        'last_deployment_url': promoted_url,
+        'last_deployment_state': 'PROMOTED_REBUILT' if fallback_rebuilt else 'PROMOTED',
+        'updated_at': now,
+    }
+    if not fallback_rebuilt:
+        # Direct Vercel promotion reuses an already READY preview artifact, so
+        # it is safe to record as known-good for future rollback. The fallback
+        # path starts a brand-new production rebuild that may still fail, so it
+        # must not become a rollback target until Vercel marks it READY.
+        update_fields['last_good_deployment_id'] = target_id
     await db.deploy_projects.update_one(
         {'id': project_id},
-        {'$set': {
-            'last_promoted_at': now,
-            'last_promoted_deployment_id': target_id,
-            # A successfully promoted deployment is our best "known-good"
-            # production artifact, and becomes the target for auto-rollback
-            # if a later deploy fails.
-            'last_good_deployment_id': target_id,
-            'last_deployment_id': target_id,
-            'last_deployment_url': promoted_url,
-            'last_deployment_state': 'PROMOTED_REBUILT' if fallback_rebuilt else 'PROMOTED',
-            'updated_at': now,
-        }},
+        {'$set': update_fields},
     )
     await _fire_webhook(
         'deploy.promoted',
