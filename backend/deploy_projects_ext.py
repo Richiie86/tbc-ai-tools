@@ -1853,7 +1853,7 @@ async def op_project_health(
 
 # The platform's own repo — direct commits to its `main` auto-deploy the LIVE
 # app, so a fix here must go through a PR (never a straight push), while a
-# user's chat-deployed app is safe to overwrite in place (emergent-style).
+# user's chat-deployed app is safe to overwrite in place (TBCTools app-builder style).
 PLATFORM_REPO = f"{os.environ.get('APP_BUILDER_OWNER', 'Richiie86')}/tbc-ai-tools"
 
 

@@ -381,9 +381,19 @@ def _is_bad_deploy_learning(text: str) -> bool:
         'confirm all keys', 'verify env', 'ask the user to confirm',
         'which session are you',
     )
+    wrong_stack_markers = (
+        'next.js', 'nextjs', 'next-auth', 'auth.js', 'app/api/',
+        'route.ts', 'route.js', 'lib/dbconnect', 'github actions',
+        '.github/workflows', 'deploy.yml', 'vercel ai sdk', 'usechat',
+        '@ai-sdk/',
+    )
     deploy_context = ('deploy' in t or 'ship' in t or 'publish' in t
-                      or 'vercel project' in t or 'github repo' in t)
-    return deploy_context and any(m in t for m in checklist_markers)
+                      or 'vercel project' in t or 'github repo' in t
+                      or 'render' in t or 'mongodb' in t)
+    return deploy_context and (
+        any(m in t for m in checklist_markers)
+        or any(m in t for m in wrong_stack_markers)
+    )
 
 
 async def _build_session_deploy_context(session_id: Optional[str]) -> str:
@@ -585,6 +595,57 @@ async def startup():
             } for t in seed
         ])
         logger.info('Seeded %d default AI learnings', len(seed))
+
+    # --- Always-on stack/deploy guardrail learning -------------------
+    # This replaces the old Emergent/v0/Next.js-style background guidance with
+    # the real TBCTools architecture every time the app boots. It is idempotent
+    # and intentionally enabled so stale imported learnings cannot make the AI
+    # generate incompatible deployment code again.
+    now = datetime.now(timezone.utc)
+    await db.ai_learnings.update_one(
+        {'id': 'system-stack-deploy-guardrail'},
+        {'$set': {
+            'id': 'system-stack-deploy-guardrail',
+            'text': (
+                'TBCTools deploys through React CRA frontend on Vercel + FastAPI backend on Render. '
+                'Use backend/deploy_projects_ext.py, backend/vercel_api_ext.py, backend/deploy_ext.py and the existing React UI. '
+                'Never add Next.js app/api routes, Auth.js, lib/dbConnect.js, Vercel AI SDK handlers, or GitHub Actions deploy YAML unless explicitly migrating stacks.'
+            ),
+            'enabled': True,
+            'updated_at': now,
+            'created_by_email': 'system-guardrail',
+            'source': 'system_stack_guardrail',
+        }, '$setOnInsert': {'created_at': now}},
+        upsert=True,
+    )
+
+    # --- Self-running deployment automation bootstrap ----------------
+    # Keep the platform's own deploy project present and enable the autonomous
+    # self-healing loop by default. The loop is still guarded by daily caps,
+    # cross-AI review, optional tests, and clean-merge checks, but it no longer
+    # depends on any old Emergent background process to be attached.
+    try:
+        from deploy_projects_ext import SELF_PROJECT_ID, _ensure_self_project
+        self_project = await _ensure_self_project()
+        cfg_doc = await db.app_settings.find_one({}) or {}
+        cfg = cfg_doc.get('auto_fix') or {}
+        desired = {
+            'enabled': True,
+            'auto_merge': True,
+            'include_health': True,
+            'auto_push_empty_repo': True,
+            'auto_run_tests': True,
+            'per_day_cap': int(cfg.get('per_day_cap') or 5),
+            'per_tick_cap': int(cfg.get('per_tick_cap') or 3),
+            'project_id': cfg.get('project_id') or SELF_PROJECT_ID,
+        }
+        if self_project and cfg != {**cfg, **desired}:
+            await db.app_settings.update_one(
+                {}, {'$set': {'auto_fix': {**cfg, **desired}}}, upsert=True,
+            )
+            logger.info('Self-running auto-fix/deploy loop configured for %s', desired['project_id'])
+    except Exception as e:
+        logger.warning('Self-running deploy automation bootstrap failed (non-fatal): %s', e)
 
     # --- One-time migration: rename historical typo'd operator email if present ---
     if _LEGACY_OPERATOR_EMAIL != OPERATOR_EMAIL:
