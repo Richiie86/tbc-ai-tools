@@ -609,7 +609,8 @@ async def startup():
             'text': (
                 'TBCTools deploys through React CRA frontend on Vercel + FastAPI backend on Render. '
                 'Use backend/deploy_projects_ext.py, backend/vercel_api_ext.py, backend/deploy_ext.py and the existing React UI. '
-                'Never add Next.js app/api routes, Auth.js, lib/dbConnect.js, Vercel AI SDK handlers, or GitHub Actions deploy YAML unless explicitly migrating stacks.'
+                'Never add Next.js app/api routes, Auth.js, lib/dbConnect.js, Vercel AI SDK handlers, or GitHub Actions deploy YAML unless explicitly migrating stacks. '
+                'Launch checklist for this app: keep AI/provider keys server-side only; handle 400/404/409/429/5xx errors with actionable messages; stream AI responses with status/timeout handling; use RuntimeErrorBoundary and chunk-load recovery for blank screens; serve CRA routes through the Vercel rewrite to index.html; keep index.html no-cache; expose Privacy and Terms pages; validate user input on the backend before sending it to AI providers; log runtime errors to Operator → Errors.'
             ),
             'enabled': True,
             'updated_at': now,
@@ -1140,6 +1141,32 @@ def _public_user(u: dict) -> dict:
         ),
     }
 
+
+
+async def _maybe_notify_low_credits(user_id: str, credits_left: int) -> None:
+    """Warn a user once per day when their credit balance drops below 10."""
+    if credits_left >= 10:
+        return
+    try:
+        today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+        dedupe = f'{today}:low-credits:{user_id}'
+        if await db.user_notifications.find_one({'user_id': user_id, 'dedupe_key': dedupe}):
+            return
+        await db.user_notifications.insert_one({
+            'id': secrets.token_urlsafe(12),
+            'user_id': user_id,
+            'from_operator_id': None,
+            'kind': 'usage_alert',
+            'subject': 'Low credits — refill soon',
+            'body': f'Your balance is down to {max(0, credits_left)} credits. Refill now so chat, deploys, and AI tools keep working without interruption.',
+            'action_url': '/pricing',
+            'action_label': 'Refill credits',
+            'dedupe_key': dedupe,
+            'read_at': None,
+            'created_at': datetime.now(timezone.utc),
+        })
+    except Exception as e:  # noqa: BLE001
+        logger.warning('low-credit notification failed for %s: %s', user_id, str(e)[:160])
 
 async def _activate_plan_for_user(user_id: str, plan_doc: dict | None) -> dict:
     """Apply a plan to a user: set `plan`, add credits, and compute expiry.
@@ -1924,6 +1951,11 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
         # stream its progress as normal deltas, then finish the turn. Bypasses
         # the text-only LLM entirely — apply/redeploy are not credit-charged.
         if agentic_edit:
+            yield 'data: ' + json.dumps({
+                'type': 'status',
+                'message': 'Preparing the real code edit pipeline…',
+                'session_id': session_id,
+            }) + '\n\n'
             from chat_deploy_ext import stream_agentic_edit
             agent_response = ''
             sess_full = await db.chat_sessions.find_one({'id': session_id})
@@ -2001,6 +2033,11 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
             return
 
         full_response = ''
+        yield 'data: ' + json.dumps({
+            'type': 'status',
+            'message': 'Connecting to the AI model…',
+            'session_id': session_id,
+        }) + '\n\n'
         # Build the model attempt list. Explicit user picks are authoritative:
         # try ONLY that model and surface its real error if it fails. Automatic
         # mode may use the cross-provider fallback chain because the user asked
@@ -2068,6 +2105,11 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
             # binds the model at chat-construction time, so we need a new
             # instance per attempt to switch providers cleanly.
             provider_i, model_name_i = resolve_model(model_id)
+            yield 'data: ' + json.dumps({
+                'type': 'status',
+                'message': f'Using {provider_i} model {model_name_i}…',
+                'session_id': session_id,
+            }) + '\n\n'
             chat_i = LlmChat(
                 api_key=llm_key,
                 session_id=session_id,
@@ -2169,7 +2211,13 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
             except Exception as e:  # noqa: BLE001
                 logger.warning('credit pricing fell back to 1 credit: %s', e)
             if charge > 0:
-                await db.users.update_one({'id': user['sub']}, {'$inc': {'credits': -charge}})
+                updated = await db.users.find_one_and_update(
+                    {'id': user['sub']},
+                    {'$inc': {'credits': -charge}},
+                    return_document=True,
+                )
+                if updated:
+                    await _maybe_notify_low_credits(user['sub'], int(updated.get('credits', 0)))
         # Log estimated spend for the amAI monthly summary (fire-and-forget).
         if full_response.strip():
             await record_usage(user['sub'], used_model, kind=auto_kind, source='chat')

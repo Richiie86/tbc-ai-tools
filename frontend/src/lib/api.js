@@ -12,6 +12,23 @@ const api = axios.create({
   withCredentials: true,
 });
 
+const STREAM_IDLE_TIMEOUT_MS = 45_000;
+
+async function readWithIdleTimeout(reader, timeoutMs, label) {
+  let timer;
+  try {
+    return await Promise.race([
+      reader.read(),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} timed out waiting for data. Please retry; if it repeats, check Operator → Errors.`)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+
 api.interceptors.response.use(
   (r) => r,
   (err) => {
@@ -46,7 +63,7 @@ export async function* streamPost(path, body) {
   const decoder = new TextDecoder();
   let buffer = '';
   while (true) {
-    const { value, done } = await reader.read();
+    const { value, done } = await readWithIdleTimeout(reader, STREAM_IDLE_TIMEOUT_MS, 'Streaming request');
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
     const parts = buffer.split('\n\n');
@@ -85,7 +102,7 @@ export async function* streamChat({ session_id, message, model, variant, attachm
   const decoder = new TextDecoder();
   let buffer = '';
   while (true) {
-    const { value, done } = await reader.read();
+    const { value, done } = await readWithIdleTimeout(reader, STREAM_IDLE_TIMEOUT_MS, 'AI response');
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
     const parts = buffer.split('\n\n');

@@ -982,6 +982,72 @@ _LIVE_FETCHERS = {
 }
 
 
+
+async def _notify_operator_usage_alerts(db, meters: list[dict]) -> int:
+    """Create actionable bell notifications for provider spend/limit issues.
+
+    De-duped per UTC day + provider + issue so the bell nudges without spam.
+    """
+    today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+    op = await db.users.find_one({'role': 'operator'}, {'id': 1})
+    if not op:
+        return 0
+    user_id = op.get('id')
+    created = 0
+
+    async def _emit(key: str, subject: str, body: str, action_url: str, action_label: str):
+        nonlocal created
+        dedupe = f'{today}:{key}'
+        exists = await db.user_notifications.find_one({'dedupe_key': dedupe, 'user_id': user_id})
+        if exists:
+            return
+        await db.user_notifications.insert_one({
+            'id': secrets.token_urlsafe(12),
+            'user_id': user_id,
+            'from_operator_id': None,
+            'kind': 'usage_alert',
+            'subject': subject,
+            'body': body,
+            'action_url': action_url,
+            'action_label': action_label,
+            'dedupe_key': dedupe,
+            'read_at': None,
+            'created_at': datetime.now(timezone.utc),
+        })
+        created += 1
+
+    for m in meters:
+        mid = m.get('id') or m.get('provider') or 'provider'
+        name = m.get('provider') or mid
+        used = _num(m.get('used'))
+        total = _num(m.get('total'))
+        pct = (used / total * 100) if total > 0 else None
+        if pct is not None and pct >= 90:
+            await _emit(
+                f'usage:{mid}:critical',
+                f'{name} usage is at {pct:.0f}%',
+                f'{name} is close to its configured budget/cap ({used:g} of {total:g} {m.get("unit") or "units"}). Refill or raise the limit before AI/deploy automation stalls.',
+                '/operator?tab=taxameter',
+                'Open Taxameter',
+            )
+        elif pct is not None and pct >= 70:
+            await _emit(
+                f'usage:{mid}:warning',
+                f'{name} usage is at {pct:.0f}%',
+                f'{name} has used {used:g} of {total:g} {m.get("unit") or "units"}. Check the meter before it blocks AI/deploy work.',
+                '/operator?tab=taxameter',
+                'Review usage',
+            )
+        if m.get('live_supported') and m.get('source') != 'live':
+            await _emit(
+                f'usage:{mid}:needs-live-key',
+                f'{name} spend is manual-only',
+                m.get('sync_reason') or f'Add a billing/admin key so {name} spend can sync automatically.',
+                '/operator?tab=taxameter',
+                'Add sync key',
+            )
+    return created
+
 async def _sync_one_meter(meter: dict, settings_doc: dict) -> dict:
     """Return the meter updated with live spend + status metadata."""
     mid = meter.get('id')
@@ -1042,7 +1108,8 @@ async def op_sync_usage_meters(_: dict = Depends(get_current_operator)):
         upsert=True,
     )
     live = sum(1 for m in synced if m.get('source') == 'live')
-    return {'success': True, 'meters': synced, 'updated_at': now, 'live_count': live}
+    alerts_created = await _notify_operator_usage_alerts(db, synced)
+    return {'success': True, 'meters': synced, 'updated_at': now, 'live_count': live, 'alerts_created': alerts_created}
 
 
 @router.get('/operator/usage-meters/keys')
