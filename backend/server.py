@@ -609,7 +609,8 @@ async def startup():
             'text': (
                 'TBCTools deploys through React CRA frontend on Vercel + FastAPI backend on Render. '
                 'Use backend/deploy_projects_ext.py, backend/vercel_api_ext.py, backend/deploy_ext.py and the existing React UI. '
-                'Never add Next.js app/api routes, Auth.js, lib/dbConnect.js, Vercel AI SDK handlers, or GitHub Actions deploy YAML unless explicitly migrating stacks.'
+                'Never add Next.js app/api routes, Auth.js, lib/dbConnect.js, Vercel AI SDK handlers, or GitHub Actions deploy YAML unless explicitly migrating stacks. '
+                'Launch checklist for this app: keep AI/provider keys server-side only; handle 400/404/409/429/5xx errors with actionable messages; stream AI responses with status/timeout handling; use RuntimeErrorBoundary and chunk-load recovery for blank screens; serve CRA routes through the Vercel rewrite to index.html; keep index.html no-cache; expose Privacy and Terms pages; validate user input on the backend before sending it to AI providers; log runtime errors to Operator → Errors.'
             ),
             'enabled': True,
             'updated_at': now,

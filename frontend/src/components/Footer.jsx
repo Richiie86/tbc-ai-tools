@@ -39,8 +39,8 @@ export default function Footer() {
             <li><Link to="/contact" className="text-slate-300 hover:text-tbc-300">Contact</Link></li>
             <li><Link to="/changelog" className="text-slate-300 hover:text-tbc-300">Changelog</Link></li>
             <li><Link to="/status" className="text-slate-300 hover:text-tbc-300">Status</Link></li>
-            <li><a href="#" className="text-slate-300 hover:text-tbc-300">Privacy</a></li>
-            <li><a href="#" className="text-slate-300 hover:text-tbc-300">Terms</a></li>
+            <li><Link to="/privacy" className="text-slate-300 hover:text-tbc-300">Privacy</Link></li>
+            <li><Link to="/terms" className="text-slate-300 hover:text-tbc-300">Terms</Link></li>
           </ul>
         </div>
 

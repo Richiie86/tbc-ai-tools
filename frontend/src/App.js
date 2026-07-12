@@ -25,6 +25,8 @@ import Operator from './pages/Operator';
 import ProjectSettings from './pages/ProjectSettings';
 import Status from './pages/Status';
 import ChangelogPage from './pages/ChangelogPage';
+import Privacy from './pages/Privacy';
+import Terms from './pages/Terms';
 import MarketingBanner from './components/MarketingBanner';
 import PersonalUseBanner from './components/PersonalUseBanner';
 import BuildUpdateWatcher from './components/BuildUpdateWatcher';
@@ -43,6 +45,8 @@ function App() {
             <Route path="/" element={<Landing />} />
             <Route path="/status" element={<Status />} />
             <Route path="/changelog" element={<ChangelogPage />} />
+            <Route path="/privacy" element={<Privacy />} />
+            <Route path="/terms" element={<Terms />} />
             <Route path="/about" element={<About />} />
             <Route path="/contact" element={<Contact />} />
             <Route path="/pricing" element={<Pricing />} />
