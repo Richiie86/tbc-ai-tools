@@ -1924,6 +1924,11 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
         # stream its progress as normal deltas, then finish the turn. Bypasses
         # the text-only LLM entirely — apply/redeploy are not credit-charged.
         if agentic_edit:
+            yield 'data: ' + json.dumps({
+                'type': 'status',
+                'message': 'Preparing the real code edit pipeline…',
+                'session_id': session_id,
+            }) + '\n\n'
             from chat_deploy_ext import stream_agentic_edit
             agent_response = ''
             sess_full = await db.chat_sessions.find_one({'id': session_id})
@@ -2001,6 +2006,11 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
             return
 
         full_response = ''
+        yield 'data: ' + json.dumps({
+            'type': 'status',
+            'message': 'Connecting to the AI model…',
+            'session_id': session_id,
+        }) + '\n\n'
         # Build the model attempt list. Explicit user picks are authoritative:
         # try ONLY that model and surface its real error if it fails. Automatic
         # mode may use the cross-provider fallback chain because the user asked
@@ -2068,6 +2078,11 @@ async def chat_stream(req: ChatSendRequest, user: dict = Depends(get_current_use
             # binds the model at chat-construction time, so we need a new
             # instance per attempt to switch providers cleanly.
             provider_i, model_name_i = resolve_model(model_id)
+            yield 'data: ' + json.dumps({
+                'type': 'status',
+                'message': f'Using {provider_i} model {model_name_i}…',
+                'session_id': session_id,
+            }) + '\n\n'
             chat_i = LlmChat(
                 api_key=llm_key,
                 session_id=session_id,

@@ -219,6 +219,11 @@ export default function Dashboard({ variant = 'tbc1' }) {
         if (ev.type === 'delta') {
           if (ev.session_id && !acquiredSessionId) acquiredSessionId = ev.session_id;
           setStreamText((t) => t + (ev.content || ''));
+        } else if (ev.type === 'status') {
+          if (ev.session_id && !acquiredSessionId) acquiredSessionId = ev.session_id;
+          if (ev.message) toast.info(ev.message, { duration: 2200 });
+        } else if (ev.type === 'heartbeat') {
+          // Keep-alive frame; no UI update needed.
         } else if (ev.type === 'auto_selected') {
           // Automatic mode picked a model based on the task. Show a subtle
           // hint so the user understands why (best for work, cheap for Q&A).
