@@ -36,9 +36,11 @@ class Notification(BaseModel):
     id: str = Field(default_factory=_uid)
     user_id: str                          # recipient
     from_operator_id: Optional[str] = None
-    kind: Literal['dm', '2fa_reminder', 'broadcast'] = 'dm'
+    kind: Literal['dm', '2fa_reminder', 'broadcast', 'usage_alert', 'income_alert'] = 'dm'
     subject: str
     body: str
+    action_url: Optional[str] = None
+    action_label: Optional[str] = None
     read_at: Optional[datetime] = None
     created_at: datetime = Field(default_factory=_now)
 
@@ -46,13 +48,13 @@ class Notification(BaseModel):
 class OperatorDMRequest(BaseModel):
     subject: str
     body: str
-    kind: Literal['dm', '2fa_reminder', 'broadcast'] = 'dm'
+    kind: Literal['dm', '2fa_reminder', 'broadcast', 'usage_alert', 'income_alert'] = 'dm'
 
 
 class BroadcastRequest(BaseModel):
     subject: str
     body: str
-    kind: Literal['broadcast', '2fa_reminder'] = 'broadcast'
+    kind: Literal['broadcast', '2fa_reminder', 'usage_alert', 'income_alert'] = 'broadcast'
     # Audience filters (any combination — all must be true to receive).
     only_no_2fa: bool = False
     only_paid: bool = False

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Bell, ShieldAlert, MessageSquare, Megaphone, X, Loader2, Check } from 'lucide-react';
+import { Bell, ShieldAlert, MessageSquare, Megaphone, X, Loader2, Check, Gauge, DollarSign } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import api from '../../lib/api';
 import {
@@ -12,6 +12,8 @@ const KIND_ICONS = {
   '2fa_reminder': ShieldAlert,
   broadcast: Megaphone,
   dm: MessageSquare,
+  usage_alert: Gauge,
+  income_alert: DollarSign,
 };
 
 const relative = (iso) => {
@@ -140,15 +142,17 @@ export function NotificationsBell() {
                   <div className="mt-0.5 whitespace-pre-wrap break-words text-[11px] text-tbc-200/80">
                     {n.body}
                   </div>
-                  {setupCta && (
+                  {(setupCta || n.action_url) && (
                     <Link
-                      to="/setup-2fa"
+                      to={n.action_url || '/setup-2fa'}
                       onClick={() => { markOne(n.id); setOpen(false); }}
                       data-testid={`notification-cta-${n.id}`}
-                      className="mt-1.5 inline-flex items-center gap-1 rounded-md bg-amber-500 px-2 py-1 text-[10px] font-bold text-ink-950 hover:bg-amber-400"
+                      className={`mt-1.5 inline-flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-bold ${
+                        setupCta ? 'bg-amber-500 text-ink-950 hover:bg-amber-400' : 'bg-tbc-500 text-ink-950 hover:bg-tbc-400'
+                      }`}
                     >
-                      <ShieldAlert className="h-3 w-3" />
-                      Set up 2FA now
+                      {setupCta ? <ShieldAlert className="h-3 w-3" /> : <Icon className="h-3 w-3" />}
+                      {n.action_label || 'Open'}
                     </Link>
                   )}
                   <div className="mt-1 text-[10px] text-tbc-200/40">{relative(n.created_at)}</div>
