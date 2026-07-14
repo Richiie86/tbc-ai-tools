@@ -123,14 +123,37 @@ async def _standalone_health_check(project: dict) -> dict:
     
     try:
         start_time = time.time()
+        
+        # Increase timeout and add retry logic
+        timeout_config = httpx.Timeout(
+            timeout=30.0,  # Increased from 10.0
+            connect=10.0,  # Increased from 5.0
+            read=20.0,     # Added explicit read timeout
+            pool=5.0       # Added pool timeout
+        )
+        
         async with httpx.AsyncClient(
-            timeout=httpx.Timeout(10.0, connect=5.0),
+            timeout=timeout_config,
             follow_redirects=True,
             max_redirects=5,
+            limits=httpx.Limits(max_connections=10, max_keepalive_connections=5)
         ) as client:
-            response = await client.get(url, headers={
-                'User-Agent': 'TBC-Health-Check/1.0'
-            })
+            # Retry logic for transient failures
+            last_error = None
+            for attempt in range(3):  # 3 attempts total
+                try:
+                    response = await client.get(url, headers={
+                        'User-Agent': 'TBC-Health-Check/1.0',
+                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+                    })
+                    break  # Success, exit retry loop
+                except (httpx.TimeoutException, httpx.ConnectError) as e:
+                    last_error = e
+                    if attempt < 2:  # Not the last attempt
+                        await asyncio.sleep(2 ** attempt)  # Exponential backoff
+                        continue
+                    else:
+                        raise last_error  # Re-raise on final attempt
         
         response_time = round((time.time() - start_time) * 1000, 2)  # ms
         
@@ -156,10 +179,17 @@ async def _standalone_health_check(project: dict) -> dict:
             result['error'] = f'HTTP {response.status_code}: {response.reason_phrase}'
             # Try to get more details from response body for common errors
             try:
-                body_preview = (await response.aread())[:500].decode('utf-8', errors='ignore')
+                if hasattr(response, 'aread'):
+                    body_preview = (await response.aread())[:500].decode('utf-8', errors='ignore')
+                elif hasattr(response, 'content'):
+                    body_preview = response.content[:500].decode('utf-8', errors='ignore')
+                else:
+                    body_preview = str(response.text)[:500] if hasattr(response, 'text') else ''
+                
                 if body_preview:
                     result['details']['body_preview'] = body_preview
-            except Exception:
+            except Exception as body_error:
+                logger.debug(f'Could not read response body: {body_error}')
                 pass
             
         return result
@@ -167,10 +197,10 @@ async def _standalone_health_check(project: dict) -> dict:
     except httpx.TimeoutException as e:
         return {
             'ok': False, 
-            'error': f'Request timeout: {str(e)}',
+            'error': f'Request timeout after 30s: {str(e)}',
             'url': url,
             'url_source': url_source,
-            'details': {'timeout_seconds': 10.0, 'error_type': 'timeout'}
+            'details': {'timeout_seconds': 30.0, 'error_type': 'timeout'}
         }
     except httpx.ConnectError as e:
         return {
@@ -190,6 +220,7 @@ async def _standalone_health_check(project: dict) -> dict:
             'details': {'error_type': 'http_status', 'raw_error': str(e)}
         }
     except Exception as e:
+        logger.warning(f'Unexpected health check error for {url}: {e}', exc_info=True)
         return {
             'ok': False, 
             'error': f'Health check failed: {str(e)}',
@@ -236,7 +267,7 @@ async def _react_to_deployment(
                     project_id, health.get('response_time')
                 )
         except Exception as e:
-            logger.error(f'Health check crashed for {project_id}: {e}')
+            logger.error(f'Health check crashed for {project_id}: {e}', exc_info=True)
             health = {
                 'ok': False, 
                 'error': f'Health check crashed: {str(e)}',
@@ -321,7 +352,7 @@ async def _autopilot_stream(
                 yield _sse('loop_error', {'stage': 'review', 'status': he.status_code, 'message': str(he.detail)})
                 return
             except Exception as e:
-                logger.error(f'Unexpected error during code review: {e}')
+                logger.error(f'Unexpected error during code review: {e}', exc_info=True)
                 yield _sse('loop_error', {'stage': 'review', 'message': str(e)[:300]})
                 return
             
@@ -374,7 +405,7 @@ async def _autopilot_stream(
                 })
                 return
             except Exception as e:
-                logger.error(f'Unexpected error requesting patches: {e}')
+                logger.error(f'Unexpected error requesting patches: {e}', exc_info=True)
                 yield _sse('auto_fix_error', {
                     'iteration': iteration, 'stage': 'request_patches',
                     'message': str(e)[:300],
@@ -409,7 +440,7 @@ async def _autopilot_stream(
                 })
                 return
             except Exception as e:
-                logger.error(f'Unexpected error committing patches: {e}')
+                logger.error(f'Unexpected error committing patches: {e}', exc_info=True)
                 yield _sse('auto_fix_error', {
                     'iteration': iteration, 'stage': 'commit_patches',
                     'message': str(e)[:300],
@@ -435,7 +466,7 @@ async def _autopilot_stream(
             yield _sse('loop_error', {'stage': 'deploy', 'status': he.status_code, 'message': str(he.detail)})
             return
         except Exception as e:
-            logger.error(f'Unexpected error creating deployment: {e}')
+            logger.error(f'Unexpected error creating deployment: {e}', exc_info=True)
             yield _sse('loop_error', {'stage': 'deploy', 'message': str(e)[:300]})
             return
         
