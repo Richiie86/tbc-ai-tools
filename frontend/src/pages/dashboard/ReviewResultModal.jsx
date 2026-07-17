@@ -94,6 +94,39 @@ function explainProblem(result) {
   const raw = String(result.summary || result.detail || result.error || '').trim();
   const lc = raw.toLowerCase();
 
+  // Vercel billing / account block (HTTP 402). This is NOT a code bug — Vercel
+  // refuses to create any deployment while the team has an overdue balance, so
+  // no AI code fix can resolve it. We flag `noCodeFix` so the modal suppresses
+  // the (useless) "Fix problem" button and instead tells the operator to settle
+  // the balance in Vercel.
+  if (
+    lc.includes('402')
+    || lc.includes('resource_creation_blocked')
+    || lc.includes('overdue balance')
+    || lc.includes('overdue invoice')
+    || lc.includes('payment method')
+    || lc.includes('reactivate your account')
+    || lc.includes('spend limit')
+    || lc.includes('spending limit')
+  ) {
+    return {
+      raw,
+      noCodeFix: true,
+      cause:
+        'This is a Vercel billing block, not a bug in your app. Vercel returned HTTP 402 '
+        + '(resource_creation_blocked) because the Vercel team that owns this project has an '
+        + 'overdue balance or no valid payment method, so it refuses to create any new '
+        + 'deployment. No code change can fix this — the deploy will keep failing until the '
+        + 'billing issue on the Vercel account is resolved.',
+      fixes: [
+        'Open vercel.com and switch to the "richiie-s-projects" team.',
+        'Go to Settings → Billing and add or update a valid payment method.',
+        'Pay off the overdue balance so the account is reactivated.',
+        'Once Vercel shows the account as active, come back and run Deploy again.',
+      ],
+    };
+  }
+
   if (lc.includes('project not found') || lc.includes('no such project')) {
     return {
       raw,
@@ -168,8 +201,13 @@ export default function ReviewResultModal({ result, onClose, onOpenFixChat, onFi
   const cls = classify(result);
   const open = !!result && !!cls;
 
-  // Reset the expand state whenever a new result comes in.
-  React.useEffect(() => { setExpanded(false); }, [result]);
+  // Reset the expand state whenever a new result comes in. For failures that
+  // can't be code-fixed (e.g. a Vercel billing block) there's no "Fix problem"
+  // button, so auto-expand the explanation to show the real remediation steps.
+  React.useEffect(() => {
+    const p = explainProblem(result);
+    setExpanded(!!(p && p.noCodeFix));
+  }, [result]);
 
   if (!cls) return null;
   const tone = TONES[cls.tone] || TONES.yellow;
@@ -191,7 +229,10 @@ export default function ReviewResultModal({ result, onClose, onOpenFixChat, onFi
   // For failed deploy/health checks, build a real explanation so the panel is
   // never empty and we can hand a precise prompt to the AIs via "Fix problem".
   const problem = explainProblem(result);
-  const canFixProblem = !!problem && typeof onFixProblem === 'function';
+  // Some failures (e.g. a Vercel billing/402 block) cannot be fixed by editing
+  // code, so we hide the "Fix problem" button for them — offering it would just
+  // waste an AI code-fix attempt on a problem that lives in the Vercel account.
+  const canFixProblem = !!problem && !problem.noCodeFix && typeof onFixProblem === 'function';
   const hasDetail =
     (result.summary && result.summary.length > 0) ||
     findings.length > 0 ||
